@@ -1,11 +1,15 @@
-import { Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { matchPath, Navigate, Route, Routes, useLocation } from 'react-router'
 import { games } from './games/catalog'
 import HomePage from './pages/HomePage'
 
+const ChessRoomPage = lazy(() => import('./games/chess/ChessRoomPage'))
+
 export default function App() {
   const { pathname } = useLocation()
-  const game = games.find((entry) => matchPath(entry.path, pathname))
+  const game = games.find(
+    (entry) => matchPath(entry.path, pathname) || matchPath(`${entry.path}/room/:code`, pathname),
+  )
 
   useEffect(() => {
     document.title = game ? `${game.name} — Games` : 'Games — A little play goes a long way.'
@@ -33,6 +37,7 @@ export default function App() {
         {games.flatMap(({ path, aliases }) =>
           aliases.map((alias) => <Route key={alias} path={alias} element={<Navigate to={path} replace />} />),
         )}
+        <Route path="/chess/room/:code" element={<ChessRoomPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
