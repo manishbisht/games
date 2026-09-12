@@ -20,6 +20,11 @@ import type { Env } from './env'
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 /** Safety valve so one alarm cannot spin forever on an adapter that never settles. */
 const MAX_AUTO_ADVANCES = 20
+/**
+ * How long the room pauses before taking an abandoned seat's turn for it. Long
+ * enough to read as a player thinking, short enough that the table keeps moving.
+ */
+const STAND_IN_DELAY_MS = 1200
 
 interface StoredSeat {
   player: PlayerInfo
@@ -127,6 +132,29 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
+   * The seat the room will play for, or `null`. A game counts as stuck only when
+   * every seat it is waiting on has been abandoned — one away player among
+   * several present ones is just a player the others are still waiting for.
+   */
+  private standInSeat(record: RoomRecord): SeatId | null {
+    if (record.status !== 'playing' || record.gameState === null) return null
+    const waiting = this.adapter(record).waitingOn(record.gameState, record.seatIds)
+    if (!waiting.length || !waiting.every((seat) => record.seats[seat]?.abandoned)) return null
+    return waiting[0]
+  }
+
+  /**
+   * The stand-in's deadline. Unlike a phase deadline this tracks presence, which
+   * changes outside `setGameState` (a reclaim, a claim), so it is restamped
+   * whenever abandonment does — but never over a live phase, which owns the slot
+   * and must not be pushed out by an unrelated save.
+   */
+  private stampStandIn(record: RoomRecord): void {
+    if (this.pendingPhase(record)) return
+    record.autoAt = this.standInSeat(record) ? Date.now() + STAND_IN_DELAY_MS : undefined
+  }
+
+  /**
    * The one door the game state changes through: it settles the room's status
    * and stamps the timed phase's deadline, once, as that phase is entered.
    * Status is decided first so a game that just ended cannot leave a deadline
@@ -136,7 +164,9 @@ export class RoomDO extends DurableObject<Env> {
     record.gameState = state
     if (this.adapter(record).isFinished(state)) record.status = 'finished'
     const pending = this.pendingPhase(record)
-    record.autoAt = pending ? Date.now() + pending.afterMs : undefined
+    if (pending) record.autoAt = Date.now() + pending.afterMs
+    // A game that has come to rest on an abandoned seat still has to move on.
+    else this.stampStandIn(record)
   }
 
   /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
@@ -336,6 +366,8 @@ export class RoomDO extends DurableObject<Env> {
         disconnectedAt: undefined,
         abandoned: undefined,
       }
+      // They are back, so the room stops playing their turns for them.
+      this.stampStandIn(record)
       await this.save(record)
     }
     this.broadcast(record)
@@ -497,6 +529,9 @@ export class RoomDO extends DurableObject<Env> {
         break
       }
       state = settled
+      // The claim is granted once and stands: a seat the room has now played
+      // through keeps being played through, turn after turn, until it comes back.
+      record.seats[id]!.abandoned = true
       if (adapter.isFinished(state)) break
     }
     // Settle the status before the state, so a game forfeited mid-phase does not
@@ -533,11 +568,14 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    // Which master woke us: a game still mid-phase before its deadline is an
-    // auto-advance, and everything else is the room's time running out.
+    // Which master woke us: before the room's own deadline it is the game —
+    // a phase to resolve, or a turn to take for a seat nobody came back to —
+    // and after it, the room's time has simply run out.
     const record = await this.load()
-    const pending = record && this.pendingPhase(record)
-    if (record && pending && Date.now() < record.expiresAt) return this.autoAdvance(record)
+    if (record && Date.now() < record.expiresAt) {
+      if (this.pendingPhase(record)) return this.autoAdvance(record)
+      if (this.standInSeat(record)) return this.playStandIn(record)
+    }
     await this.expire(record)
   }
 
@@ -555,6 +593,27 @@ export class RoomDO extends DurableObject<Env> {
       if (!pending || (step > 0 && pending.afterMs > 0)) break
       this.setGameState(record, pending.resolve(record.gameState, ctx))
     }
+    await this.save(record)
+    this.broadcast(record)
+  }
+
+  /**
+   * A seat whose claim has already been granted still has to take its turns, or
+   * the table sits there forever. One decision per fire: `setGameState` stamps
+   * whatever comes next — the beat the decision opened, or the following turn if
+   * that seat is away too — and the alarm comes back around for it.
+   */
+  private async playStandIn(record: RoomRecord): Promise<void> {
+    const adapter = this.adapter(record)
+    const seat = this.standInSeat(record)!
+    const before = record.gameState
+    const settled = adapter.resolveAbsent(before, seat, record.seatIds, this.gameCtx())
+    // `null`: nobody stands in at this game, so it ends where the absence left it.
+    if (settled === null) record.status = 'finished'
+    this.setGameState(record, settled ?? before)
+    // An adapter that stands in by changing nothing would be woken on this same
+    // state every 1200ms until the room expired. Hand the slot back instead.
+    if (settled === before) record.autoAt = undefined
     await this.save(record)
     this.broadcast(record)
   }
