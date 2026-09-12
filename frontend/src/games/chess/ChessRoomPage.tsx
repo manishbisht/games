@@ -22,6 +22,9 @@ export default function ChessRoomPage() {
         <Link to="/chess">Back to Gambit</Link>
       </Notice>
     )
+  // `Room` owns the socket, and the join frame carries our identity — so don't
+  // mount it (or prompt for a name we may not need) until the identity settles.
+  if (!identity.isReady) return <p role="status">Joining room {code}…</p>
   if (!identity.name) return <NamePrompt />
   return <Room code={code} />
 }

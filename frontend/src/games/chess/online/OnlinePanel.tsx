@@ -26,6 +26,9 @@ export default function OnlinePanel() {
   }, [])
 
   const playerName = identity.isSignedIn ? identity.name : name.trim()
+  // Until the identity is settled we'd send a guest id that a signed-in user is
+  // about to stop being — which is how you end up not owning your own room.
+  const blocked = !playerName || busy || !identity.isReady
 
   const rememberName = () => {
     if (!identity.isSignedIn) identity.setName(name)
@@ -78,7 +81,7 @@ export default function OnlinePanel() {
           />{' '}
           List in the public lobby
         </label>
-        <button disabled={!playerName || busy} onClick={create}>
+        <button disabled={blocked} onClick={create}>
           Create room
         </button>
       </div>
@@ -90,7 +93,7 @@ export default function OnlinePanel() {
           placeholder="Room code"
           aria-label="Room code"
         />
-        <button disabled={!playerName || !joinCode.trim() || busy} onClick={() => join(joinCode)}>
+        <button disabled={blocked || !joinCode.trim()} onClick={() => join(joinCode)}>
           Join
         </button>
       </div>
@@ -110,7 +113,7 @@ export default function OnlinePanel() {
                 <span>
                   {room.hostName} · {room.seatsTaken}/{room.seatsTotal} seated
                 </span>
-                <button disabled={!playerName} onClick={() => join(room.code)}>
+                <button disabled={blocked} onClick={() => join(room.code)}>
                   Join {room.code}
                 </button>
               </li>
