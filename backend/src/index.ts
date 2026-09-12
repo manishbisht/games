@@ -32,8 +32,8 @@ export default {
       // A game is bookable exactly when its adapter is registered — having a
       // name in `GameId` is not enough.
       const game = resolveGame(body.game)
-      if (!game) return json({ error: 'unknown game' }, 400, origin)
-      const adapter = getAdapter(game)!
+      const adapter = game ? getAdapter(game) : null
+      if (!game || !adapter) return json({ error: 'unknown game' }, 400, origin)
       const seats = body.seats === undefined ? adapter.minSeats : body.seats
       if (
         typeof seats !== 'number' ||

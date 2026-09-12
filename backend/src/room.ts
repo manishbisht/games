@@ -149,9 +149,11 @@ export class RoomDO extends DurableObject<Env> {
     seats: number
     options: unknown
   }): Promise<boolean> {
+    // `false` means "that code is taken"; an unregistered game is a caller bug,
+    // and the router has already refused those.
     if (await this.load()) return false
     const adapter = getAdapter(input.game)
-    if (!adapter) return false
+    if (!adapter) throw new Error(`no adapter registered for game "${input.game}"`)
     const record: RoomRecord = {
       code: input.code,
       game: input.game,
