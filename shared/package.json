@@ -1,0 +1,18 @@
+{
+  "name": "@games/shared",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./chess": "./src/chess/engine.ts",
+    "./chess/types": "./src/chess/types.ts",
+    "./protocol": "./src/protocol/types.ts",
+    "./protocol/codes": "./src/protocol/codes.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "chess.js": "^1.4.0" },
+  "devDependencies": { "typescript": "~6.0.2", "vitest": "^4.1.11" }
+}
