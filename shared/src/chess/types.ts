@@ -13,7 +13,7 @@ export type GameStatus =
   | 'timeout'
   | 'agreement'
 export interface GameOptions {
-  mode: 'local' | 'ai'
+  mode: 'local' | 'ai' | 'online'
   human: Color
   difficulty: Difficulty
   clock: 0 | 10
