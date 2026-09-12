@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
-import type { ChessSeat, ClientMessage } from '@games/shared/protocol'
+import type { ChessSeat, ClientMessage, ServerMessage } from '@games/shared/protocol'
 import { roomSocketUrl } from './api'
 import { initialRoomState, isFatal, roomReducer } from './roomState'
 import type { RoomClientState } from './roomState'
@@ -38,11 +38,22 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
         dispatch({ type: 'open' })
         const me = identityRef.current
         const credentials = await me.credentials()
+        // `credentials()` can hit the network (Clerk), and the socket may have
+        // closed or been replaced while we waited.
+        if (disposed || ws.readyState !== WebSocket.OPEN) return
         ws.send(
           JSON.stringify({ type: 'join', protocol: PROTOCOL_VERSION, name: me.name, ...credentials }),
         )
       }
-      ws.onmessage = (event) => dispatch({ type: 'message', message: JSON.parse(event.data as string) })
+      ws.onmessage = (event) => {
+        let message: ServerMessage
+        try {
+          message = JSON.parse(event.data as string)
+        } catch {
+          return // Not our protocol; nothing sensible to do with an unparseable frame.
+        }
+        dispatch({ type: 'message', message })
+      }
       ws.onclose = (event) => {
         if (disposed) return
         dispatch({ type: 'close', code: event.code })
