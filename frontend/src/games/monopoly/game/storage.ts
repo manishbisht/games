@@ -1,6 +1,6 @@
-import { createGame, validTrade } from './engine'
-import { BOARD, PLAYER_STYLES } from './board'
-import type { GameState } from './types'
+import { createGame, validTrade } from '@games/shared/estate'
+import { BOARD, PLAYER_STYLES } from '@games/shared/estate/board'
+import type { GameState } from '@games/shared/estate/types'
 
 const KEY = 'estate-game-v1'
 export function loadGame(): GameState {

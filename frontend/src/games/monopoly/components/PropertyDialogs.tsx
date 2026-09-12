@@ -11,7 +11,7 @@ import {
   TrainFront,
   Zap,
 } from 'lucide-react'
-import { BOARD, money } from '../game/board'
+import { BOARD, money } from '@games/shared/estate/board'
 import {
   canBuild,
   canMortgage,
@@ -20,8 +20,8 @@ import {
   ownedSpaces,
   rentFor,
   rentMultiplier,
-} from '../game/engine'
-import type { BoardSpace, GameAction, GameState } from '../game/types'
+} from '@games/shared/estate'
+import type { BoardSpace, GameAction, GameState } from '@games/shared/estate/types'
 import Dialog from './Dialog'
 
 export function SpaceIcon({ space, size = 20 }: { space: BoardSpace; size?: number }) {

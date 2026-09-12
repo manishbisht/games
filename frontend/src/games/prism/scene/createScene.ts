@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import type { Card, GameState } from '../game/types'
-import { COLOR_HEX } from '../game/types'
+import type { Card, GameState } from '@games/shared/prism/types'
+import { COLOR_HEX } from '@games/shared/prism/types'
 import { cardArtwork } from './artwork'
 
 export interface TableState {

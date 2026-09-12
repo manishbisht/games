@@ -1,4 +1,4 @@
-import type { Player } from '../game/types'
+import type { Player } from '@games/shared/estate/types'
 
 export default function TokenIcon({
   token,

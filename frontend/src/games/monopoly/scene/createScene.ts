@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { BOARD } from '../game/board'
-import type { GameState } from '../game/types'
+import { BOARD } from '@games/shared/estate/board'
+import type { GameState } from '@games/shared/estate/types'
 import {
   boardPosition,
   box,

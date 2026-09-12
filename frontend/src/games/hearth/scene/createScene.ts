@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import { HOME, PALETTES, piecePosition, spaceKey } from '../game/board'
-import type { GameState, Piece } from '../game/types'
+import { HOME, PALETTES, piecePosition, spaceKey } from '@games/shared/hearth/board'
+import type { GameState, Piece } from '@games/shared/hearth/types'
 import { dieQuaternion, makeBoard, makeDie, makePiece, material, roundedBox } from './models'
 
 export interface SceneApi {

@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { GameState } from '../game/types'
+import type { GameState } from '@games/shared/hearth/types'
 import { createScene } from './createScene'
 import type { SceneApi } from './createScene'
 

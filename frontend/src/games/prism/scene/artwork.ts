@@ -1,5 +1,5 @@
-import type { Card } from '../game/types'
-import { COLOR_HEX } from '../game/types'
+import type { Card } from '@games/shared/prism/types'
+import { COLOR_HEX } from '@games/shared/prism/types'
 
 const artwork = new Map<string, HTMLCanvasElement>()
 export function cardArtwork(card?: Card): HTMLCanvasElement {

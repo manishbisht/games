@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import type { BoardSpace, Player } from '../game/types'
+import type { BoardSpace, Player } from '@games/shared/estate/types'
 
 export function material(color: string, metalness = 0, roughness = 0.65) {
   return new THREE.MeshStandardMaterial({ color, metalness, roughness })

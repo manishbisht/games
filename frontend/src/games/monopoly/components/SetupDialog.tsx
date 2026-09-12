@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ArrowRight, Check, Minus, Plus, Sparkles, Users } from 'lucide-react'
-import type { GameState, PlayerConfig } from '../game/types'
-import { DEFAULT_PLAYERS, PLAYER_STYLES } from '../game/board'
+import type { GameState, PlayerConfig } from '@games/shared/estate/types'
+import { DEFAULT_PLAYERS, PLAYER_STYLES } from '@games/shared/estate/board'
 import TokenIcon from './TokenIcon'
 import Dialog from './Dialog'
 

@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Check, Sparkles, Users } from 'lucide-react'
-import type { Difficulty } from '../game/types'
+import type { Difficulty } from '@games/shared/prism/types'
 
 export interface SetupOptions {
   mode: 'ai' | 'local'

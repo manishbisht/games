@@ -27,10 +27,10 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { act, cardName, cardPoints, createGame, handView, playableCards } from './game/engine'
-import { chooseMove } from './game/ai'
-import { COLOR_HEX, COLORS } from './game/types'
-import type { Card, Command, GameState } from './game/types'
+import { act, cardName, cardPoints, createGame, handView, playableCards } from '@games/shared/prism'
+import { chooseMove } from '@games/shared/prism/ai'
+import { COLOR_HEX, COLORS } from '@games/shared/prism/types'
+import type { Card, Command, GameState } from '@games/shared/prism/types'
 import { sound } from './game/audio'
 import TableScene from './scene/TableScene'
 import type { TableApi } from './scene/createScene'

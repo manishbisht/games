@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { ArrowDownUp, ArrowRight, Check, Handshake } from 'lucide-react'
-import { BOARD, money } from '../game/board'
-import { ownedSpaces, validTrade } from '../game/engine'
-import type { GameAction, GameState, Trade } from '../game/types'
+import { BOARD, money } from '@games/shared/estate/board'
+import { ownedSpaces, validTrade } from '@games/shared/estate'
+import type { GameAction, GameState, Trade } from '@games/shared/estate/types'
 import Dialog from './Dialog'
 
 export default function TradeDialog({

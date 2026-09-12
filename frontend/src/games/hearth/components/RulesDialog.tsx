@@ -1,6 +1,6 @@
 import { Dices, Footprints, House, Shield, Swords, Trophy } from 'lucide-react'
 import Modal from './Modal'
-import type { Rules } from '../game/types'
+import type { Rules } from '@games/shared/hearth/types'
 
 export default function RulesDialog({ onClose, rules }: { onClose: () => void; rules: Rules }) {
   const items = [

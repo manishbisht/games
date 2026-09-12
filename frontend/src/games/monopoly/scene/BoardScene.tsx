@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createScene } from './createScene'
 import type { SceneApi } from './createScene'
-import type { GameState } from '../game/types'
+import type { GameState } from '@games/shared/estate/types'
 
 export type BoardControls = Pick<SceneApi, 'reset' | 'zoom' | 'topView'>
 const BoardScene = forwardRef<

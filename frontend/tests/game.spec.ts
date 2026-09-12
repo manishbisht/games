@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { createGame, gameReducer } from '../src/games/monopoly/game/engine'
-import type { GameState } from '../src/games/monopoly/game/types'
+import { createGame, gameReducer } from '@games/shared/estate'
+import type { GameState } from '@games/shared/estate/types'
 
 function fixture() {
   return gameReducer(createGame(), {

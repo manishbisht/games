@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createGame, gameReducer } from './engine'
+import { createGame, gameReducer } from '@games/shared/estate'
 import { loadGame, saveGame } from './storage'
 
 describe('saved game recovery', () => {

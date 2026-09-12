@@ -1,6 +1,6 @@
 import { ArrowRight, Users, Sparkles, SlidersHorizontal } from 'lucide-react'
-import { PALETTES, PLAYER_IDS } from '../game/board'
-import type { Control, GameConfig, Mode, Rules } from '../game/types'
+import { PALETTES, PLAYER_IDS } from '@games/shared/hearth/board'
+import type { Control, GameConfig, Mode, Rules } from '@games/shared/hearth/types'
 import { useState } from 'react'
 
 export default function SetupPanel({

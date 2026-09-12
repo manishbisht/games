@@ -1,7 +1,7 @@
 import { ArrowRight, Layers, Megaphone, Palette, Trophy } from 'lucide-react'
 import Dialog from './Dialog'
 import CardFace from './CardFace'
-import { createDeck } from '../game/engine'
+import { createDeck } from '@games/shared/prism'
 
 export default function Rules({ onClose }: { onClose: () => void }) {
   const deck = createDeck()

@@ -8,8 +8,8 @@ import {
   PLAYER_IDS,
   SAFE_SPACES,
   trackPosition,
-} from '../game/board'
-import type { PlayerId } from '../game/types'
+} from '@games/shared/hearth/board'
+import type { PlayerId } from '@games/shared/hearth/types'
 
 export function material(color: string, metalness = 0, roughness = 0.55) {
   return new THREE.MeshStandardMaterial({ color, metalness, roughness })
