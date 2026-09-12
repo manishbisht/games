@@ -117,3 +117,36 @@ test('two browsers create, join, and play a server-paced hearth table', async ({
   await guest.screenshot({ path: 'test-results/hearth-online-guest.png', fullPage: true })
   expect(errors).toEqual([])
 })
+
+test('a table made for three plays with the two who turned up', async ({ browser }) => {
+  const errors: string[] = []
+  const host = await newPlayer(browser, errors)
+  const guest = await newPlayer(browser, errors)
+
+  await host.goto('/#/hearth-and-home')
+  await host.getByLabel('Your name').fill('Ann')
+  await host.getByRole('group', { name: 'Table size' }).getByRole('button', { name: '3' }).click()
+  await host.getByRole('button', { name: 'Create room' }).click()
+  await expect(host).toHaveURL(/#\/hearth-and-home\/room\/[A-Z2-9]{6}$/)
+  const code = host.url().match(/room\/([A-Z2-9]{6})/)![1]
+  await expect(host.getByRole('button', { name: /Take seat 3/ })).toBeVisible()
+  await host.screenshot({ path: 'test-results/hearth-online-lobby.png', fullPage: true })
+
+  await guest.goto(`/#/hearth-and-home/room/${code}`)
+  await guest.getByLabel('Your name').fill('Ben')
+  await guest.getByRole('button', { name: 'Join room' }).click()
+
+  // Seat 3 stays empty, and Hearth does not insist on a full table.
+  await host.getByRole('button', { name: /Take seat 1/ }).click()
+  await guest.getByRole('button', { name: /Take seat 3/ }).click()
+  await expect(host.getByRole('button', { name: 'Start with 2 players' })).toBeEnabled()
+  await host.getByRole('button', { name: 'Start with 2 players' }).click()
+
+  // The two who came slide onto the first two seats, in the order they sat.
+  await expect(host.getByTestId('player-red')).toContainText('Ann')
+  await expect(host.getByTestId('player-blue')).toContainText('Ben')
+  await expect(host.getByTestId('player-green')).toHaveCount(0)
+  await expect(guest.getByTestId('player-blue')).toContainText('YOU')
+  await expect(turnHeading(host, 'Ann')).toBeVisible()
+  expect(errors).toEqual([])
+})
