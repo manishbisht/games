@@ -106,12 +106,12 @@ describe('away tracking', () => {
 describe('claiming the win', () => {
   it('rejects a claim while the opponent is connected or freshly away', async () => {
     const { host, guest } = await startedGame()
-    host.send({ type: 'claimWin' })
+    host.send({ type: 'claim' })
     await host.expectError('CLAIM_REJECTED')
 
     guest.ws.close()
     await host.waitRoom((m) => m.snapshot.seats.b?.connected === false)
-    host.send({ type: 'claimWin' })
+    host.send({ type: 'claim' })
     await vi.waitFor(() => {
       const rejections = host.messages.filter((m) => m.type === 'error' && m.code === 'CLAIM_REJECTED')
       expect(rejections.length).toBe(2)
@@ -120,7 +120,7 @@ describe('claiming the win', () => {
 
   it('rejects claims outside a live game and from unseated visitors', async () => {
     const { host } = await seatedPair()
-    host.send({ type: 'claimWin' })
+    host.send({ type: 'claim' })
     await host.expectError('NOT_PLAYING')
 
     // NOT_SEATED needs a joined-but-unseated player, which requires a free seat.
@@ -128,7 +128,7 @@ describe('claiming the win', () => {
     const lurker = await connect(code)
     lurker.join('Eve')
     await lurker.waitRoom(() => true)
-    lurker.send({ type: 'claimWin' })
+    lurker.send({ type: 'claim' })
     await lurker.expectError('NOT_SEATED')
   })
 
@@ -138,7 +138,7 @@ describe('claiming the win', () => {
     await host.waitRoom((m) => m.snapshot.seats.b?.connected === false)
     await backdateDisconnect(code, 'b', CLAIM_WIN_AFTER_MS + 1000)
 
-    host.send({ type: 'claimWin' })
+    host.send({ type: 'claim' })
     const won = await host.waitRoom((m) => m.snapshot.status === 'finished')
     expect(won.snapshot.gameState?.status).toBe('resigned')
     expect(won.snapshot.gameState?.winner).toBe('w')

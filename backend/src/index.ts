@@ -1,3 +1,4 @@
+import { getAdapter, resolveGame } from '@games/shared/online'
 import { generateRoomCode, normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { Env } from './env'
 import { resolveIdentity } from './auth'
@@ -28,13 +29,33 @@ export default {
       } catch {
         return json({ error: 'invalid JSON' }, 400, origin)
       }
-      if (body.game !== 'chess') return json({ error: 'unknown game' }, 400, origin)
+      // A game is bookable exactly when its adapter is registered — having a
+      // name in `GameId` is not enough.
+      const game = resolveGame(body.game)
+      if (!game) return json({ error: 'unknown game' }, 400, origin)
+      const adapter = getAdapter(game)!
+      const seats = body.seats === undefined ? adapter.minSeats : body.seats
+      if (
+        typeof seats !== 'number' ||
+        !Number.isInteger(seats) ||
+        seats < adapter.minSeats ||
+        seats > adapter.maxSeats
+      )
+        return json({ error: 'unsupported seat count' }, 400, origin)
+      const options = adapter.validateOptions(body.options)
       const visibility = body.visibility === 'public' ? 'public' : 'private'
       const host = await resolveIdentity(body, env)
       if (!host) return json({ error: 'invalid identity' }, 400, origin)
       for (let attempt = 0; attempt < 5; attempt++) {
         const code = generateRoomCode()
-        const created = await env.ROOM.getByName(code).create({ code, game: 'chess', visibility, host })
+        const created = await env.ROOM.getByName(code).create({
+          code,
+          game,
+          visibility,
+          host,
+          seats,
+          options,
+        })
         if (created) return json({ code }, 201, origin)
       }
       return json({ error: 'could not allocate a room code' }, 500, origin)
@@ -48,7 +69,7 @@ export default {
     }
 
     if (url.pathname === '/api/lobby' && request.method === 'GET') {
-      const game = url.searchParams.get('game') === 'chess' ? ('chess' as const) : undefined
+      const game = resolveGame(url.searchParams.get('game')) ?? undefined
       const rooms = await env.LOBBY.getByName('global').list(game)
       return json({ rooms }, 200, origin)
     }

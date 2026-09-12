@@ -1,18 +1,23 @@
 import { SELF } from 'cloudflare:test'
 import { expect, vi } from 'vitest'
-import type { ServerMessage } from '@games/shared/protocol'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
+import type { GameId, ServerMessage } from '@games/shared/protocol'
+import type { GameState } from '@games/shared/chess/types'
 
-type RoomMessage = Extract<ServerMessage, { type: 'room' }>
+/** Tests read chess snapshots directly; other games narrow `gameState` themselves. */
+type RoomMessage = Extract<ServerMessage<GameState>, { type: 'room' }>
 
 export async function createRoom(
   visibility: 'private' | 'public' = 'private',
   name = 'Host',
   guestId = crypto.randomUUID(),
+  game: GameId = 'chess',
+  seats?: number,
 ) {
   const res = await SELF.fetch('https://api.test/api/rooms', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ game: 'chess', visibility, name, guestId }),
+    body: JSON.stringify({ game, visibility, name, guestId, ...(seats ? { seats } : {}) }),
   })
   expect(res.status).toBe(201)
   const { code } = await res.json<{ code: string }>()
@@ -21,7 +26,7 @@ export async function createRoom(
 
 export interface Client {
   ws: WebSocket
-  messages: ServerMessage[]
+  messages: ServerMessage<GameState>[]
   closes: { code: number }[]
   send: (message: unknown) => void
   join: (name: string, guestId?: string) => string
@@ -36,7 +41,7 @@ export async function connect(code: string): Promise<Client> {
   expect(res.status).toBe(101)
   const ws = res.webSocket!
   ws.accept()
-  const messages: ServerMessage[] = []
+  const messages: ServerMessage<GameState>[] = []
   const closes: { code: number }[] = []
   ws.addEventListener('message', (event) => {
     messages.push(JSON.parse(event.data as string))
@@ -50,7 +55,7 @@ export async function connect(code: string): Promise<Client> {
     closes,
     send: (message) => ws.send(JSON.stringify(message)),
     join: (name, guestId = crypto.randomUUID()) => {
-      client.send({ type: 'join', protocol: 1, name, guestId })
+      client.send({ type: 'join', protocol: PROTOCOL_VERSION, name, guestId })
       return guestId
     },
     waitRoom: (predicate) =>

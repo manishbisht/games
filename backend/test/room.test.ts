@@ -1,7 +1,15 @@
 import { SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import { ROOM_CODE_ALPHABET } from '@games/shared/protocol/codes'
 import { connect, createRoom } from './helpers'
+
+const post = (body: unknown) =>
+  SELF.fetch('https://api.test/api/rooms', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 
 describe('room creation', () => {
   it('creates a room and returns a six-char code', async () => {
@@ -16,6 +24,40 @@ describe('room creation', () => {
       body: JSON.stringify({ game: 'chess', visibility: 'private', name: '' }),
     })
     expect(res.status).toBe(400)
+  })
+
+  it('only books games that have an adapter registered', async () => {
+    // `estate` is a known GameId with no adapter yet — a name is not a game.
+    for (const game of ['estate', 'nope', 42, undefined]) {
+      const res = await post({ game, visibility: 'private', name: 'Ann', guestId: crypto.randomUUID() })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'unknown game' })
+    }
+  })
+
+  it('holds the host to the seat counts the adapter supports', async () => {
+    for (const seats of [1, 3, 2.5, 'two']) {
+      const res = await post({
+        game: 'chess',
+        visibility: 'private',
+        name: 'Ann',
+        guestId: crypto.randomUUID(),
+        seats,
+      })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'unsupported seat count' })
+    }
+    expect(
+      (
+        await post({
+          game: 'chess',
+          visibility: 'private',
+          name: 'Ann',
+          guestId: crypto.randomUUID(),
+          seats: 2,
+        })
+      ).status,
+    ).toBe(201)
   })
 })
 
@@ -34,6 +76,9 @@ describe('joining and seats', () => {
     expect(open.you.id).toBe(`guest:${guestId}`)
     expect(open.you.seat).toBeNull()
     expect(open.you.isHost).toBe(true)
+    // Seats are the adapter's, announced to the client rather than assumed by it.
+    expect(open.snapshot.protocol).toBe(PROTOCOL_VERSION)
+    expect(open.snapshot.seatIds).toEqual(['w', 'b'])
 
     host.send({ type: 'sit', seat: 'w' })
     const seated = await host.waitRoom((m) => m.you.seat === 'w')
@@ -148,7 +193,7 @@ describe('joining and seats', () => {
     const client = await connect(code)
     client.send({ type: 'sit', seat: 'w' })
     await client.expectError('NOT_JOINED')
-    client.send({ type: 'join', protocol: 1, name: '   ', guestId: crypto.randomUUID() })
+    client.send({ type: 'join', protocol: PROTOCOL_VERSION, name: '   ', guestId: crypto.randomUUID() })
     await client.expectError('BAD_MESSAGE')
     client.send({ type: 'join', protocol: 99, name: 'Ann', guestId: crypto.randomUUID() })
     await client.expectError('PROTOCOL_MISMATCH')
