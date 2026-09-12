@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import type { GameState, Preferences, Square } from '../game/types'
+import type { GameState, Preferences, Square } from '@games/shared/chess/types'
 import { disposeObject, makeBoard, makePiece, squarePosition } from './models'
 
 export interface SceneState {

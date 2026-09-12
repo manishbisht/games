@@ -1,6 +1,6 @@
 import { Chess } from 'chess.js'
 import type { Move, PieceSymbol } from 'chess.js'
-import type { Difficulty } from './types'
+import type { Difficulty } from '@games/shared/chess/types'
 
 export interface AIMove {
   from: string

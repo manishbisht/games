@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { Square } from '../game/types'
-import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '../game/types'
+import type { Square } from '@games/shared/chess/types'
+import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
 import { createScene } from './createScene'
 import type { SceneApi, SceneState } from './createScene'
 

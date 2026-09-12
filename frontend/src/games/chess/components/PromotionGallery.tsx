@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { disposeObject, makePiece } from '../scene/models'
-import type { Color, Preferences, PromotionPiece } from '../game/types'
-import { PIECE_NAMES } from '../game/types'
+import type { Color, Preferences, PromotionPiece } from '@games/shared/chess/types'
+import { PIECE_NAMES } from '@games/shared/chess/types'
 
 const choices: PromotionPiece[] = ['q', 'r', 'b', 'n']
 export default function PromotionGallery({

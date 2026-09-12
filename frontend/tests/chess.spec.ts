@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { OrthographicCamera, Vector3 } from 'three'
-import { createGame } from '../src/games/chess/game/engine'
+import { createGame } from '../../shared/src/chess/engine'
 
 async function loadPosition(page: Page, fen: string) {
   const game = createGame({}, fen)

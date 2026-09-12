@@ -1,6 +1,6 @@
 import { chooseMove } from './ai'
 import type { AIMove } from './ai'
-import type { Difficulty } from './types'
+import type { Difficulty } from '@games/shared/chess/types'
 
 self.onmessage = (
   event: MessageEvent<{ fen: string; difficulty: Difficulty; initialFen: string; moves: AIMove[] }>,

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import type { Color, PieceSymbol, Preferences, Square } from '../game/types'
+import type { Color, PieceSymbol, Preferences, Square } from '@games/shared/chess/types'
 
 export const squarePosition = (square: Square) =>
   new THREE.Vector3(square.charCodeAt(0) - 100.5, 0.43, 4.5 - Number(square[1]))

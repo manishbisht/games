@@ -43,10 +43,17 @@ import {
   restoreGame,
   tickClock,
   undoMove,
-} from './game/engine'
+} from '@games/shared/chess'
 import { playChessSound } from './game/audio'
-import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from './game/types'
-import type { Color, GameOptions, GameState, Preferences, PromotionPiece, Square } from './game/types'
+import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
+import type {
+  Color,
+  GameOptions,
+  GameState,
+  Preferences,
+  PromotionPiece,
+  Square,
+} from '@games/shared/chess/types'
 import './ChessGame.css'
 
 const STORAGE = 'gambit-game-v1',
