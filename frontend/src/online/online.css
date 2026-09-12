@@ -7,8 +7,22 @@
 .ch-online {
   display: grid;
   gap: 0.75rem;
-  border-top: 1px solid var(--ch-border);
+  /* The fallback matters: this panel is embedded in games that have no `--ch-`
+     palette of their own, where an unresolved var would leave a currentColor rule. */
+  border-top: 1px solid var(--ch-border, rgba(0, 0, 0, 0.12));
   padding-top: 1rem;
+}
+.ch-online-seats {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ch-online-seats button {
+  min-width: 2.5rem;
+}
+.ch-online-seats .selected {
+  outline: 2px solid currentColor;
 }
 .ch-online-row {
   display: flex;
@@ -42,10 +56,15 @@
   display: grid;
   gap: 1rem;
 }
+/* Two to four seats, laid out in pairs. */
 .ch-room-seats {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+/* Three at the table: the odd seat takes the whole row rather than half of one. */
+.ch-room-seats > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 .ch-room-seat {
   display: grid;

@@ -76,9 +76,9 @@ describe('hearth adapter authorization', () => {
   it('refuses a move while the dice are still in the air', () => {
     const rolling = act(start(), 'p0', { kind: 'roll' })
     expect(rolling.phase).toBe('rolling')
-    expect(hearthAdapter.apply(rolling, 'p0', SEATS, { kind: 'move', pieceId: 'red-0' }, ctx())).toMatchObject(
-      { error: 'NOT_ALLOWED' },
-    )
+    expect(
+      hearthAdapter.apply(rolling, 'p0', SEATS, { kind: 'move', pieceId: 'red-0' }, ctx()),
+    ).toMatchObject({ error: 'NOT_ALLOWED' })
     // And a second roll cannot be squeezed in either.
     expect(hearthAdapter.apply(rolling, 'p0', SEATS, { kind: 'roll' }, ctx())).toMatchObject({
       error: 'NOT_ALLOWED',
@@ -91,9 +91,9 @@ describe('hearth adapter authorization', () => {
     expect(rolled.phase).toBe('pass')
     const six = settle(act(start(), 'p0', { kind: 'roll' })).state
     expect(six.phase).toBe('choose')
-    expect(
-      hearthAdapter.apply(six, 'p0', SEATS, { kind: 'move', pieceId: 'blue-0' }, ctx()),
-    ).toMatchObject({ error: 'ILLEGAL_MOVE' })
+    expect(hearthAdapter.apply(six, 'p0', SEATS, { kind: 'move', pieceId: 'blue-0' }, ctx())).toMatchObject({
+      error: 'ILLEGAL_MOVE',
+    })
   })
 
   it('refuses everything once the game is won', () => {

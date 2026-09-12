@@ -14,11 +14,12 @@ export interface OnlinePanelProps {
   seatChoices?: number[]
 }
 
-export default function OnlinePanel({ game, basePath }: OnlinePanelProps) {
+export default function OnlinePanel({ game, basePath, seatChoices }: OnlinePanelProps) {
   const navigate = useNavigate()
   const identity = useIdentity()
   const [name, setName] = useState(identity.name)
   const [visibility, setVisibility] = useState<RoomVisibility>('private')
+  const [seats, setSeats] = useState(seatChoices?.[0])
   const [joinCode, setJoinCode] = useState('')
   const [rooms, setRooms] = useState<PublicRoomSummary[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -48,7 +49,7 @@ export default function OnlinePanel({ game, basePath }: OnlinePanelProps) {
     setError('')
     try {
       rememberName()
-      const code = await createRoom(game, visibility, playerName, await identity.credentials())
+      const code = await createRoom(game, visibility, playerName, await identity.credentials(), seats)
       navigate(`${basePath}/room/${code}`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Something went wrong.')
@@ -80,6 +81,21 @@ export default function OnlinePanel({ game, basePath }: OnlinePanelProps) {
             placeholder="What should we call you?"
           />
         </label>
+      )}
+      {seatChoices && (
+        <div className="ch-online-seats" role="group" aria-label="Table size">
+          <span>Table size</span>
+          {seatChoices.map((count) => (
+            <button
+              key={count}
+              className={seats === count ? 'selected' : ''}
+              aria-pressed={seats === count}
+              onClick={() => setSeats(count)}
+            >
+              {count}
+            </button>
+          ))}
+        </div>
       )}
       <div className="ch-online-row">
         <label>

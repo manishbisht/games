@@ -27,8 +27,9 @@ import {
 import { Link } from 'react-router'
 import { estateGame, hearthGame } from '../catalog'
 import { HOME, PALETTES } from '@games/shared/hearth/board'
-import { createGame, gameReducer, motionDuration, progressFor } from '@games/shared/hearth'
+import { createGame, gameReducer, motionDuration, phasePause, progressFor } from '@games/shared/hearth'
 import { chooseAIMove } from '@games/shared/hearth/ai'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { createAudio } from './game/audio'
 import type { GameConfig, GameState } from '@games/shared/hearth/types'
 import BoardScene from './scene/BoardScene'
@@ -37,6 +38,8 @@ import SetupPanel from './components/SetupPanel'
 import RulesDialog from './components/RulesDialog'
 import Modal from './components/Modal'
 import Die from './components/Die'
+import OnlinePanel from '../../online/OnlinePanel'
+import type { OnlineHearthSession } from './online/session'
 import './HearthGame.css'
 
 const DEFAULT_CONFIG: GameConfig = {
@@ -57,11 +60,53 @@ function BrandMark() {
   )
 }
 
-export default function HearthGame() {
+/**
+ * The countdown before an away player's seat can be claimed, and the claim
+ * itself. The server stamps `awaySince` and re-validates the claim, so drift
+ * here only shifts what the banner says, never what the room allows.
+ */
+function AbandonmentNotice({
+  name,
+  awaySince,
+  onClaim,
+}: {
+  name: string
+  awaySince?: number
+  onClaim: () => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const ticker = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(ticker)
+  }, [])
+  const remaining = Math.max(0, CLAIM_WIN_AFTER_MS - (now - (awaySince ?? now)))
+  const seconds = Math.ceil(remaining / 1000)
+  return (
+    <div className="hh-abandon" role="status">
+      {remaining > 0 ? (
+        <span>
+          {name} stepped away — the table can play on without them in {Math.floor(seconds / 60)}:
+          {String(seconds % 60).padStart(2, '0')}.
+        </span>
+      ) : (
+        <>
+          <span>{name} seems to be gone.</span>
+          <button onClick={onClaim}>Play on without them</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+export default function HearthGame({ online }: { online?: OnlineHearthSession }) {
   const [config, setConfig] = useState(DEFAULT_CONFIG)
-  const [state, dispatch] = useReducer(gameReducer, DEFAULT_CONFIG, createGame)
-  const [started, setStarted] = useState(false),
+  const [localState, dispatch] = useReducer(gameReducer, DEFAULT_CONFIG, createGame)
+  // Online the room is the only source of truth: the reducer above never runs,
+  // and the table is already under way by the time this component mounts.
+  const state = online ? online.state : localState
+  const [localStarted, setStarted] = useState(false),
     [session, setSession] = useState(0)
+  const started = online ? true : localStarted
   const [dialog, setDialog] = useState<'rules' | 'new' | 'settings' | null>(null)
   const [muted, setMuted] = useState(true),
     [paused, setPaused] = useState(false),
@@ -75,18 +120,30 @@ export default function HearthGame() {
   const soundedState = useRef<GameState | null>(null)
   const player = state.players[state.currentPlayer]
   const human = player.control === 'human'
+  /** Whose inputs this browser is allowed to make: its own seat online, the shared one locally. */
+  const myTurn = online ? online.mySeat === player.id : human
+  // Online every fresh game shows its own result — a rematch arrives as a new
+  // state rather than through the local restart that would have cleared this.
+  const [wasWon, setWasWon] = useState(state.phase === 'won')
+  if (online && wasWon !== (state.phase === 'won')) {
+    setWasWon(state.phase === 'won')
+    if (state.phase !== 'won') setWinDismissed(false)
+  }
   const active = started && !dialog && !paused
   const roll = useCallback(() => {
-    if (active && state.phase === 'roll' && human) {
+    if (active && state.phase === 'roll' && myTurn) {
       if (!muted) audio.unlock()
-      dispatch({ type: 'ROLL_START' })
+      if (online) online.send.roll()
+      else dispatch({ type: 'ROLL_START' })
     }
-  }, [active, state.phase, human, muted, audio])
+  }, [active, state.phase, myTurn, muted, audio, online])
   const select = useCallback(
     (pieceId: string) => {
-      if (active && human) dispatch({ type: 'MOVE', pieceId })
+      if (!active || !myTurn) return
+      if (online) online.send.move(pieceId)
+      else dispatch({ type: 'MOVE', pieceId })
     },
-    [active, human],
+    [active, myTurn, online],
   )
 
   useEffect(() => {
@@ -96,26 +153,29 @@ export default function HearthGame() {
     return () => media.removeEventListener('change', listener)
   }, [])
   useEffect(() => {
+    // Online every one of these beats is the server's to keep, so that the whole
+    // table sees the same die at the same moment.
+    if (online) return
     let callback: (() => void) | undefined,
       delay = 0
     if (state.phase === 'rolling') {
       callback = () => dispatch({ type: 'ROLL_RESULT', value: Math.floor(Math.random() * 6) + 1 })
-      delay = reduced ? 220 : 1100
+      delay = phasePause('rolling', reduced)
     } else if (state.phase === 'moving') {
       callback = () => dispatch({ type: 'ANIMATION_DONE' })
       delay = motionDuration(state, reduced)
     } else if (state.phase === 'pass') {
       callback = () => dispatch({ type: 'NEXT_TURN' })
-      delay = reduced ? 600 : 1700
+      delay = phasePause('pass', reduced)
     } else if (state.phase === 'roll' && !human) {
       callback = () => dispatch({ type: 'ROLL_START' })
-      delay = reduced ? 300 : 750
+      delay = phasePause('aiRoll', reduced)
     } else if (state.phase === 'choose' && (!human || state.legalMoves.length === 1)) {
       callback = () => {
         const move = human ? state.legalMoves[0] : chooseAIMove(state, player.control, Math.random())
         if (move) dispatch({ type: 'MOVE', pieceId: move.pieceId })
       }
-      delay = reduced ? 350 : 900
+      delay = phasePause('aiChoose', reduced)
     }
     if (!callback) {
       turnSchedule.current = null
@@ -131,7 +191,7 @@ export default function HearthGame() {
       window.clearTimeout(timer)
       schedule.remaining = Math.max(0, schedule.remaining - (performance.now() - startedAt))
     }
-  }, [active, state, reduced, human, player.control])
+  }, [online, active, state, reduced, human, player.control])
   useEffect(() => () => audio.dispose(), [audio])
   useEffect(() => {
     if (muted || !active) return
@@ -238,9 +298,13 @@ export default function HearthGame() {
             ? 'Next player…'
             : state.phase === 'won'
               ? 'Home, sweet home'
-              : human
+              : myTurn
                 ? 'Roll dice'
-                : 'Thinking…'
+                : online
+                  ? 'Waiting…'
+                  : 'Thinking…'
+  // The player the table is stuck on, once they have walked away from their turn.
+  const awayBlocking = online && state.phase !== 'won' && !myTurn ? online.players[player.id] : undefined
   const EventIcon = {
     start: Flag,
     roll: Dices,
@@ -272,7 +336,7 @@ export default function HearthGame() {
         <div className="hh-header-actions">
           <span className="hh-local-badge">
             <span />
-            Made for good company
+            {online ? 'Playing together, apart' : 'Made for good company'}
           </span>
           <button
             className="hh-icon-button"
@@ -300,8 +364,8 @@ export default function HearthGame() {
             </h1>
           </div>
           <div className="hh-table-meta">
-            <span className="hh-online-dot" /> YOUR PRIVATE TABLE <span className="hh-divider" />{' '}
-            <Users size={15} />
+            <span className="hh-online-dot" /> {online ? 'AN ONLINE TABLE' : 'YOUR PRIVATE TABLE'}{' '}
+            <span className="hh-divider" /> <Users size={15} />
             {state.players.length} seats
           </div>
         </div>
@@ -371,7 +435,10 @@ export default function HearthGame() {
 
           <aside className="hh-sidebar" aria-label="Game controls">
             {!started ? (
-              <SetupPanel initialConfig={config} onStart={start} onPreview={preview} />
+              <>
+                <SetupPanel initialConfig={config} onStart={start} onPreview={preview} />
+                {!online && <OnlinePanel game="hearth" basePath={hearthGame.path} seatChoices={[2, 3, 4]} />}
+              </>
             ) : (
               <>
                 <section
@@ -383,9 +450,11 @@ export default function HearthGame() {
                       <span className="hh-live-dot" />
                       {state.phase === 'won'
                         ? 'A JOURNEY WELL PLAYED'
-                        : human
+                        : myTurn
                           ? 'YOU’RE UP'
-                          : 'COMPUTER’S TURN'}
+                          : online
+                            ? 'THEIR TURN'
+                            : 'COMPUTER’S TURN'}
                     </div>
                     <span className="hh-time">{time}</span>
                   </div>
@@ -407,17 +476,18 @@ export default function HearthGame() {
                   <button
                     className={`hh-primary hh-roll-button ${state.phase === 'roll' ? 'ready' : ''}`}
                     aria-label={actionLabel}
-                    disabled={state.phase !== 'roll' || !human || paused}
+                    disabled={state.phase !== 'roll' || !myTurn || paused}
                     onClick={roll}
                   >
                     <Dices size={20} />
                     {actionLabel}
-                    {state.phase === 'roll' && human && <kbd>SPACE</kbd>}
+                    {state.phase === 'roll' && myTurn && <kbd>SPACE</kbd>}
                   </button>
                   {state.phase === 'choose' ? (
                     <div className="hh-piece-choices">
                       <p>
-                        {state.legalMoves.length === 1
+                        {/* Locally a lone move plays itself; online the seat still chooses it. */}
+                        {state.legalMoves.length === 1 && !online
                           ? 'One possible move. On its way…'
                           : 'Pick a piece on the board or below.'}
                       </p>
@@ -431,7 +501,7 @@ export default function HearthGame() {
                                 key={p.id}
                                 aria-label={`Move piece ${p.index + 1}`}
                                 aria-describedby={`piece-description-${p.id}`}
-                                disabled={!legal || !human || paused}
+                                disabled={!legal || !myTurn || paused}
                                 onMouseEnter={() => board.current?.focus(p.id)}
                                 onFocus={() => board.current?.focus(p.id)}
                                 onClick={() => select(p.id)}
@@ -507,6 +577,7 @@ export default function HearthGame() {
                   <div className="hh-player-list">
                     {state.players.map((p) => {
                       const progress = progressFor(state, p.id)
+                      const seat = online?.players[p.id]
                       return (
                         <div
                           key={p.id}
@@ -528,6 +599,10 @@ export default function HearthGame() {
                             <strong>
                               {p.name}
                               {p.control !== 'human' && <span className="hh-ai-badge">AI</span>}
+                              {online?.mySeat === p.id && <span className="hh-ai-badge">YOU</span>}
+                              {seat?.connected === false && (
+                                <span className="hh-ai-badge hh-away-badge">AWAY</span>
+                              )}
                               {p.id === player.id && <span className="hh-current-dot" />}
                             </strong>
                             <small>
@@ -588,7 +663,16 @@ export default function HearthGame() {
               <CircleHelp size={14} /> A little help
             </button>
           </div>
-          {started ? (
+          {online ? (
+            // The table belongs to the room: there is nothing here one player
+            // could pause or restart on everyone else's behalf.
+            <div className="hh-game-actions">
+              <button onClick={online.leave}>
+                <ArrowLeft size={14} />
+                Leave room
+              </button>
+            </div>
+          ) : started ? (
             <div className="hh-game-actions">
               <button onClick={() => setPaused(!paused)}>
                 {paused ? <Play size={14} /> : <Pause size={14} />} {paused ? 'Resume' : 'Pause'}
@@ -661,8 +745,8 @@ export default function HearthGame() {
             </div>
             <div>
               <span>
-                <strong>Local multiplayer</strong>
-                <small>Players share this device.</small>
+                <strong>{online ? 'Online table' : 'Local multiplayer'}</strong>
+                <small>{online ? 'Every seat has its own device.' : 'Players share this device.'}</small>
               </span>
               <Users size={18} />
             </div>
@@ -671,6 +755,13 @@ export default function HearthGame() {
             Back to the table <ArrowRight size={17} />
           </button>
         </Modal>
+      )}
+      {awayBlocking && !awayBlocking.connected && (
+        <AbandonmentNotice
+          name={awayBlocking.name}
+          awaySince={awayBlocking.awaySince}
+          onClaim={() => online?.send.claim()}
+        />
       )}
       {state.winner && !winDismissed && !dialog && (
         <Modal title={`${player.name} wins!`} onClose={() => setWinDismissed(true)} className="hh-victory">
@@ -712,18 +803,36 @@ export default function HearthGame() {
               </div>
             ))}
           </div>
-          <button className="hh-primary" onClick={() => start(config)}>
-            Play again <ArrowRight size={17} />
-          </button>
-          <button
-            className="hh-text-button"
-            onClick={() => {
-              setWinDismissed(true)
-              setDialog('new')
-            }}
-          >
-            Change the company
-          </button>
+          {online ? (
+            <>
+              <button className="hh-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>
+                {online.rematch.mine
+                  ? 'Waiting for the table…'
+                  : online.rematch.theirs
+                    ? 'Accept rematch'
+                    : 'Rematch'}
+                <RotateCcw size={16} />
+              </button>
+              <button className="hh-text-button" onClick={online.leave}>
+                Leave room
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="hh-primary" onClick={() => start(config)}>
+                Play again <ArrowRight size={17} />
+              </button>
+              <button
+                className="hh-text-button"
+                onClick={() => {
+                  setWinDismissed(true)
+                  setDialog('new')
+                }}
+              >
+                Change the company
+              </button>
+            </>
+          )}
         </Modal>
       )}
     </div>

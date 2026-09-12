@@ -881,6 +881,10 @@
   padding: 1px 3px;
   font-weight: 500;
 }
+.hh-away-badge {
+  color: #b4756a;
+  border-color: #e8cdc6;
+}
 .hh-player-info > small {
   display: block;
   font-size: 8px;
@@ -1973,7 +1977,8 @@
   .hh-events {
     grid-column: 1 / -1;
   }
-  .hh-sidebar > .hh-setup {
+  .hh-sidebar > .hh-setup,
+  .hh-sidebar > .ch-online {
     max-width: 520px;
     margin-inline: auto;
   }
@@ -1982,6 +1987,85 @@
   .hh-board-section {
     height: max(290px, calc(100svh - 32px));
   }
+}
+/*
+ * The shared online chrome, in Hearth's voice. `.ch-online` brings its own
+ * layout (see online/online.css); these rules only settle it into the sidebar
+ * and hand it the table's palette.
+ */
+.hh-sidebar > .ch-online {
+  --ch-border: #e5e6db;
+  padding: 0 24px 28px;
+  font-size: 12px;
+  color: #6c6f5f;
+}
+.hh-sidebar > .ch-online h3 {
+  font:
+    400 20px/1.2 Georgia,
+    'Times New Roman',
+    serif;
+  color: #2f3128;
+}
+.hh-sidebar > .ch-online input[type='text'],
+.hh-sidebar > .ch-online input:not([type]) {
+  border: 1px solid #e5e6db;
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: #fcfbf7;
+  font: inherit;
+  min-width: 0;
+  flex: 1;
+}
+.hh-sidebar > .ch-online button {
+  border: 1px solid #dde2d2;
+  border-radius: 7px;
+  padding: 7px 12px;
+  background: #fcfbf7;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-height: 32px;
+}
+.hh-sidebar > .ch-online button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.hh-sidebar > .ch-online .selected {
+  border-color: var(--hh-ink, #2f3128);
+  outline: none;
+  color: #2f3128;
+  font-weight: 600;
+}
+.hh-sidebar > .ch-online .ch-online-name {
+  display: grid;
+  gap: 6px;
+}
+/* The countdown before an away seat can be played on without. */
+.hh-abandon {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  background: rgba(38, 40, 33, 0.93);
+  color: #f7f6ef;
+  font-size: 12px;
+  z-index: 60;
+  max-width: calc(100vw - 32px);
+}
+.hh-abandon button {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
   .hh-app *,

@@ -27,6 +27,7 @@ export const hearthGame: GameEntry = {
   tags: ['Race & strategy', 'Classic, quick & custom'],
   icon: 'hearth.svg',
   themeColor: '#faf9f5',
+  online: true,
   Component: lazy(() => import('./hearth/HearthGame')),
 }
 

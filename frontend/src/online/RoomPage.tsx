@@ -142,7 +142,10 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   }
 
   const isHost = Boolean(you?.isHost)
-  const ready = snapshot.seatIds.every((seat) => snapshot.seats[seat])
+  // A game that does not insist on a full table plays with whoever turned up, so
+  // "ready" is its own minimum rather than every seat being taken.
+  const taken = snapshot.seatIds.filter((seat) => snapshot.seats[seat]).length
+  const ready = taken >= config.minSeats
   return (
     <main className="ch-room">
       <h1>Room {snapshot.code}</h1>
@@ -158,7 +161,11 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
       <div className="ch-room-seats">{snapshot.seatIds.map(seatButton)}</div>
       {isHost ? (
         <button className="ch-room-start" disabled={!ready} onClick={api.start}>
-          {ready ? 'Start the game' : 'Waiting for every seat…'}
+          {!ready
+            ? 'Waiting for players…'
+            : taken === snapshot.seatIds.length
+              ? 'Start the game'
+              : `Start with ${taken} players`}
         </button>
       ) : (
         <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
