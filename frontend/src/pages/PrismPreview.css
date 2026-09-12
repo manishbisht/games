@@ -1,0 +1,85 @@
+.collection-preview-prism {
+  background: #213b2f;
+  color: #c4b88a;
+}
+.collection-preview-prism .collection-board {
+  background: #2c5945;
+  border: 4px solid #526146;
+  box-shadow:
+    0 4px 0 #172c21,
+    0 16px 22px #0c201c40;
+  border-radius: 50%;
+  transform: rotate(-9deg);
+}
+.collection-prism-hand {
+  height: 100%;
+  width: 100%;
+  position: relative;
+}
+.collection-prism-card {
+  position: absolute;
+  width: 72px;
+  height: 108px;
+  background: #d96d55;
+  border: 4px solid #f2e9cf;
+  border-radius: 6px;
+  box-shadow:
+    1px 3px 0 #b8b097,
+    1px 6px 8px #0a2a2150;
+  color: #fff3d6;
+  left: 25px;
+  top: 20px;
+  transform: rotate(-17deg);
+  display: grid;
+  place-items: center;
+}
+.collection-prism-card::before {
+  content: '';
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  border: 1px solid #ffefc655;
+  border-radius: 8px;
+  transform: rotate(45deg);
+}
+.collection-prism-card small {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-size: 9px;
+}
+.collection-prism-card strong {
+  font-size: 36px;
+  font-weight: 650;
+}
+.collection-prism-card > span {
+  position: absolute;
+  bottom: 9px;
+  font-size: 5px;
+  letter-spacing: 2px;
+}
+.collection-prism-card-1 {
+  left: 66px;
+  top: 10px;
+  background: #548ac1;
+  transform: rotate(-5deg);
+}
+.collection-prism-card-2 {
+  left: 108px;
+  top: 10px;
+  background: conic-gradient(#d4a956 0 25%, #5b9e7c 0 50%, #5388b9 0 75%, #d96d55 0);
+  transform: rotate(9deg);
+}
+.collection-prism-card-3 {
+  left: 148px;
+  top: 24px;
+  background: #579975;
+  transform: rotate(22deg);
+}
+.collection-prism-spark {
+  font-size: 38px;
+  color: #93815c;
+}
+.collection-card-prism .collection-play {
+  background: #34533f;
+}

@@ -7,8 +7,9 @@ A React frontend for original 3D tabletop games, using React, TypeScript, Three.
 - `/` or `/#/`: browse the homepage and choose a game.
 - `/#/hearth-and-home`: play **Hearth & Home**, the Ludo-inspired game.
 - `/#/estate`: play **Estate**, the property game.
+- `/#/prism`: play **Prism**, the 3D color-matching card game. `/#/uno` and `/#/Prism` redirect here.
 - `/#/Ludo` and `/#/Hearth` redirect to `/#/hearth-and-home`; `/#/Monopoly` redirects to `/#/estate`, so existing bookmarks keep working.
-- Unknown hash routes return to the homepage. Both games include an **All games** link back to the collection.
+- Unknown hash routes return to the homepage. Every game includes an **All games** link back to the collection.
 
 The route path is `/hearth-and-home` or `/estate`; `HashRouter` adds the `#` in the browser URL. Hash routes support direct links and refreshes without requiring server-side route rewrites. Page titles, descriptions, and favicons follow the active game.
 
@@ -35,6 +36,20 @@ This milestone supports local play and AI. Hearth & Home sessions are held in me
 ## Monopoly / Estate
 
 A playable 3D property game for 2–4 players. Built with React, TypeScript, Three.js, and Vite. All property names, card text, tokens, and board artwork are original.
+
+## Prism
+
+Open `http://localhost:5173/#/prism`, choose 2–4 players and select **Let’s play**. Play against one to three AI opponents on Easy, Medium or Hard, or choose **Local friends** to pass the device. Local hands remain hidden until the next player acknowledges the handoff.
+
+Match the active color, number or action. Select a highlighted card, then tap it again or use **Play card**. **Draw card** takes one card; if it matches, play that card or **Keep & pass**. Wild cards open a color chooser. **Pause** skips, **Turn** reverses (and skips in two-player games), **Take Two** and **Take Four** draw penalties and skip the recipient. Take Four is legal only without another card of the active color. The 108-card deck uses Fisher–Yates shuffling and a numbered opening discard. Used cards recycle when the draw pile runs out, preserving the top discard.
+
+**Call Prism!** with two cards before playing, or with one before the next accepted play/draw. Another player can catch a missed call during that window for two cards. AI allows 2.4 seconds before catching; this timer only schedules the opponent, while the engine's deadline is defined by accepted actions. Calls remain available during local handoff. Final-card penalties resolve before scoring: numbers are face value, actions 20 and wilds 50. **Play again** retains cumulative scores. A fully blocked table with no recyclable cards ends in a draw.
+
+The pure command engine lives in `src/games/prism/game/engine.ts`; centralized defaults and state types are in `game/types.ts`. `handView()` derives playability from authoritative state rather than persisting stale flags. AI uses legal cards, its own hand and public opponent counts. `scene/` renders physical mesh cards, an oval felt table and event-based card animations; the accessible hand controls work even without WebGL. Original card textures and sounds are generated locally.
+
+Settings include sound, reduced motion and AI pace. Classic rules are the initial UI; stacking, immediate drawn-card play, draw-until-playable, Draw Four restrictions, call penalties and scoring are engine options. Jump-in and 7–0 cannot be enabled until implemented. Online transport, custom-rule UI, tournament formats, music and saved sessions are outside this milestone. Rounds remain in memory; refreshing resets the game.
+
+Verification: `npx vitest run src/games/prism` and `npx playwright test tests/prism.spec.ts`. Browser tests play a complete local round, including calls after handoff, wild choices, victory/replay, and check mobile AI play. Seeded engine simulations verify card conservation across complete rounds.
 
 ## Run
 
@@ -132,4 +147,4 @@ npm run test:e2e
 
 The browser suite starts or reuses the dev server at `http://127.0.0.1:5173` and uses an installed Google Chrome. It checks the homepage, canonical game links, legacy redirects, direct-link refreshes, return navigation, mobile layout, and page titles. Game coverage includes Hearth setup, human rolls and nest entry, AI-versus-AI victory/replay, custom rules, pause/resume, audio controls and camera controls. Estate's purchase, autosave, trade and bankruptcy regressions remain covered. Screenshots are written to the ignored `test-results/` directory. Unit tests exercise rule boundaries, invalid actions, AI strategy, and complete deterministic games without loading a renderer.
 
-The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. Both games run locally without an account or backend; online networking is outside this milestone.
+The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. All games run locally without an account or backend; online networking is outside this milestone.

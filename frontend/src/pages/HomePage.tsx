@@ -2,13 +2,18 @@ import { ArrowRight, Bot, Dices, Heart, House, Monitor, Users } from 'lucide-rea
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
 import './HomePage.css'
+import './PrismPreview.css'
 
 function BoardPreview({ game }: { game: string }) {
   return (
     <div className={`collection-preview collection-preview-${game}`} aria-hidden="true">
       <span className="collection-preview-caption">THE TABLE IS SET</span>
       <div className="collection-board">
-        {game === 'hearth' ? (
+        {game === 'prism' ? (
+          <div className="collection-prism-hand">
+            {['7', '⇄', '✦', '+2'].map((symbol, i) => <div key={symbol} className={`collection-prism-card collection-prism-card-${i}`}><small>{symbol}</small><strong>{symbol}</strong><span>PRISM</span></div>)}
+          </div>
+        ) : game === 'hearth' ? (
           <>
             {['red', 'gold', 'green', 'blue'].map((color) => (
               <div className={`collection-court collection-court-${color}`} key={color}>
@@ -37,7 +42,7 @@ function BoardPreview({ game }: { game: string }) {
         )}
       </div>
       <div className="collection-preview-dice">
-        <Dices size={40} strokeWidth={1.4} />
+        {game === 'prism' ? <span className="collection-prism-spark">✦</span> : <Dices size={40} strokeWidth={1.4} />}
       </div>
       <span className="collection-preview-note">A fresh take on a timeless game</span>
     </div>

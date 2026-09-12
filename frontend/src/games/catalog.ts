@@ -28,4 +28,18 @@ export const estateGame = {
   Component: lazy(() => import('./monopoly/MonopolyGame')),
 }
 
-export const games = [hearthGame, estateGame]
+export const prismGame = {
+  id: 'prism',
+  name: 'Prism',
+  path: '/prism',
+  aliases: ['/uno', '/Prism'],
+  category: 'A little color. A little chaos.',
+  description:
+    'Match a color, change the direction, and keep your friends guessing. A colorful 3D card game with a little friendly rivalry in every hand.',
+  tags: ['Cards & color', 'Local & three AI levels'],
+  icon: 'prism.svg',
+  themeColor: '#142b24',
+  Component: lazy(() => import('./prism/PrismGame')),
+}
+
+export const games = [hearthGame, estateGame, prismGame]
