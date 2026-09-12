@@ -223,7 +223,7 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
   const board = useRef<BoardControls>(null),
     motionTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
     historyEnd = useRef<HTMLDivElement>(null)
-  // Online, the seat orients the board; each fresh game drops a stale picker and shows its own result.
+  // Online, the seat orients the board; each fresh game starts clean and shows its own result.
   const [seat, setSeat] = useState(online?.myColor ?? null),
     [seatStatus, setSeatStatus] = useState(game.status)
   if (online && seat !== online.myColor) {
@@ -233,6 +233,8 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
   if (online && seatStatus !== game.status) {
     setSeatStatus(game.status)
     setOnlinePromotion(null)
+    setSelected(null)
+    setNotice('')
     if (game.status === 'playing') setResultDismissed(false)
   }
   const aiTurn =
@@ -1073,10 +1075,15 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
             color={promotion.color}
             theme={preferences.theme}
             onChoose={(p) => {
-              if (online && onlinePromotion) {
-                online.send.move(onlinePromotion.from, onlinePromotion.to, p)
-                setOnlinePromotion(null)
-              } else commit(promote(game, p), game)
+              if (online) {
+                // The local engine never runs an online game, even if this modal's gating loosens.
+                if (onlinePromotion) {
+                  online.send.move(onlinePromotion.from, onlinePromotion.to, p)
+                  setOnlinePromotion(null)
+                }
+                return
+              }
+              commit(promote(game, p), game)
             }}
           />
           {!!game.options.clock && <p className="ch-setup-note">Your clock is still running.</p>}
