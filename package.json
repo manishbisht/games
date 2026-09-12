@@ -6,6 +6,6 @@
     "dev": "npm run dev -w frontend",
     "build": "npm run build -w frontend",
     "lint": "npm run lint -w frontend",
-    "test": "npm run test -ws --if-present"
+    "test": "npm run test --workspaces --if-present"
   }
 }
