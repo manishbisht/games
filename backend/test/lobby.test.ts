@@ -45,6 +45,25 @@ describe('public lobby', () => {
     })
   })
 
+  it('hides a full room even before the host starts it', async () => {
+    const { code, guestId } = await createRoom('public', 'Ann')
+    await vi.waitFor(async () => expect((await lobbyRooms()).map((r) => r.code)).toContain(code))
+
+    const host = await connect(code)
+    host.join('Ann', guestId)
+    host.send({ type: 'sit', seat: 'w' })
+    await host.waitRoom((m) => m.you.seat === 'w')
+    const guest = await connect(code)
+    guest.join('Ben')
+    guest.send({ type: 'sit', seat: 'b' })
+    const both = await host.waitRoom((m) => Boolean(m.snapshot.seats.w && m.snapshot.seats.b))
+    expect(both.snapshot.status).toBe('open')
+
+    await vi.waitFor(async () => {
+      expect((await lobbyRooms()).map((r) => r.code)).not.toContain(code)
+    })
+  })
+
   it('never lists private rooms', async () => {
     const { code } = await createRoom('private')
     expect((await lobbyRooms()).map((r) => r.code)).not.toContain(code)

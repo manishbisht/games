@@ -67,14 +67,16 @@ export class LobbyDO extends DurableObject<Env> {
 
   async list(game?: GameId): Promise<PublicRoomSummary[]> {
     const cutoff = Date.now() - STALE_MS
+    // Only joinable rooms: a room with every seat taken is still `open` (the
+    // host hasn't pressed start) but nobody else can get in.
     const rows = game
       ? this.ctx.storage.sql.exec<Row>(
-          'SELECT code, game, host_name, seats_taken, seats_total, created_at FROM rooms WHERE game = ? AND updated_at > ? ORDER BY created_at DESC LIMIT 50',
+          'SELECT code, game, host_name, seats_taken, seats_total, created_at FROM rooms WHERE game = ? AND updated_at > ? AND seats_taken < seats_total ORDER BY created_at DESC LIMIT 50',
           game,
           cutoff,
         )
       : this.ctx.storage.sql.exec<Row>(
-          'SELECT code, game, host_name, seats_taken, seats_total, created_at FROM rooms WHERE updated_at > ? ORDER BY created_at DESC LIMIT 50',
+          'SELECT code, game, host_name, seats_taken, seats_total, created_at FROM rooms WHERE updated_at > ? AND seats_taken < seats_total ORDER BY created_at DESC LIMIT 50',
           cutoff,
         )
     return rows.toArray().map(toSummary)

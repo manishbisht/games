@@ -198,7 +198,8 @@ export class RoomDO extends DurableObject<Env> {
     } catch {
       return this.fail(ws, 'BAD_MESSAGE', 'Messages must be JSON.')
     }
-    await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS)
+    // No TTL refresh here: `save()` re-arms the alarm on every mutation, and a
+    // room whose only traffic is non-mutating messages has nothing worth keeping.
     if (message.type === 'join') return this.handleJoin(ws, record, message)
     const attachment = ws.deserializeAttachment() as Attachment | null
     if (!attachment) return this.fail(ws, 'NOT_JOINED', 'Send a join message first.')
