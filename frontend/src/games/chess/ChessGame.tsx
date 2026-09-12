@@ -46,6 +46,7 @@ import {
 } from '@games/shared/chess'
 import { playChessSound } from './game/audio'
 import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type {
   Color,
   GameOptions,
@@ -197,6 +198,40 @@ function Toggle({
         <i />
       </span>
     </button>
+  )
+}
+
+function AbandonmentNotice({
+  name,
+  awaySince,
+  onClaim,
+}: {
+  name: string
+  awaySince?: number
+  onClaim: () => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const ticker = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(ticker)
+  }, [])
+  // The server stamps awaySince; it re-validates any claim, so drift here only shifts the countdown.
+  const remaining = Math.max(0, CLAIM_WIN_AFTER_MS - (now - (awaySince ?? now)))
+  const seconds = Math.ceil(remaining / 1000)
+  return (
+    <div className="ch-abandon" role="status">
+      {remaining > 0 ? (
+        <span>
+          {name} disconnected — you can claim the win in {Math.floor(seconds / 60)}:
+          {String(seconds % 60).padStart(2, '0')}.
+        </span>
+      ) : (
+        <>
+          <span>{name} seems to be gone.</span>
+          <button onClick={onClaim}>Claim win</button>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -470,6 +505,8 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
   // across the board — falling back to the plain word if we never saw their name.
   const onlineOpponent =
     (online?.myColor ? online.players[opposite(online.myColor)]?.name : undefined) || 'opponent'
+  const onlineAway =
+    online?.myColor && game.status === 'playing' ? online.players[opposite(online.myColor)] : undefined
   const turnStatus = menu
     ? 'The table is yours.'
     : isOver
@@ -1098,6 +1135,13 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
           />
           {!!game.options.clock && <p className="ch-setup-note">Your clock is still running.</p>}
         </Modal>
+      )}
+      {!menu && onlineAway && !onlineAway.connected && (
+        <AbandonmentNotice
+          name={onlineAway.name}
+          awaySince={onlineAway.awaySince}
+          onClaim={() => online?.send.claimWin()}
+        />
       )}
       {!menu && isOver && !resultDismissed && !moving && !dialog && (
         <Modal title="Game result" onClose={() => setResultDismissed(true)}>

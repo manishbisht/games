@@ -1,5 +1,5 @@
 import { CLOSE_CODES } from '@games/shared/protocol'
-import type { ErrorCode, RoomSnapshot, ServerMessage, YouInfo } from '@games/shared/protocol'
+import type { ChessSeat, ErrorCode, RoomSnapshot, ServerMessage, YouInfo } from '@games/shared/protocol'
 
 export type RoomPhase = 'connecting' | 'connected' | 'reconnecting' | 'notfound' | 'full' | 'expired'
 
@@ -51,3 +51,29 @@ export function roomReducer(state: RoomClientState, event: RoomClientEvent): Roo
 
 export const isFatal = (phase: RoomPhase): boolean =>
   phase === 'notfound' || phase === 'full' || phase === 'expired'
+
+export interface PresenceEvent {
+  seat: ChessSeat
+  name: string
+  connected: boolean
+}
+
+/**
+ * Seat-presence transitions between two snapshots, for disconnect/reconnect
+ * toasts. Snapshots carry no player ids (they're bearer credentials), so a
+ * same-name check is what guards against a seat changing occupants — e.g. the
+ * rematch color swap — being misread as a presence change.
+ */
+export function presenceEvents(prev: RoomSnapshot | null, next: RoomSnapshot | null): PresenceEvent[] {
+  if (!prev || !next) return []
+  const events: PresenceEvent[] = []
+  for (const seat of ['w', 'b'] as const) {
+    const before = prev.seats[seat]
+    const after = next.seats[seat]
+    if (!before || !after) continue
+    if (before.player.name !== after.player.name) continue
+    if (before.connected !== after.connected)
+      events.push({ seat, name: after.player.name, connected: after.connected })
+  }
+  return events
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RoomSnapshot } from '@games/shared/protocol'
-import { initialRoomState, isFatal, roomReducer } from './roomState'
+import { initialRoomState, isFatal, presenceEvents, roomReducer } from './roomState'
 
 const snapshot: RoomSnapshot = {
   protocol: 1,
@@ -39,7 +39,10 @@ describe('roomReducer', () => {
   })
 
   it('treats other closes as reconnecting and keeps the last snapshot', () => {
-    const roomed = roomReducer(initialRoomState, { type: 'message', message: { type: 'room', snapshot, you } })
+    const roomed = roomReducer(initialRoomState, {
+      type: 'message',
+      message: { type: 'room', snapshot, you },
+    })
     const dropped = roomReducer(roomed, { type: 'close', code: 1006 })
     expect(dropped.phase).toBe('reconnecting')
     expect(dropped.snapshot?.code).toBe('KX3F9M')
@@ -51,5 +54,29 @@ describe('roomReducer', () => {
     expect(isFatal('full')).toBe(true)
     expect(isFatal('connected')).toBe(false)
     expect(isFatal('reconnecting')).toBe(false)
+  })
+})
+
+describe('presenceEvents', () => {
+  const seated = (connected: boolean, name = 'Ben'): RoomSnapshot => ({
+    ...snapshot,
+    seats: { b: { player: { name, isGuest: true }, connected, wantsRematch: false } },
+  })
+
+  it('emits disconnect and reconnect transitions', () => {
+    expect(presenceEvents(seated(true), seated(false))).toEqual([
+      { seat: 'b', name: 'Ben', connected: false },
+    ])
+    expect(presenceEvents(seated(false), seated(true))).toEqual([{ seat: 'b', name: 'Ben', connected: true }])
+  })
+
+  it('is quiet without a transition, a previous snapshot, or a still-seated player', () => {
+    expect(presenceEvents(null, seated(true))).toEqual([])
+    expect(presenceEvents(seated(true), seated(true))).toEqual([])
+    expect(presenceEvents(seated(true), { ...snapshot, seats: {} })).toEqual([])
+  })
+
+  it('ignores a seat that changed occupants', () => {
+    expect(presenceEvents(seated(true, 'Ben'), seated(false, 'Eve'))).toEqual([])
   })
 })

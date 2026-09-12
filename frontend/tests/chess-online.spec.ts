@@ -59,7 +59,8 @@ test('two browsers create, join, and play in the same room', async ({ browser })
   await expect(guest.getByRole('heading', { name: `Room ${code}` })).toBeVisible()
 
   await host.getByRole('button', { name: /Play as White/ }).click()
-  await expect(host.getByRole('button', { name: /Play as White/ })).toContainText('Ann')
+  // Your own occupied seat relabels itself as the way out of it.
+  await expect(host.getByRole('button', { name: /Leave seat/ })).toContainText('Ann')
   await guest.getByRole('button', { name: /Play as Black/ }).click()
   // The host only learns the black seat is filled through the broadcast snapshot.
   await expect(host.getByRole('button', { name: /Play as Black/ })).toContainText('Ben')

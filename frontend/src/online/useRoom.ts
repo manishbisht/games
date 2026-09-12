@@ -8,12 +8,17 @@ import { useIdentity } from './identity'
 
 export interface RoomApi {
   sit: (seat: ChessSeat) => void
+  leaveSeat: () => void
   start: () => void
   move: (from: string, to: string, promotion?: 'q' | 'r' | 'b' | 'n') => void
   resign: () => void
   rematch: () => void
+  claimWin: () => void
   dismissError: () => void
 }
+
+/** The server's edge answers these without waking the room (setWebSocketAutoResponse). */
+const HEARTBEAT_MS = 20000
 
 export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
   const identity = useIdentity()
@@ -30,22 +35,39 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
     if (fatal) return
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    let missedPongs = 0
     const open = () => {
       const ws = new WebSocket(roomSocketUrl(code))
       socket.current = ws
       ws.onopen = async () => {
         attempts.current = 0
         dispatch({ type: 'open' })
+        missedPongs = 0
+        clearInterval(heartbeat)
+        heartbeat = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return
+          if (missedPongs >= 2) {
+            // The connection is silently dead: closing it hands control to the
+            // normal reconnect path (and lets the server mark us away).
+            ws.close()
+            return
+          }
+          missedPongs++
+          ws.send('ping')
+        }, HEARTBEAT_MS)
         const me = identityRef.current
         const credentials = await me.credentials()
         // `credentials()` can hit the network (Clerk), and the socket may have
         // closed or been replaced while we waited.
         if (disposed || ws.readyState !== WebSocket.OPEN) return
-        ws.send(
-          JSON.stringify({ type: 'join', protocol: PROTOCOL_VERSION, name: me.name, ...credentials }),
-        )
+        ws.send(JSON.stringify({ type: 'join', protocol: PROTOCOL_VERSION, name: me.name, ...credentials }))
       }
       ws.onmessage = (event) => {
+        if (event.data === 'pong') {
+          missedPongs = 0
+          return
+        }
         let message: ServerMessage
         try {
           message = JSON.parse(event.data as string)
@@ -55,6 +77,7 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
         dispatch({ type: 'message', message })
       }
       ws.onclose = (event) => {
+        clearInterval(heartbeat)
         if (disposed) return
         dispatch({ type: 'close', code: event.code })
         timer = setTimeout(open, Math.min(10000, 1000 * 2 ** attempts.current++))
@@ -64,6 +87,7 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
     return () => {
       disposed = true
       clearTimeout(timer)
+      clearInterval(heartbeat)
       socket.current?.close()
       socket.current = null
     }
@@ -76,10 +100,12 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
   const api = useMemo<RoomApi>(
     () => ({
       sit: (seat) => send({ type: 'sit', seat }),
+      leaveSeat: () => send({ type: 'leaveSeat' }),
       start: () => send({ type: 'start' }),
       move: (from, to, promotion) => send({ type: 'action', action: { kind: 'move', from, to, promotion } }),
       resign: () => send({ type: 'action', action: { kind: 'resign' } }),
       rematch: () => send({ type: 'rematch' }),
+      claimWin: () => send({ type: 'claimWin' }),
       dismissError: () => dispatch({ type: 'dismiss-error' }),
     }),
     [send],

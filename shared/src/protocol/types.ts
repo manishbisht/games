@@ -27,7 +27,12 @@ export interface SeatInfo {
   player: PublicPlayerInfo
   connected: boolean
   wantsRematch: boolean
+  /** Server timestamp of when this seat-holder's last socket dropped; absent while connected. */
+  awaySince?: number
 }
+
+/** How long a seat must be abandoned mid-game before the opponent may claim the win. */
+export const CLAIM_WIN_AFTER_MS = 2 * 60 * 1000
 
 export interface RoomSnapshot {
   protocol: typeof PROTOCOL_VERSION
@@ -47,8 +52,7 @@ export interface YouInfo {
 }
 
 export type ChessAction =
-  | { kind: 'move'; from: string; to: string; promotion?: 'q' | 'r' | 'b' | 'n' }
-  | { kind: 'resign' }
+  { kind: 'move'; from: string; to: string; promotion?: 'q' | 'r' | 'b' | 'n' } | { kind: 'resign' }
 
 export interface JoinCredentials {
   name: string
@@ -60,9 +64,11 @@ export interface JoinCredentials {
 export type ClientMessage =
   | ({ type: 'join'; protocol: number } & JoinCredentials)
   | { type: 'sit'; seat: ChessSeat }
+  | { type: 'leaveSeat' }
   | { type: 'start' }
   | { type: 'action'; action: ChessAction }
   | { type: 'rematch' }
+  | { type: 'claimWin' }
 
 export type ErrorCode =
   | 'BAD_MESSAGE'
@@ -81,10 +87,10 @@ export type ErrorCode =
   | 'ILLEGAL_MOVE'
   | 'PROMOTION_REQUIRED'
   | 'NOT_FINISHED'
+  | 'CLAIM_REJECTED'
 
 export type ServerMessage =
-  | { type: 'room'; snapshot: RoomSnapshot; you: YouInfo }
-  | { type: 'error'; code: ErrorCode; message: string }
+  { type: 'room'; snapshot: RoomSnapshot; you: YouInfo } | { type: 'error'; code: ErrorCode; message: string }
 
 /** WebSocket close codes the server uses for terminal conditions. */
 export const CLOSE_CODES = { notFound: 4404, full: 4403, expired: 4408 } as const

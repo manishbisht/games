@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { createGame, playMove, resign } from '@games/shared/chess'
 import type { GameState } from '@games/shared/chess/types'
-import { CLOSE_CODES, PROTOCOL_VERSION } from '@games/shared/protocol'
+import { CLAIM_WIN_AFTER_MS, CLOSE_CODES, PROTOCOL_VERSION } from '@games/shared/protocol'
 import type {
   ChessAction,
   ChessSeat,
@@ -24,6 +24,8 @@ const SEATS: readonly ChessSeat[] = ['w', 'b']
 interface StoredSeat {
   player: PlayerInfo
   wantsRematch: boolean
+  /** When this seat-holder's last socket dropped; cleared on reconnect. */
+  disconnectedAt?: number
 }
 
 export interface RoomRecord {
@@ -43,6 +45,14 @@ interface Attachment {
 }
 
 export class RoomDO extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env)
+    // Heartbeat: the edge answers client pings itself, without waking (or
+    // billing) a hibernated object — and the pong traffic makes dead TCP
+    // connections surface as closes in seconds instead of minutes.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
+  }
+
   // `load()` returns this same mutable object on every call (after the first
   // fill from storage), not a fresh snapshot. That matters because
   // `handleJoin`'s `await resolveIdentity(...)` is the only genuine yield
@@ -59,8 +69,7 @@ export class RoomDO extends DurableObject<Env> {
   private cached: RoomRecord | null | undefined
 
   private async load(): Promise<RoomRecord | null> {
-    if (this.cached === undefined)
-      this.cached = (await this.ctx.storage.get<RoomRecord>('room')) ?? null
+    if (this.cached === undefined) this.cached = (await this.ctx.storage.get<RoomRecord>('room')) ?? null
     return this.cached
   }
 
@@ -153,7 +162,13 @@ export class RoomDO extends DurableObject<Env> {
       const stored = record.seats[seat]
       if (!stored) continue
       const { id, ...player } = stored.player
-      seats[seat] = { player, connected: connected.has(id), wantsRematch: stored.wantsRematch }
+      const isConnected = connected.has(id)
+      seats[seat] = {
+        player,
+        connected: isConnected,
+        wantsRematch: stored.wantsRematch,
+        ...(isConnected || !stored.disconnectedAt ? {} : { awaySince: stored.disconnectedAt }),
+      }
     }
     return {
       protocol: PROTOCOL_VERSION,
@@ -206,12 +221,16 @@ export class RoomDO extends DurableObject<Env> {
     switch (message.type) {
       case 'sit':
         return this.handleSit(ws, record, attachment.player, message.seat)
+      case 'leaveSeat':
+        return this.handleLeaveSeat(ws, record, attachment.player)
       case 'start':
         return this.handleStart(ws, record, attachment.player)
       case 'action':
         return this.handleAction(ws, record, attachment.player, message.action)
       case 'rematch':
         return this.handleRematch(ws, record, attachment.player)
+      case 'claimWin':
+        return this.handleClaimWin(ws, record, attachment.player)
       default:
         return this.fail(ws, 'BAD_MESSAGE', 'Unknown message type.')
     }
@@ -236,7 +255,7 @@ export class RoomDO extends DurableObject<Env> {
     }
     ws.serializeAttachment({ player } satisfies Attachment)
     if (seat) {
-      record.seats[seat] = { ...record.seats[seat]!, player }
+      record.seats[seat] = { ...record.seats[seat]!, player, disconnectedAt: undefined }
       await this.save(record)
     }
     this.broadcast(record)
@@ -249,8 +268,7 @@ export class RoomDO extends DurableObject<Env> {
     seat: ChessSeat,
   ): Promise<void> {
     if (!SEATS.includes(seat)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown seat.')
-    if (record.status !== 'open')
-      return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
+    if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
     const occupant = record.seats[seat]
     if (occupant && occupant.player.id !== player.id)
       return this.fail(ws, 'SEAT_TAKEN', 'That seat is taken.')
@@ -262,9 +280,19 @@ export class RoomDO extends DurableObject<Env> {
     this.broadcast(record)
   }
 
-  private async handleStart(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
+  private async handleLeaveSeat(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
     if (record.status !== 'open')
-      return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
+      return this.fail(ws, 'ALREADY_STARTED', 'Seats are locked once the game starts — resign instead.')
+    const seat = this.seatOf(record, player.id)
+    if (!seat) return this.fail(ws, 'NOT_SEATED', 'You are not seated.')
+    delete record.seats[seat]
+    await this.save(record)
+    this.pushLobby(record)
+    this.broadcast(record)
+  }
+
+  private async handleStart(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
+    if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
     if (player.id !== record.hostId)
       return this.fail(ws, 'NOT_HOST', 'Only the room creator can start the game.')
     if (!record.seats.w || !record.seats.b)
@@ -286,8 +314,7 @@ export class RoomDO extends DurableObject<Env> {
     if (!seat) return this.fail(ws, 'NOT_SEATED', 'Take a seat to play.')
     if (record.status !== 'playing' || !record.gameState)
       return this.fail(ws, 'NOT_PLAYING', 'The game is not in progress.')
-    if (!action || typeof action !== 'object')
-      return this.fail(ws, 'BAD_MESSAGE', 'Malformed action.')
+    if (!action || typeof action !== 'object') return this.fail(ws, 'BAD_MESSAGE', 'Malformed action.')
 
     if (action.kind === 'resign') {
       record.gameState = resign(record.gameState, Date.now(), seat)
@@ -324,8 +351,7 @@ export class RoomDO extends DurableObject<Env> {
   private async handleRematch(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
     const seat = this.seatOf(record, player.id)
     if (!seat) return this.fail(ws, 'NOT_SEATED', 'Take a seat to play.')
-    if (record.status !== 'finished')
-      return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
+    if (record.status !== 'finished') return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
     record.seats[seat] = { ...record.seats[seat]!, wantsRematch: true }
     if (record.seats.w?.wantsRematch && record.seats.b?.wantsRematch) {
       const { w, b } = record.seats
@@ -340,21 +366,56 @@ export class RoomDO extends DurableObject<Env> {
     this.broadcast(record)
   }
 
-  async webSocketClose(): Promise<void> {
+  private async handleClaimWin(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
+    const seat = this.seatOf(record, player.id)
+    if (!seat) return this.fail(ws, 'NOT_SEATED', 'Take a seat to play.')
+    if (record.status !== 'playing' || !record.gameState)
+      return this.fail(ws, 'NOT_PLAYING', 'The game is not in progress.')
+    const opponentSeat: ChessSeat = seat === 'w' ? 'b' : 'w'
+    const opponent = record.seats[opponentSeat]
+    if (!opponent) return this.fail(ws, 'CLAIM_REJECTED', 'There is no opponent to claim against.')
+    if (this.connectedIds().has(opponent.player.id) || !opponent.disconnectedAt)
+      return this.fail(ws, 'CLAIM_REJECTED', 'Your opponent is still here.')
+    const awayFor = Date.now() - opponent.disconnectedAt
+    if (awayFor < CLAIM_WIN_AFTER_MS) {
+      const wait = Math.ceil((CLAIM_WIN_AFTER_MS - awayFor) / 1000)
+      return this.fail(ws, 'CLAIM_REJECTED', `Hold on — you can claim the win in ${wait}s.`)
+    }
+    record.gameState = resign(record.gameState, Date.now(), opponentSeat)
+    record.status = 'finished'
+    await this.save(record)
+    this.broadcast(record)
+  }
+
+  /** A socket went away: stamp any seat that just lost its last connection, then tell everyone. */
+  private async handleDeparture(): Promise<void> {
     const record = await this.load()
-    if (record) this.broadcast(record)
+    if (!record) return
+    const connected = this.connectedIds()
+    let changed = false
+    for (const seat of SEATS) {
+      const stored = record.seats[seat]
+      if (stored && !connected.has(stored.player.id) && !stored.disconnectedAt) {
+        stored.disconnectedAt = Date.now()
+        changed = true
+      }
+    }
+    if (changed) await this.save(record)
+    this.broadcast(record)
+  }
+
+  async webSocketClose(): Promise<void> {
+    await this.handleDeparture()
   }
 
   async webSocketError(): Promise<void> {
-    const record = await this.load()
-    if (record) this.broadcast(record)
+    await this.handleDeparture()
   }
 
   async alarm(): Promise<void> {
     for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_CODES.expired, 'ROOM_EXPIRED')
     const record = await this.load()
-    if (record?.visibility === 'public')
-      await this.env.LOBBY.getByName('global').remove(record.code)
+    if (record?.visibility === 'public') await this.env.LOBBY.getByName('global').remove(record.code)
     this.cached = null
     await this.ctx.storage.deleteAll()
     await this.ctx.storage.deleteAlarm()

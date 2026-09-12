@@ -1,16 +1,19 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
-import type { ChessSeat, SeatInfo } from '@games/shared/protocol'
+import type { ChessSeat, RoomSnapshot, SeatInfo } from '@games/shared/protocol'
 import type { ReactNode } from 'react'
 import { useIdentity } from '../../online/identity'
 import { useRoom } from '../../online/useRoom'
+import { presenceEvents } from '../../online/roomState'
 import ChessGame from './ChessGame'
 import type { OnlineChessSession } from './online/session'
 import './ChessGame.css'
 
 const other = (seat: ChessSeat): ChessSeat => (seat === 'w' ? 'b' : 'w')
-const player = (seat?: SeatInfo) => (seat ? { name: seat.player.name, connected: seat.connected } : undefined)
+const player = (seat?: SeatInfo) =>
+  seat ? { name: seat.player.name, connected: seat.connected, awaySince: seat.awaySince } : undefined
+const TOAST_MS = 4000
 
 export default function ChessRoomPage() {
   const { code: raw } = useParams()
@@ -62,6 +65,43 @@ function Room({ code }: { code: string }) {
   const { snapshot, you } = room
   const leave = () => navigate('/chess')
 
+  // Presence toasts: announce the other seats' disconnects/reconnects.
+  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([])
+  const toastId = useRef(0)
+  const prevSnapshot = useRef<RoomSnapshot | null>(null)
+  const mySeat = you?.seat ?? null
+  useEffect(() => {
+    const events = presenceEvents(prevSnapshot.current, snapshot)
+    prevSnapshot.current = snapshot
+    for (const event of events) {
+      if (event.seat === mySeat) continue
+      const id = ++toastId.current
+      const text = `${event.name} ${event.connected ? 'reconnected' : 'disconnected'}`
+      setToasts((current) => [...current, { id, text }])
+      setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), TOAST_MS)
+    }
+  }, [snapshot, mySeat])
+
+  const toastStack = (
+    <div className="ch-room-toasts">
+      {toasts.map((toast) => (
+        <div key={toast.id} className="ch-room-toast" role="status">
+          {toast.text}
+        </div>
+      ))}
+      {room.error && (
+        <button className="ch-room-toast" role="status" onClick={api.dismissError}>
+          {room.error.message}
+        </button>
+      )}
+      {room.phase === 'reconnecting' && (
+        <div className="ch-room-toast" role="status">
+          Reconnecting…
+        </div>
+      )}
+    </div>
+  )
+
   const session = useMemo<OnlineChessSession | null>(() => {
     if (!snapshot?.gameState || !you) return null
     const mySeat = you.seat
@@ -73,7 +113,7 @@ function Room({ code }: { code: string }) {
         mine: mySeat ? (snapshot.seats[mySeat]?.wantsRematch ?? false) : false,
         theirs: mySeat ? (snapshot.seats[other(mySeat)]?.wantsRematch ?? false) : false,
       },
-      send: { move: api.move, resign: api.resign, rematch: api.rematch },
+      send: { move: api.move, resign: api.resign, rematch: api.rematch, claimWin: api.claimWin },
       leave,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,16 +143,7 @@ function Room({ code }: { code: string }) {
     return (
       <>
         <ChessGame online={session} />
-        {room.error && (
-          <button className="ch-room-toast" role="status" onClick={api.dismissError}>
-            {room.error.message}
-          </button>
-        )}
-        {room.phase === 'reconnecting' && (
-          <div className="ch-room-toast" role="status">
-            Reconnecting…
-          </div>
-        )}
+        {toastStack}
       </>
     )
 
@@ -123,9 +154,9 @@ function Room({ code }: { code: string }) {
       <button
         className={`ch-room-seat ${mine ? 'ch-room-seat-mine' : ''}`}
         disabled={Boolean(occupant) && !mine}
-        onClick={() => api.sit(seat)}
+        onClick={() => (mine ? api.leaveSeat() : api.sit(seat))}
       >
-        <strong>{label}</strong>
+        <strong>{mine ? 'Leave seat' : label}</strong>
         <span>
           {occupant ? `${occupant.player.name}${occupant.connected ? '' : ' (away)'}` : 'Open seat'}
         </span>
@@ -158,12 +189,8 @@ function Room({ code }: { code: string }) {
       ) : (
         <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
       )}
-      {room.error && (
-        <p role="alert" onClick={api.dismissError}>
-          {room.error.message}
-        </p>
-      )}
       <Link to="/chess">Leave room</Link>
+      {toastStack}
     </main>
   )
 }
