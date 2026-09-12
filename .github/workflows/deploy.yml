@@ -69,6 +69,12 @@ jobs:
   deploy-api:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    # Mapped at job level so the deploy step can ask whether they exist: secrets
+    # are empty on forks and on repos that never configured Cloudflare, and the
+    # tests below should still run there.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -87,8 +93,6 @@ jobs:
         run: npm run test -w shared && npm run test -w backend && npm run typecheck -w backend
 
       - name: Deploy Worker
+        if: env.CLOUDFLARE_API_TOKEN != ''
         working-directory: backend
         run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

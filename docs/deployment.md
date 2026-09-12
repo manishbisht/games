@@ -15,6 +15,9 @@ skipping the Clerk section just means everyone plays as a guest.
    Worker URL, e.g. `https://games-api.<account>.workers.dev`.
 4. Repo variable `API_URL` — that Worker URL. The Pages build bakes it in as
    `VITE_API_URL`.
+5. Recommended before going live: add a Cloudflare Rate Limiting rule on
+   `POST /api/rooms` (e.g. 10 requests per minute per IP) — room creation is
+   unauthenticated, so it is the one endpoint worth capping.
 
 ## Clerk (optional sign-in)
 

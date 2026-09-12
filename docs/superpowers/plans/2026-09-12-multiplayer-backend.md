@@ -17,7 +17,7 @@
 - Node 24, npm workspaces. The lockfile lives at the repo root after Task 1 (`frontend/package-lock.json` is deleted).
 - The frontend MUST keep working with no env vars set: no `VITE_CLERK_PUBLISHABLE_KEY` → guest-only mode; no `VITE_API_URL` → default `http://127.0.0.1:8787`.
 - Every existing test keeps passing: `npm test -w frontend`, `npm test -w shared` (after Task 2), `npm run lint -w frontend`, `npm run build -w frontend`.
-- Backend vitest is pinned `~3.2.0` (peer requirement of `@cloudflare/vitest-pool-workers`); other workspaces stay on vitest 4.
+- Every workspace runs vitest 4.x: `@cloudflare/vitest-pool-workers` 0.22 accepts it in its peer range, so the backend needed no pin (an earlier draft of this plan assumed a `~3.2.0` pin — it turned out to be unnecessary).
 - Chess seats are chess.js colors `'w' | 'b'`. Player ids are namespaced strings: `clerk:<sub>` or `guest:<uuid>`.
 - Commit after every task with a conventional-commit message.
 
@@ -58,7 +58,7 @@ games/
    └─ tests/chess-online.spec.ts # NEW two-context e2e
 ```
 
-Spec deviations (deliberate, small): presence is carried by the `room` snapshot's per-seat `connected` flags instead of a separate `presence` message type — same information, one less message shape. WebSocket upgrades to unknown rooms are accepted, sent an error, and closed with code 4404 so the client can distinguish "room not found" from a network blip.
+Spec deviations (deliberate, small): presence is carried by the `room` snapshot's per-seat `connected` flags instead of a separate `presence` message type — same information, one less message shape. WebSocket upgrades to unknown rooms are accepted, sent an error, and closed with code 4404 so the client can distinguish "room not found" from a network blip. The spec's `leave` client message is intentionally not implemented: leaving a room means closing the socket, and the spec's own reconnect behaviour is that a seat is *retained* for its player, so a message that gave up a seat would contradict it (the "Leave room" button simply navigates away).
 
 ---
 
