@@ -1,8 +1,9 @@
 import { DurableObject } from 'cloudflare:workers'
-import { createGame } from '@games/shared/chess'
+import { createGame, playMove, resign } from '@games/shared/chess'
 import type { GameState } from '@games/shared/chess/types'
 import { CLOSE_CODES, PROTOCOL_VERSION } from '@games/shared/protocol'
 import type {
+  ChessAction,
   ChessSeat,
   ClientMessage,
   ErrorCode,
@@ -177,6 +178,10 @@ export class RoomDO extends DurableObject<Env> {
         return this.handleSit(ws, record, attachment.player, message.seat)
       case 'start':
         return this.handleStart(ws, record, attachment.player)
+      case 'action':
+        return this.handleAction(ws, record, attachment.player, message.action)
+      case 'rematch':
+        return this.handleRematch(ws, record, attachment.player)
       default:
         return this.fail(ws, 'BAD_MESSAGE', 'Unknown message type.')
     }
@@ -235,6 +240,70 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'NOT_READY', 'Both seats must be taken first.')
     record.status = 'playing'
     record.gameState = createGame({ mode: 'online', human: 'w', difficulty: 'medium', clock: 0 })
+    await this.save(record)
+    this.broadcast(record)
+  }
+
+  private async handleAction(
+    ws: WebSocket,
+    record: RoomRecord,
+    player: PlayerInfo,
+    action: ChessAction,
+  ): Promise<void> {
+    const seat = this.seatOf(record, player.id)
+    if (!seat) return this.fail(ws, 'NOT_SEATED', 'Take a seat to play.')
+    if (record.status !== 'playing' || !record.gameState)
+      return this.fail(ws, 'NOT_PLAYING', 'The game is not in progress.')
+    if (!action || typeof action !== 'object')
+      return this.fail(ws, 'BAD_MESSAGE', 'Malformed action.')
+
+    if (action.kind === 'resign') {
+      record.gameState = resign(record.gameState, Date.now(), seat)
+      record.status = 'finished'
+      await this.save(record)
+      this.broadcast(record)
+      return
+    }
+
+    if (action.kind === 'move') {
+      if (record.gameState.turn !== seat) return this.fail(ws, 'NOT_YOUR_TURN', 'It is not your turn.')
+      const { from, to, promotion } = action
+      if (
+        typeof from !== 'string' ||
+        typeof to !== 'string' ||
+        (promotion !== undefined && !['q', 'r', 'b', 'n'].includes(promotion))
+      )
+        return this.fail(ws, 'BAD_MESSAGE', 'Malformed move.')
+      const next = playMove(record.gameState, from, to, promotion)
+      if (next.history.length === record.gameState.history.length) {
+        if (next.promotion) return this.fail(ws, 'PROMOTION_REQUIRED', 'Choose a piece to promote to.')
+        return this.fail(ws, 'ILLEGAL_MOVE', 'That move is not legal.')
+      }
+      record.gameState = next
+      if (next.status !== 'playing') record.status = 'finished'
+      await this.save(record)
+      this.broadcast(record)
+      return
+    }
+
+    return this.fail(ws, 'BAD_MESSAGE', 'Unknown action.')
+  }
+
+  private async handleRematch(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
+    const seat = this.seatOf(record, player.id)
+    if (!seat) return this.fail(ws, 'NOT_SEATED', 'Take a seat to play.')
+    if (record.status !== 'finished')
+      return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
+    record.seats[seat] = { ...record.seats[seat]!, wantsRematch: true }
+    if (record.seats.w?.wantsRematch && record.seats.b?.wantsRematch) {
+      const { w, b } = record.seats
+      record.seats = {
+        w: { player: b.player, wantsRematch: false },
+        b: { player: w.player, wantsRematch: false },
+      }
+      record.gameState = createGame({ mode: 'online', human: 'w', difficulty: 'medium', clock: 0 })
+      record.status = 'playing'
+    }
     await this.save(record)
     this.broadcast(record)
   }
