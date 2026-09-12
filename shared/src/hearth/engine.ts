@@ -232,3 +232,20 @@ export function motionDuration(state: GameState, reducedMotion: boolean) {
     (state.motion?.captures.length ? 550 : state.motion?.to === HOME ? 650 : 220)
   )
 }
+
+/** `[full, reducedMotion]` milliseconds for the beats that resolve on a timer. */
+const PAUSES = {
+  rolling: [1100, 220],
+  pass: [1700, 600],
+  aiRoll: [750, 300],
+  aiChoose: [900, 350],
+} as const
+
+/**
+ * How long a beat that nobody has to act on is held. Shared with the online
+ * adapter so a server-paced table keeps exactly the rhythm the local one has —
+ * a server never takes the reduced pace, having no view of anyone's preference.
+ */
+export function phasePause(beat: keyof typeof PAUSES, reducedMotion: boolean): number {
+  return PAUSES[beat][reducedMotion ? 1 : 0]
+}

@@ -10,6 +10,7 @@
     "./hearth/types": "./src/hearth/types.ts",
     "./hearth/board": "./src/hearth/board.ts",
     "./hearth/ai": "./src/hearth/ai.ts",
+    "./hearth/online": "./src/hearth/online.ts",
     "./estate": "./src/estate/engine.ts",
     "./estate/types": "./src/estate/types.ts",
     "./estate/board": "./src/estate/board.ts",
