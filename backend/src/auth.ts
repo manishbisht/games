@@ -38,9 +38,7 @@ export async function resolveIdentity(
       const payload = await verify(cred.clerkToken, { secretKey: env.CLERK_SECRET_KEY })
       if (!payload.sub) return null
       const avatar =
-        typeof cred.avatar === 'string' && cred.avatar.startsWith(CLERK_AVATAR_HOST)
-          ? cred.avatar
-          : undefined
+        typeof cred.avatar === 'string' && cred.avatar.startsWith(CLERK_AVATAR_HOST) ? cred.avatar : undefined
       return { id: `clerk:${payload.sub}`, name, ...(avatar ? { avatar } : {}), isGuest: false }
     } catch {
       return null

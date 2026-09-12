@@ -38,7 +38,11 @@ describe('resolveIdentity', () => {
       ),
     ).toEqual({ id: 'clerk:user_123', name: 'Ann', avatar: 'https://img.clerk.com/abc', isGuest: false })
     expect(
-      await resolveIdentity({ name: 'Ann', clerkToken: 'jwt', avatar: 'https://evil.example/x' }, withEnv, verify),
+      await resolveIdentity(
+        { name: 'Ann', clerkToken: 'jwt', avatar: 'https://evil.example/x' },
+        withEnv,
+        verify,
+      ),
     ).toEqual({ id: 'clerk:user_123', name: 'Ann', isGuest: false })
   })
   it('rejects Clerk tokens when verification fails or no secret is configured', async () => {
@@ -48,7 +52,10 @@ describe('resolveIdentity', () => {
     const withEnv = { ...testEnv, CLERK_SECRET_KEY: 'sk_test' } as unknown as Env
     expect(await resolveIdentity({ name: 'Ann', clerkToken: 'jwt' }, withEnv, boom)).toBeNull()
     expect(
-      await resolveIdentity({ name: 'Ann', clerkToken: 'jwt' }, { ...testEnv, CLERK_SECRET_KEY: undefined } as unknown as Env),
+      await resolveIdentity({ name: 'Ann', clerkToken: 'jwt' }, {
+        ...testEnv,
+        CLERK_SECRET_KEY: undefined,
+      } as unknown as Env),
     ).toBeNull()
   })
 })

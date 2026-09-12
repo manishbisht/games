@@ -4,7 +4,11 @@ import type { ServerMessage } from '@games/shared/protocol'
 
 type RoomMessage = Extract<ServerMessage, { type: 'room' }>
 
-export async function createRoom(visibility: 'private' | 'public' = 'private', name = 'Host', guestId = crypto.randomUUID()) {
+export async function createRoom(
+  visibility: 'private' | 'public' = 'private',
+  name = 'Host',
+  guestId = crypto.randomUUID(),
+) {
   const res = await SELF.fetch('https://api.test/api/rooms', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
