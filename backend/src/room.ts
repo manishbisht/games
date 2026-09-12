@@ -317,4 +317,11 @@ export class RoomDO extends DurableObject<Env> {
     const record = await this.load()
     if (record) this.broadcast(record)
   }
+
+  async alarm(): Promise<void> {
+    for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_CODES.expired, 'ROOM_EXPIRED')
+    this.cached = null
+    await this.ctx.storage.deleteAll()
+    await this.ctx.storage.deleteAlarm()
+  }
 }
