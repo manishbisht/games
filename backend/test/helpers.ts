@@ -34,8 +34,12 @@ export async function connect(code: string): Promise<Client> {
   ws.accept()
   const messages: ServerMessage[] = []
   const closes: { code: number }[] = []
-  ws.addEventListener('message', (event) => messages.push(JSON.parse(event.data as string)))
-  ws.addEventListener('close', (event) => closes.push({ code: event.code }))
+  ws.addEventListener('message', (event) => {
+    messages.push(JSON.parse(event.data as string))
+  })
+  ws.addEventListener('close', (event) => {
+    closes.push({ code: event.code })
+  })
   const client: Client = {
     ws,
     messages,

@@ -40,6 +40,20 @@ describe('joining and seats', () => {
     expect(seated.snapshot.seats.w?.connected).toBe(true)
   })
 
+  it('lets a seated player switch seats before the game starts', async () => {
+    const { code, guestId } = await createRoom()
+    const host = await connect(code)
+    host.join('Ann', guestId)
+    host.send({ type: 'sit', seat: 'w' })
+    await host.waitRoom((m) => m.you.seat === 'w')
+
+    host.send({ type: 'sit', seat: 'b' })
+    const switched = await host.waitRoom((m) => m.you.seat === 'b')
+    expect(switched.you.seat).toBe('b')
+    expect(switched.snapshot.seats.b?.player.id).toBe(`guest:${guestId}`)
+    expect(switched.snapshot.seats.w).toBeUndefined()
+  })
+
   it('rejects sitting on a taken seat and non-host starts', async () => {
     const { code, guestId } = await createRoom()
     const host = await connect(code)
@@ -73,6 +87,32 @@ describe('joining and seats', () => {
     const playing = await guest.waitRoom((m) => m.snapshot.status === 'playing')
     expect(playing.snapshot.gameState?.turn).toBe('w')
     expect(playing.snapshot.gameState?.options.mode).toBe('online')
+    expect(playing.snapshot.gameState?.options.human).toBe('w')
+    expect(playing.snapshot.gameState?.options.difficulty).toBe('medium')
+    expect(playing.snapshot.gameState?.options.clock).toBe(0)
+  })
+
+  it('rejects sit and start once the game has already started', async () => {
+    const { code, guestId } = await createRoom()
+    const host = await connect(code)
+    host.join('Ann', guestId)
+    host.send({ type: 'sit', seat: 'w' })
+
+    const guest = await connect(code)
+    guest.join('Ben')
+    guest.send({ type: 'sit', seat: 'b' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.b))
+    host.send({ type: 'start' })
+    await host.waitRoom((m) => m.snapshot.status === 'playing')
+
+    const alreadyStartedCount = () =>
+      host.messages.filter((m) => m.type === 'error' && m.code === 'ALREADY_STARTED').length
+
+    host.send({ type: 'sit', seat: 'w' })
+    await vi.waitFor(() => expect(alreadyStartedCount()).toBe(1))
+
+    host.send({ type: 'start' })
+    await vi.waitFor(() => expect(alreadyStartedCount()).toBe(2))
   })
 
   it('turns away a third player and reclaims seats on reconnect', async () => {

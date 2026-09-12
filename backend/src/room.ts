@@ -42,6 +42,19 @@ interface Attachment {
 }
 
 export class RoomDO extends DurableObject<Env> {
+  // `load()` returns this same mutable object on every call (after the first
+  // fill from storage), not a fresh snapshot. That matters because
+  // `handleJoin`'s `await resolveIdentity(...)` is the only genuine yield
+  // point in this file's message handling — the Clerk path does real network
+  // I/O, so other messages (and other sockets' handlers) can run interleaved
+  // while it's pending. Every handler mutates and reads this one shared
+  // `cached` record, so a mutation made during that await (e.g. another
+  // `sit`) is still visible to the handler that resumes after it. If a future
+  // change makes `load()` return a copy (e.g. `structuredClone`) instead of
+  // this shared reference, handlers resuming after an await would read a
+  // stale snapshot and could clobber concurrent updates on `save()` — a
+  // lost-update bug. Keep `load()` returning the same object identity unless
+  // that concurrency story is reworked deliberately.
   private cached: RoomRecord | null | undefined
 
   private async load(): Promise<RoomRecord | null> {
