@@ -223,6 +223,9 @@
   padding: 2px 4px;
   border-radius: 3px;
 }
+.ch-small-tag.ch-tag-away {
+  opacity: 0.6;
+}
 .ch-clock {
   margin-left: auto;
   display: flex;

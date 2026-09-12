@@ -54,6 +54,7 @@ import type {
   PromotionPiece,
   Square,
 } from '@games/shared/chess/types'
+import type { OnlineChessSession } from './online/session'
 import './ChessGame.css'
 
 const STORAGE = 'gambit-game-v1',
@@ -113,11 +114,17 @@ function PlayerCard({
   game,
   active,
   menu,
+  label,
+  away,
+  you,
 }: {
   color: Color
   game: GameState
   active: boolean
   menu: boolean
+  label?: string
+  away?: boolean
+  you?: boolean
 }) {
   const computer = game.options.mode === 'ai' && game.options.human !== color
   const captures = game.captured[color]
@@ -128,9 +135,10 @@ function PlayerCard({
       </div>
       <div className="ch-player-details">
         <div>
-          <strong>{COLOR_NAMES[color]}</strong>
+          <strong>{label ?? COLOR_NAMES[color]}</strong>
           {computer && <span className="ch-small-tag">COMPUTER</span>}
-          {!computer && game.options.mode === 'ai' && <span className="ch-small-tag">YOU</span>}
+          {((!computer && game.options.mode === 'ai') || you) && <span className="ch-small-tag">YOU</span>}
+          {away && <span className="ch-small-tag ch-tag-away">AWAY</span>}
         </div>
         <span>
           {menu
@@ -191,24 +199,56 @@ function Toggle({
   )
 }
 
-export default function ChessGame() {
-  const [boot] = useState(storedGame)
-  const [game, setGame] = useState<GameState>(() => boot || createGame())
-  const [menu, setMenu] = useState(!boot),
+export default function ChessGame({ online }: { online?: OnlineChessSession }) {
+  const [boot] = useState(() => (online ? null : storedGame()))
+  const [localGame, setGame] = useState<GameState>(() => boot || createGame())
+  const game = online ? online.state : localGame
+  const [menu, setMenu] = useState(online ? false : !boot),
     [options, setOptions] = useState<GameOptions>(() => boot?.options || DEFAULT_OPTIONS)
   const [preferences, setPreferences] = useState(storedPreferences)
   const [dialog, setDialog] = useState<Dialog>(null),
     [selected, setSelected] = useState<Square | null>(null)
-  const [black, setBlack] = useState(() => boot?.options.mode === 'ai' && boot.options.human === 'b')
+  const [onlinePromotion, setOnlinePromotion] = useState<{
+    from: Square
+    to: Square
+    color: Color
+  } | null>(null)
+  const promotion = online ? onlinePromotion : game.promotion
+  const [black, setBlack] = useState(() =>
+    online ? online.myColor === 'b' : boot?.options.mode === 'ai' && boot.options.human === 'b',
+  )
   const [moving, setMoving] = useState(false),
     [resultDismissed, setResultDismissed] = useState(false),
     [notice, setNotice] = useState('')
   const board = useRef<BoardControls>(null),
     motionTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
     historyEnd = useRef<HTMLDivElement>(null)
+  // Online, the seat orients the board; each fresh game drops a stale picker and shows its own result.
+  const [seat, setSeat] = useState(online?.myColor ?? null),
+    [seatStatus, setSeatStatus] = useState(game.status)
+  if (online && seat !== online.myColor) {
+    setSeat(online.myColor)
+    setBlack(online.myColor === 'b')
+  }
+  if (online && seatStatus !== game.status) {
+    setSeatStatus(game.status)
+    setOnlinePromotion(null)
+    if (game.status === 'playing') setResultDismissed(false)
+  }
   const aiTurn =
-    !menu && game.status === 'playing' && game.options.mode === 'ai' && game.turn !== game.options.human
-  const enabled = !menu && game.status === 'playing' && !moving && !aiTurn && !game.promotion && !dialog
+    !online &&
+    !menu &&
+    game.status === 'playing' &&
+    game.options.mode === 'ai' &&
+    game.turn !== game.options.human
+  const enabled =
+    !menu &&
+    game.status === 'playing' &&
+    !moving &&
+    !aiTurn &&
+    !promotion &&
+    !dialog &&
+    (!online || (online.myColor !== null && game.turn === online.myColor))
   const moves = useMemo(() => (selected ? legalMoves(game, selected) : []), [game, selected])
   const destinations = useMemo(
     () => Array.from(new Map(moves.map((m) => [m.to, { to: m.to, capture: !!m.captured }])).values()),
@@ -221,7 +261,7 @@ export default function ChessGame() {
   const isOver = game.status !== 'playing'
 
   useEffect(() => {
-    if (menu || isOver || !game.options.clock) return
+    if (online || menu || isOver || !game.options.clock) return
     const interval = setInterval(() => setGame((g) => tickClock(g)), 200)
     const catchUp = () => setGame((g) => tickClock(g))
     document.addEventListener('visibilitychange', catchUp)
@@ -229,15 +269,16 @@ export default function ChessGame() {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', catchUp)
     }
-  }, [menu, isOver, game.options.clock])
+  }, [online, menu, isOver, game.options.clock])
   useEffect(() => {
+    if (online) return
     try {
       if (menu) localStorage.removeItem(STORAGE)
       else localStorage.setItem(STORAGE, JSON.stringify(game))
     } catch {
       /* Storage may be unavailable in private mode. */
     }
-  }, [game, menu])
+  }, [online, game, menu])
   useEffect(() => {
     try {
       localStorage.setItem(PREFS, JSON.stringify(preferences))
@@ -285,7 +326,7 @@ export default function ChessGame() {
   )
 
   useEffect(() => {
-    if (!aiTurn || moving || game.promotion) return
+    if (online || !aiTurn || moving || game.promotion) return
     let stopped = false,
       worker: Worker | undefined,
       watchdog: ReturnType<typeof setTimeout> | undefined
@@ -360,6 +401,15 @@ export default function ChessGame() {
       return
     }
     if (selected && moves.some((m) => m.to === square)) {
+      if (online) {
+        // The board waits for the authoritative snapshot instead of moving optimistically.
+        if (moves.some((m) => m.to === square && m.promotion))
+          setOnlinePromotion({ from: selected, to: square, color: game.turn })
+        else online.send.move(selected, square)
+        setSelected(null)
+        setNotice('')
+        return
+      }
       commit(playMove(game, selected, square), game)
       return
     }
@@ -407,6 +457,12 @@ export default function ChessGame() {
     setNotice('')
     if (motionTimer.current) clearTimeout(motionTimer.current)
   }
+  // Online, the seated player resigns; in an AI game the human does, even while the computer thinks.
+  const resigningColor = online
+    ? (online.myColor ?? game.turn)
+    : game.options.mode === 'ai'
+      ? game.options.human
+      : game.turn
   const turnStatus = menu
     ? 'The table is yours.'
     : isOver
@@ -430,6 +486,13 @@ export default function ChessGame() {
   const pairs = Array.from({ length: Math.ceil(game.history.length / 2) }, (_, i) =>
     game.history.slice(i * 2, i * 2 + 2),
   )
+  const far: Color = black ? 'w' : 'b',
+    near: Color = black ? 'b' : 'w'
+  const seatProps = (color: Color) => ({
+    label: online?.players[color]?.name,
+    away: online?.players[color]?.connected === false,
+    you: online?.myColor === color,
+  })
 
   return (
     <div
@@ -480,14 +543,15 @@ export default function ChessGame() {
         <div className="ch-layout">
           <section className="ch-board-column" aria-label="Chess table">
             <PlayerCard
-              color={black ? 'w' : 'b'}
+              color={far}
               game={
                 menu
                   ? { ...game, options, clocks: { w: options.clock * 60000, b: options.clock * 60000 } }
                   : game
               }
-              active={game.turn === (black ? 'w' : 'b')}
+              active={game.turn === far}
               menu={menu}
+              {...seatProps(far)}
             />
             <div className="ch-table">
               <div className="ch-table-caption">
@@ -528,14 +592,15 @@ export default function ChessGame() {
               </div>
             </div>
             <PlayerCard
-              color={black ? 'b' : 'w'}
+              color={near}
               game={
                 menu
                   ? { ...game, options, clocks: { w: options.clock * 60000, b: options.clock * 60000 } }
                   : game
               }
-              active={game.turn === (black ? 'b' : 'w')}
+              active={game.turn === near}
               menu={menu}
+              {...seatProps(near)}
             />
             <div className="ch-board-footnote">
               <span>
@@ -708,44 +773,56 @@ export default function ChessGame() {
                   )}
                 </div>
                 <div className="ch-game-actions">
-                  <button
-                    disabled={!game.history.length || moving || game.options.mode !== 'local'}
-                    onClick={undo}
-                    title={
-                      game.options.mode === 'ai'
-                        ? 'Undo is available in local games'
-                        : 'Take back the last move'
-                    }
-                  >
-                    <Undo2 size={16} />
-                    Undo
-                  </button>
+                  {!online && (
+                    <button
+                      disabled={!game.history.length || moving || game.options.mode !== 'local'}
+                      onClick={undo}
+                      title={
+                        game.options.mode === 'ai'
+                          ? 'Undo is available in local games'
+                          : 'Take back the last move'
+                      }
+                    >
+                      <Undo2 size={16} />
+                      Undo
+                    </button>
+                  )}
                   <button disabled={isOver} onClick={() => setDialog('resign')}>
                     <Flag size={15} />
                     Resign
                   </button>
-                  <button
-                    disabled={isOver || game.options.mode !== 'local'}
-                    onClick={() => setDialog('draw')}
-                    title={
-                      game.options.mode === 'ai'
-                        ? 'Draw agreement is available in local games'
-                        : 'Offer a draw'
-                    }
-                  >
-                    <Handshake size={16} />
-                    Draw
-                  </button>
+                  {!online && (
+                    <button
+                      disabled={isOver || game.options.mode !== 'local'}
+                      onClick={() => setDialog('draw')}
+                      title={
+                        game.options.mode === 'ai'
+                          ? 'Draw agreement is available in local games'
+                          : 'Offer a draw'
+                      }
+                    >
+                      <Handshake size={16} />
+                      Draw
+                    </button>
+                  )}
                 </div>
-                <button
-                  className="ch-primary"
-                  onClick={() => (game.history.length && !isOver ? setDialog('menu') : returnToMenu())}
-                >
-                  <Plus size={17} /> New game <ArrowUpRight size={17} />
-                </button>
-                <button className="ch-restart" onClick={() => setDialog('restart')}>
-                  <RotateCcw size={13} /> Restart this game
-                </button>
+                {online ? (
+                  <button className="ch-primary" onClick={online.leave}>
+                    <ArrowLeft size={17} /> Leave room
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="ch-primary"
+                      onClick={() => (game.history.length && !isOver ? setDialog('menu') : returnToMenu())}
+                    >
+                      <Plus size={17} /> New game <ArrowUpRight size={17} />
+                    </button>
+                    <button className="ch-restart" onClick={() => setDialog('restart')}>
+                      <RotateCcw size={13} /> Restart this game
+                    </button>
+                  </>
+                )}
                 {notice && (
                   <p className="ch-notice" role="status">
                     {notice}
@@ -946,7 +1023,7 @@ export default function ChessGame() {
           </h2>
           <p className="ch-dialog-copy">
             {dialog === 'resign'
-              ? `${COLOR_NAMES[game.options.mode === 'ai' ? game.options.human : game.turn]} will resign and ${COLOR_NAMES[opposite(game.options.mode === 'ai' ? game.options.human : game.turn)]} will win.`
+              ? `${COLOR_NAMES[resigningColor]} will resign and ${COLOR_NAMES[opposite(resigningColor)]} will win.`
               : dialog === 'draw'
                 ? `${COLOR_NAMES[opposite(game.turn)]}, do you accept the draw? Both players must agree.`
                 : dialog === 'restart'
@@ -961,13 +1038,8 @@ export default function ChessGame() {
               className="ch-primary"
               onClick={() => {
                 if (dialog === 'resign') {
-                  // In an AI game the human resigns, including while the computer is thinking.
-                  const next = resign(
-                    game,
-                    Date.now(),
-                    game.options.mode === 'ai' ? game.options.human : game.turn,
-                  )
-                  commit(next, game)
+                  if (online) online.send.resign()
+                  else commit(resign(game, Date.now(), resigningColor), game)
                   setDialog(null)
                 } else if (dialog === 'draw') {
                   commit(agreeDraw(game), game)
@@ -988,7 +1060,7 @@ export default function ChessGame() {
         </Modal>
       )}
 
-      {!menu && game.promotion && !isOver && (
+      {!menu && promotion && !isOver && (
         <Modal title="Promote pawn" locked onClose={() => {}}>
           <p className="ch-eyebrow">A WELL-EARNED PROMOTION</p>
           <h2>A new possibility.</h2>
@@ -998,9 +1070,14 @@ export default function ChessGame() {
             Choose the piece it will become.
           </p>
           <PromotionGallery
-            color={game.promotion.color}
+            color={promotion.color}
             theme={preferences.theme}
-            onChoose={(p) => commit(promote(game, p), game)}
+            onChoose={(p) => {
+              if (online && onlinePromotion) {
+                online.send.move(onlinePromotion.from, onlinePromotion.to, p)
+                setOnlinePromotion(null)
+              } else commit(promote(game, p), game)
+            }}
           />
           {!!game.options.clock && <p className="ch-setup-note">Your clock is still running.</p>}
         </Modal>
@@ -1033,12 +1110,30 @@ export default function ChessGame() {
               {game.options.mode === 'local' ? 'A friendly match' : `${game.options.difficulty} opponent`}
             </span>
           </div>
-          <button className="ch-primary" onClick={restart}>
-            Play again <ArrowRight size={17} />
-          </button>
-          <button className="ch-result-menu" onClick={returnToMenu}>
-            Return to menu
-          </button>
+          {online ? (
+            <>
+              <button className="ch-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>
+                {online.rematch.mine
+                  ? 'Waiting for opponent…'
+                  : online.rematch.theirs
+                    ? 'Accept rematch'
+                    : 'Rematch'}
+                <RotateCcw size={16} />
+              </button>
+              <button className="ch-result-menu" onClick={online.leave}>
+                Leave room
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="ch-primary" onClick={restart}>
+                Play again <ArrowRight size={17} />
+              </button>
+              <button className="ch-result-menu" onClick={returnToMenu}>
+                Return to menu
+              </button>
+            </>
+          )}
         </Modal>
       )}
     </div>
