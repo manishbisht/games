@@ -7,6 +7,7 @@ A React frontend for original 3D tabletop games, using React, TypeScript, Three.
 - `/` or `/#/`: browse the homepage and choose a game.
 - `/#/hearth-and-home`: play **Hearth & Home**, the Ludo-inspired game.
 - `/#/estate`: play **Estate**, the property game.
+- `/#/chess`: play **Gambit**, the 3D chess game. `/#/Gambit` redirects here.
 - `/#/prism`: play **Prism**, the 3D color-matching card game. `/#/uno` and `/#/Prism` redirect here.
 - `/#/Ludo` and `/#/Hearth` redirect to `/#/hearth-and-home`; `/#/Monopoly` redirects to `/#/estate`, so existing bookmarks keep working.
 - Unknown hash routes return to the homepage. Every game includes an **All games** link back to the collection.
@@ -32,6 +33,18 @@ Drag to orbit, scroll/pinch or use the camera buttons to zoom. Pause and rule/se
 `src/games/hearth/game/engine.ts` is the immutable source of truth for rules, legal moves, turns, events and victory. `board.ts` defines routes and coordinates; `ai.ts` scores only legal moves with caller-supplied randomness. React schedules actions; `scene/` renders state and animates recorded movement paths. No game rule depends on WebGL, and the numbered controls remain usable if WebGL is unavailable.
 
 This milestone supports local play and AI. Hearth & Home sessions are held in memory; refreshing starts a new setup. Online rooms and saved Hearth sessions are not implemented.
+
+## Gambit / Chess
+
+Open `http://localhost:5173/#/chess`. Choose **Play local** for two people on the same device or **Play vs AI** for a computer opponent. AI offers either color and Easy, Medium, and Hard levels. The clock is optional; enabling it gives each side ten minutes.
+
+Click or tap a piece and then a marked destination. Filled dots indicate ordinary moves and rings indicate captures. Drag to orbit, scroll or pinch to zoom, and use the board toolbar to flip, reset, or view from above. Focus the board with Tab, use arrow keys to explore from e2, and press Enter or Space to select and move; Escape deselects. A functional 2D board is available if WebGL fails.
+
+All legal movement, check restrictions, castling, en passant, promotion, checkmate, stalemate, repetition, the fifty-move rule, and insufficient material use [chess.js](https://jhlywa.github.io/chess.js/). This casual version automatically ends games on threefold repetition or fifty moves rather than requiring a claim. Local players can undo a move or agree to a draw; resignation and restart require confirmation. Promotion offers four original 3D piece previews. Clocks continue through dialogs, promotion, background tabs, and reloads. Undo restores the complete prior position, capture list, special-move rights, and clocks.
+
+The immutable state adapter is `src/games/chess/game/engine.ts`. It replays the full move line to preserve repetition counts; FEN alone is insufficient. State and preferences save locally under `gambit-game-v1` and `gambit-preferences-v1`, with validation on restore. React coordinates interaction, while `scene/` only renders positions, indicators, and animations. All board and piece geometry is original and procedural. The worker AI uses bounded iterative alpha-beta search and positional/material evaluation; Hard is the strongest included level, not a tournament-strength engine. It can be replaced independently of the rules and rendering.
+
+Walnut and marble sets, synthesized move sounds, higher contrast, and reduced motion are available in Settings. Online multiplayer and additional clock formats are outside this milestone. No account or backend is required.
 
 ## Monopoly / Estate
 

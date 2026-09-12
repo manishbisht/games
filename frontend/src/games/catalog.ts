@@ -28,6 +28,20 @@ export const estateGame = {
   Component: lazy(() => import('./monopoly/MonopolyGame')),
 }
 
+export const chessGame = {
+  id: 'chess',
+  name: 'Gambit',
+  path: '/chess',
+  aliases: ['/Gambit'],
+  category: 'A quiet moment. A world of possibility.',
+  description:
+    'A timeless game in a new dimension. Settle in at a beautiful 3D chessboard, challenge a friend or the computer, and find your next great move.',
+  tags: ['Chess & strategy', 'Local & three AI levels'],
+  icon: 'chess.svg',
+  themeColor: '#f8f7f2',
+  Component: lazy(() => import('./chess/ChessGame')),
+}
+
 export const prismGame = {
   id: 'prism',
   name: 'Prism',
@@ -42,4 +56,4 @@ export const prismGame = {
   Component: lazy(() => import('./prism/PrismGame')),
 }
 
-export const games = [hearthGame, estateGame, prismGame]
+export const games = [hearthGame, estateGame, chessGame, prismGame]

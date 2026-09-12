@@ -2,6 +2,7 @@ import { ArrowRight, Bot, Dices, Heart, House, Monitor, Users } from 'lucide-rea
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
 import './HomePage.css'
+import './ChessPreview.css'
 import './PrismPreview.css'
 
 function BoardPreview({ game }: { game: string }) {
@@ -12,6 +13,14 @@ function BoardPreview({ game }: { game: string }) {
         {game === 'prism' ? (
           <div className="collection-prism-hand">
             {['7', '⇄', '✦', '+2'].map((symbol, i) => <div key={symbol} className={`collection-prism-card collection-prism-card-${i}`}><small>{symbol}</small><strong>{symbol}</strong><span>PRISM</span></div>)}
+          </div>
+        ) : game === 'chess' ? (
+          <div className="collection-chess-grid">
+            {Array.from({ length: 64 }, (_, i) => (
+              <span key={i} className={(i + Math.floor(i / 8)) % 2 ? 'dark' : ''}>
+                {i < 8 ? '♜♞♝♛♚♝♞♜'[i] : i < 16 ? '♟' : i >= 56 ? '♖♘♗♕♔♗♘♖'[i - 56] : i >= 48 ? '♙' : ''}
+              </span>
+            ))}
           </div>
         ) : game === 'hearth' ? (
           <>
@@ -42,7 +51,11 @@ function BoardPreview({ game }: { game: string }) {
         )}
       </div>
       <div className="collection-preview-dice">
-        {game === 'prism' ? <span className="collection-prism-spark">✦</span> : <Dices size={40} strokeWidth={1.4} />}
+        {game === 'prism' ? <span className="collection-prism-spark">✦</span> : game === 'chess' ? (
+          <span className="collection-chess-knight">♞</span>
+        ) : (
+          <Dices size={40} strokeWidth={1.4} />
+        )}
       </div>
       <span className="collection-preview-note">A fresh take on a timeless game</span>
     </div>
@@ -116,7 +129,8 @@ export default function HomePage() {
                     <div className="collection-player-info">
                       <Users size={17} />
                       <span>
-                        2–4 players<small>Local friends or AI</small>
+                        {game.id === 'chess' ? '1–2 players' : '2–4 players'}
+                        <small>Local friends or AI</small>
                       </span>
                     </div>
                     <Link to={game.path} className="collection-play" aria-label={`Play ${game.name}`}>

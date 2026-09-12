@@ -22,7 +22,7 @@
 }
 body {
   margin: 0;
-  min-width: 340px;
+  min-width: 320px;
 }
 button,
 input,
@@ -34,6 +34,7 @@ a,
 input,
 select {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 button {
   cursor: pointer;
@@ -118,4 +119,27 @@ select {
 .game-collection-link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.collection-page,
+.hh-app,
+.app-shell {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+@media (max-width: 1000px), (pointer: coarse) {
+  .game-collection-link {
+    min-height: 44px;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  /* Keep editable controls legible without triggering phone input zoom. */
+  .hh-app input:not([type='checkbox']),
+  .hh-app select,
+  .hh-dialog input:not([type='checkbox']),
+  .hh-dialog select,
+  .dialog input:not([type='checkbox']),
+  .dialog select {
+    min-height: 44px;
+    font-size: 16px;
+  }
 }

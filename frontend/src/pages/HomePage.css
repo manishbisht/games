@@ -509,4 +509,26 @@
     align-items: center;
     gap: 12px;
   }
+  .collection-play {
+    min-height: 48px;
+  }
+}
+@media (max-width: 380px) {
+  .collection-header,
+  .collection-main {
+    padding-inline: 16px;
+  }
+  .collection-header {
+    gap: 12px;
+  }
+  .collection-card-content {
+    padding-inline: 18px;
+  }
+  .collection-card-footer {
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+  .collection-play {
+    width: 100%;
+  }
 }

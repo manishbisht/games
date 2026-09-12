@@ -1532,7 +1532,7 @@
     display: none;
   }
 }
-@media (max-width: 700px) {
+@media (max-width: 1000px) {
   .hh-header {
     padding: 0 20px;
     height: 76px;
@@ -1590,16 +1590,16 @@
     display: none;
   }
   .hh-game-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     border-radius: 13px;
     overflow: hidden;
   }
   .hh-board-section {
-    height: 460px;
+    height: clamp(360px, calc(75vw + 100px), 540px);
     min-height: 0;
   }
   .hh-canvas {
-    inset: 30px -2px 43px;
+    inset: 40px 0 98px;
   }
   .hh-board-top {
     top: 15px;
@@ -1620,25 +1620,25 @@
     letter-spacing: 0.8px;
   }
   .hh-camera-toolbar {
-    bottom: 55px;
+    bottom: 52px;
     left: 13px;
     padding: 2px;
   }
   .hh-camera-toolbar button {
-    width: 29px;
-    height: 29px;
+    width: 44px;
+    height: 44px;
   }
   .hh-board-status {
-    min-height: 43px;
-    font-size: 9px;
-    padding: 10px 13px;
+    min-height: 48px;
+    font-size: 11px;
+    padding: 8px 13px;
   }
   .hh-sidebar {
     border-left: 0;
     border-top: 1px solid #dfe2d6;
   }
   .hh-setup {
-    padding: 26px;
+    padding: 24px 20px;
   }
   .hh-setup h2 {
     font-size: 34px;
@@ -1668,18 +1668,19 @@
   .hh-player-count button {
     font-size: 11px;
     padding: 9px 0;
+    min-height: 44px;
   }
   .hh-setup-player {
     min-height: 47px;
     padding: 7px 11px;
-    gap: 12px;
+    gap: 8px;
   }
   .hh-setup-player input {
     font-size: 12px;
   }
   .hh-setup-player select {
-    font-size: 10px;
-    width: 110px;
+    width: 140px;
+    flex-shrink: 0;
   }
   .hh-primary {
     min-height: 48px;
@@ -1691,6 +1692,7 @@
   .hh-below-table {
     align-items: flex-start;
     padding: 17px 2px 21px;
+    flex-wrap: wrap;
   }
   .hh-legend {
     gap: 16px;
@@ -1711,9 +1713,9 @@
     font-size: 8px;
   }
   .hh-turn-panel {
-    padding: 25px 26px 20px;
+    padding: 18px 20px;
     display: grid;
-    grid-template-columns: 1fr 92px;
+    grid-template-columns: minmax(0, 1fr) 76px;
     position: relative;
     column-gap: 5px;
   }
@@ -1721,7 +1723,7 @@
     grid-column: 1/-1;
   }
   .hh-turn-panel h2 {
-    font-size: 32px;
+    font-size: 28px;
     grid-column: 1;
     margin-top: 15px;
   }
@@ -1769,7 +1771,7 @@
   }
   .hh-player-list {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 9px;
   }
   .hh-player-card {
@@ -1822,20 +1824,22 @@
     min-height: 0;
   }
   .hh-custom-rules label {
-    min-height: 37px;
+    min-height: 44px;
     font-size: 11px;
   }
   .hh-game-actions {
     gap: 12px;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
   .hh-game-actions button {
-    font-size: 8px;
+    font-size: 11px;
     white-space: nowrap;
   }
   .hh-dialog {
-    padding: 30px 25px;
+    padding: 30px 20px 24px;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
   }
   .hh-rule p {
     font-size: 11px;
@@ -1843,23 +1847,65 @@
   .hh-dialog .hh-setup {
     padding: 8px 0 0;
   }
+  .hh-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px 88px;
+    gap: 4px;
+    padding-inline: 16px;
+  }
+  .hh-nav {
+    margin-left: 0;
+    align-self: center;
+  }
+  .hh-header .hh-nav button,
+  .hh-header-actions .hh-icon-button,
+  .hh-dialog-close {
+    width: 44px;
+    height: 44px;
+  }
+  .hh-header-actions {
+    gap: 0;
+  }
+  .hh-mode-options button,
+  .hh-legend > button,
+  .hh-game-actions > button,
+  .hh-game-picker button,
+  .hh-game-picker a {
+    min-height: 44px;
+  }
+  .hh-settings-list > label {
+    min-height: 44px;
+  }
+  .hh-dialog h2 {
+    padding-right: 22px;
+    overflow-wrap: anywhere;
+  }
+  .hh-piece-choices > div {
+    flex-wrap: wrap;
+  }
+  .hh-footer {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 }
 @media (max-width: 400px) {
   .hh-header {
-    padding: 0 16px;
-    gap: 8px;
+    padding-inline: 12px;
   }
   .hh-brand > span {
-    font-size: 22px;
+    font-size: 20px;
   }
   .hh-brand small {
     font-size: 5.8px;
+    letter-spacing: 1px;
   }
-  .hh-header-actions .hh-icon-button {
-    width: 28px;
+  .hh-brand {
+    gap: 6px;
   }
-  .hh-nav button {
-    width: 26px;
+  .hh-brand svg {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
   }
   .hh-main {
     padding: 21px 13px 0;
@@ -1867,14 +1913,23 @@
   .hh-page-heading h1 {
     font-size: 26px;
   }
-  .hh-board-section {
-    height: 395px;
-  }
   .hh-turn-count {
     display: none;
   }
   .hh-setup {
-    padding: 24px 20px;
+    padding: 24px 16px;
+  }
+  .hh-setup-player {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 0 8px;
+  }
+  .hh-setup-player select {
+    grid-column: 2;
+    width: 100%;
+    border-left: 0;
+    border-top: 1px solid #e7e7dc;
+    padding-left: 0;
   }
   .hh-players-section {
     padding: 20px;
@@ -1905,6 +1960,27 @@
   .hh-final-players > div > span:not(:first-child) {
     min-width: 44px;
     font-size: 7px;
+  }
+}
+@media (min-width: 601px) and (max-width: 1000px) {
+  .hh-sidebar:has(.hh-turn-panel) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hh-players-section {
+    border-bottom: 1px solid var(--hh-line);
+  }
+  .hh-events {
+    grid-column: 1 / -1;
+  }
+  .hh-sidebar > .hh-setup {
+    max-width: 520px;
+    margin-inline: auto;
+  }
+}
+@media (max-width: 1000px) and (max-height: 500px) and (orientation: landscape) {
+  .hh-board-section {
+    height: max(290px, calc(100svh - 32px));
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -1,0 +1,33 @@
+.collection-preview-chess {
+  background: radial-gradient(ellipse at 50% 30%, #f1eddf, #e1e3d3);
+  color: #667453;
+}
+.collection-preview-chess .collection-board {
+  border-color: #89704e;
+  background: #e6dcc4;
+  border-radius: 5px;
+}
+.collection-chess-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  height: 100%;
+}
+.collection-chess-grid > span {
+  display: grid;
+  place-items: center;
+  font:
+    20px/1 Georgia,
+    serif;
+  color: #3b4933;
+  background: #e3d5b7;
+}
+.collection-chess-grid > span.dark {
+  background: #a0ab87;
+}
+.collection-chess-knight {
+  font:
+    67px Georgia,
+    serif;
+  color: #697b50;
+  text-shadow: -2px 3px #40532b;
+}
