@@ -8,11 +8,10 @@ const snapshot: RoomSnapshot = {
   game: 'chess',
   visibility: 'private',
   status: 'open',
-  hostId: 'guest:abc',
   seats: {},
   gameState: null,
 }
-const you = { id: 'guest:abc', seat: null }
+const you = { id: 'guest:abc', seat: null, isHost: true }
 
 describe('roomReducer', () => {
   it('stores snapshots and clears stale errors', () => {

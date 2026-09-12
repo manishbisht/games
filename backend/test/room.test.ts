@@ -33,11 +33,15 @@ describe('joining and seats', () => {
     const open = await host.waitRoom((m) => m.snapshot.status === 'open')
     expect(open.you.id).toBe(`guest:${guestId}`)
     expect(open.you.seat).toBeNull()
+    expect(open.you.isHost).toBe(true)
 
     host.send({ type: 'sit', seat: 'w' })
     const seated = await host.waitRoom((m) => m.you.seat === 'w')
     expect(seated.snapshot.seats.w?.player.name).toBe('Ann')
     expect(seated.snapshot.seats.w?.connected).toBe(true)
+    // Snapshots are broadcast to everyone, so they must never carry a player id.
+    expect(seated.snapshot.seats.w?.player).not.toHaveProperty('id')
+    expect(JSON.stringify(seated.snapshot)).not.toContain(guestId)
   })
 
   it('lets a seated player switch seats before the game starts', async () => {
@@ -50,7 +54,7 @@ describe('joining and seats', () => {
     host.send({ type: 'sit', seat: 'b' })
     const switched = await host.waitRoom((m) => m.you.seat === 'b')
     expect(switched.you.seat).toBe('b')
-    expect(switched.snapshot.seats.b?.player.id).toBe(`guest:${guestId}`)
+    expect(switched.snapshot.seats.b?.player.name).toBe('Ann')
     expect(switched.snapshot.seats.w).toBeUndefined()
   })
 
@@ -66,7 +70,8 @@ describe('joining and seats', () => {
     guest.send({ type: 'sit', seat: 'w' })
     await guest.expectError('SEAT_TAKEN')
     guest.send({ type: 'sit', seat: 'b' })
-    await guest.waitRoom((m) => m.you.seat === 'b')
+    const seated = await guest.waitRoom((m) => m.you.seat === 'b')
+    expect(seated.you.isHost).toBe(false)
     guest.send({ type: 'start' })
     await guest.expectError('NOT_HOST')
   })

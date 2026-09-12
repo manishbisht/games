@@ -7,15 +7,24 @@ export type RoomVisibility = 'private' | 'public'
 export type RoomStatus = 'open' | 'playing' | 'finished'
 export type ChessSeat = 'w' | 'b'
 
-export interface PlayerInfo {
-  id: string
+/**
+ * What everyone in the room may see about a player. Deliberately id-free: a
+ * guest's id doubles as their bearer credential, and snapshots are broadcast
+ * to every socket.
+ */
+export interface PublicPlayerInfo {
   name: string
   avatar?: string
   isGuest: boolean
 }
 
+/** Server-side only — `id` never leaves the Durable Object inside a snapshot. */
+export interface PlayerInfo extends PublicPlayerInfo {
+  id: string
+}
+
 export interface SeatInfo {
-  player: PlayerInfo
+  player: PublicPlayerInfo
   connected: boolean
   wantsRematch: boolean
 }
@@ -26,14 +35,15 @@ export interface RoomSnapshot {
   game: GameId
   visibility: RoomVisibility
   status: RoomStatus
-  hostId: string
   seats: Partial<Record<ChessSeat, SeatInfo>>
   gameState: GameState | null
 }
 
+/** Addressed to one socket, so it may carry that socket's own id. */
 export interface YouInfo {
   id: string
   seat: ChessSeat | null
+  isHost: boolean
 }
 
 export type ChessAction =

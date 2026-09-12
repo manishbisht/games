@@ -130,7 +130,7 @@ function Room({ code }: { code: string }) {
     )
   }
 
-  const isHost = you?.id === snapshot.hostId
+  const isHost = Boolean(you?.isHost)
   const ready = Boolean(snapshot.seats.w && snapshot.seats.b)
   return (
     <main className="ch-room">

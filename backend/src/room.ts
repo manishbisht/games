@@ -145,12 +145,15 @@ export class RoomDO extends DurableObject<Env> {
     return null
   }
 
+  /** Broadcast to every socket, so seat players are stripped down to public fields. */
   private snapshot(record: RoomRecord): RoomSnapshot {
     const connected = this.connectedIds()
     const seats: Partial<Record<ChessSeat, SeatInfo>> = {}
     for (const seat of SEATS) {
       const stored = record.seats[seat]
-      if (stored) seats[seat] = { ...stored, connected: connected.has(stored.player.id) }
+      if (!stored) continue
+      const { id, ...player } = stored.player
+      seats[seat] = { player, connected: connected.has(id), wantsRematch: stored.wantsRematch }
     }
     return {
       protocol: PROTOCOL_VERSION,
@@ -158,7 +161,6 @@ export class RoomDO extends DurableObject<Env> {
       game: record.game,
       visibility: record.visibility,
       status: record.status,
-      hostId: record.hostId,
       seats,
       gameState: record.gameState,
     }
@@ -168,7 +170,11 @@ export class RoomDO extends DurableObject<Env> {
     return {
       type: 'room',
       snapshot: this.snapshot(record),
-      you: { id: playerId, seat: this.seatOf(record, playerId) },
+      you: {
+        id: playerId,
+        seat: this.seatOf(record, playerId),
+        isHost: playerId === record.hostId,
+      },
     }
   }
 
