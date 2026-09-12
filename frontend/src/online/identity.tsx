@@ -55,8 +55,14 @@ export function useGuestIdentity(): Identity {
   )
 }
 
-export function GuestIdentity({ children }: { children: ReactNode }) {
-  const identity = useGuestIdentity()
+/**
+ * `ready={false}` is for the one case where we know a guest identity is only a
+ * placeholder: Clerk is configured but its chunk hasn't arrived yet, so the
+ * guest id below is not the id this visitor will end up playing as.
+ */
+export function GuestIdentity({ children, ready = true }: { children: ReactNode; ready?: boolean }) {
+  const guest = useGuestIdentity()
+  const identity = useMemo(() => (ready ? guest : { ...guest, isReady: false }), [guest, ready])
   return <IdentityContext.Provider value={identity}>{children}</IdentityContext.Provider>
 }
 
@@ -64,7 +70,7 @@ export function GuestIdentity({ children }: { children: ReactNode }) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   if (!CLERK_KEY) return <GuestIdentity>{children}</GuestIdentity>
   return (
-    <Suspense fallback={<GuestIdentity>{children}</GuestIdentity>}>
+    <Suspense fallback={<GuestIdentity ready={false}>{children}</GuestIdentity>}>
       <ClerkAuthProvider publishableKey={CLERK_KEY}>{children}</ClerkAuthProvider>
     </Suspense>
   )
