@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bot, Check, CircleHelp, Dices, Flag, Leaf, Maximize2, Pause, Play, RotateCcw, RotateCw, Sparkles, Trophy, Users, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react'
-import Setup, { toConfig } from './components/Setup'
+import Setup from './components/Setup'
 import type { SetupOptions } from './components/Setup'
 import Dialog from './components/Dialog'
 import TokenPortrait from './components/TokenPortrait'
-import { PALETTES } from './game/board'
+import { PALETTES, PLAYER_IDS } from './game/board'
 import { createGame, gameReducer, rollDie } from './game/engine'
 import { sound, unlockAudio } from './game/audio'
 import { useGameClock } from './game/useGameClock'
@@ -13,6 +13,10 @@ import type { GameConfig } from './game/types'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
 import './WildriseGame.css'
+
+function toConfig(options: SetupOptions): GameConfig {
+  return { playerCount: options.count, names: options.names, controls: PLAYER_IDS.slice(0, options.count).map((_, i) => options.mode === 'ai' && i > 0 ? options.style : 'human'), rules: { exactFinish: options.exact } }
+}
 
 function DieFace({ value }: { value: number | null }) {
   const active = value === 1 ? [4] : value === 2 ? [0, 8] : value === 3 ? [0, 4, 8] : value === 4 ? [0, 2, 6, 8] : value === 5 ? [0, 2, 4, 6, 8] : [0, 2, 3, 5, 6, 8]

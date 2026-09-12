@@ -1,12 +1,9 @@
 import { ArrowRight, Bot, Check, Leaf, Users } from 'lucide-react'
-import type { Control, GameConfig } from '../game/types'
+import type { Control } from '../game/types'
 import { PALETTES, PLAYER_IDS } from '../game/board'
 import TokenPortrait from './TokenPortrait'
 
 export interface SetupOptions { count: number; mode: 'local' | 'ai'; names: string[]; style: Control; exact: boolean }
-export function toConfig(options: SetupOptions): GameConfig {
-  return { playerCount: options.count, names: options.names, controls: PLAYER_IDS.slice(0, options.count).map((_, i) => options.mode === 'ai' && i > 0 ? options.style : 'human'), rules: { exactFinish: options.exact } }
-}
 export default function Setup({ options, onChange, onStart }: { options: SetupOptions; onChange: (options: SetupOptions) => void; onStart: () => void }) {
   return <section className="wr-setup" aria-labelledby="wr-setup-title">
     <div className="wr-eyebrow"><Leaf size={13} /> PULL UP A CHAIR</div>
