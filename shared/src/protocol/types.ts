@@ -1,11 +1,16 @@
-import type { GameState } from '../chess/types'
+export const PROTOCOL_VERSION = 2
 
-export const PROTOCOL_VERSION = 1
-
-export type GameId = 'chess'
+export type GameId = 'chess' | 'hearth' | 'estate' | 'prism'
+/**
+ * Every game the protocol has a name for. A game only becomes playable online
+ * once its adapter is registered (see `../online/registry`) — this list is the
+ * vocabulary, the registry is the guest list.
+ */
+export const GAME_IDS: readonly GameId[] = ['chess', 'hearth', 'estate', 'prism']
 export type RoomVisibility = 'private' | 'public'
 export type RoomStatus = 'open' | 'playing' | 'finished'
-export type ChessSeat = 'w' | 'b'
+/** `'w' | 'b'` for chess; `'p0'..'p3'` elsewhere. The adapter mints them. */
+export type SeatId = string
 
 /**
  * What everyone in the room may see about a player. Deliberately id-free: a
@@ -34,25 +39,25 @@ export interface SeatInfo {
 /** How long a seat must be abandoned mid-game before the opponent may claim the win. */
 export const CLAIM_WIN_AFTER_MS = 2 * 60 * 1000
 
-export interface RoomSnapshot {
+export interface RoomSnapshot<S = unknown> {
   protocol: typeof PROTOCOL_VERSION
   code: string
   game: GameId
   visibility: RoomVisibility
   status: RoomStatus
-  seats: Partial<Record<ChessSeat, SeatInfo>>
-  gameState: GameState | null
+  /** Ordered; fixed at creation, compacted onto the played seat count at start. */
+  seatIds: SeatId[]
+  seats: Partial<Record<SeatId, SeatInfo>>
+  /** Redacted for the socket it is addressed to — one viewer's view of the game. */
+  gameState: S | null
 }
 
 /** Addressed to one socket, so it may carry that socket's own id. */
 export interface YouInfo {
   id: string
-  seat: ChessSeat | null
+  seat: SeatId | null
   isHost: boolean
 }
-
-export type ChessAction =
-  { kind: 'move'; from: string; to: string; promotion?: 'q' | 'r' | 'b' | 'n' } | { kind: 'resign' }
 
 export interface JoinCredentials {
   name: string
@@ -63,12 +68,12 @@ export interface JoinCredentials {
 
 export type ClientMessage =
   | ({ type: 'join'; protocol: number } & JoinCredentials)
-  | { type: 'sit'; seat: ChessSeat }
+  | { type: 'sit'; seat: SeatId }
   | { type: 'leaveSeat' }
   | { type: 'start' }
-  | { type: 'action'; action: ChessAction }
+  | { type: 'action'; action: unknown }
   | { type: 'rematch' }
-  | { type: 'claimWin' }
+  | { type: 'claim' }
 
 export type ErrorCode =
   | 'BAD_MESSAGE'
@@ -81,6 +86,7 @@ export type ErrorCode =
   | 'SEAT_TAKEN'
   | 'NOT_HOST'
   | 'NOT_READY'
+  | 'NOT_ALLOWED'
   | 'ALREADY_STARTED'
   | 'NOT_PLAYING'
   | 'NOT_YOUR_TURN'
@@ -89,8 +95,9 @@ export type ErrorCode =
   | 'NOT_FINISHED'
   | 'CLAIM_REJECTED'
 
-export type ServerMessage =
-  { type: 'room'; snapshot: RoomSnapshot; you: YouInfo } | { type: 'error'; code: ErrorCode; message: string }
+export type ServerMessage<S = unknown> =
+  | { type: 'room'; snapshot: RoomSnapshot<S>; you: YouInfo }
+  | { type: 'error'; code: ErrorCode; message: string }
 
 /** WebSocket close codes the server uses for terminal conditions. */
 export const CLOSE_CODES = { notFound: 4404, full: 4403, expired: 4408 } as const

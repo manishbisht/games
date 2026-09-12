@@ -56,6 +56,9 @@ export interface GameState {
   clocks: Record<Color, number>
   clockAt: number
 }
+/** What one seat may ask the online game to do; see `./adapter`. */
+export type ChessAction =
+  { kind: 'move'; from: string; to: string; promotion?: PromotionPiece } | { kind: 'resign' }
 export interface Preferences {
   sound: boolean
   reducedMotion: boolean

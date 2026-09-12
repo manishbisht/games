@@ -6,6 +6,8 @@
   "exports": {
     "./chess": "./src/chess/engine.ts",
     "./chess/types": "./src/chess/types.ts",
+    "./online": "./src/online/registry.ts",
+    "./online/adapter": "./src/online/adapter.ts",
     "./protocol": "./src/protocol/types.ts",
     "./protocol/codes": "./src/protocol/codes.ts"
   },
