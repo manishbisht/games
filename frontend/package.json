@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@clerk/react": "^6.15.2",
     "@games/shared": "*",
     "chess.js": "^1.4.0",
     "lucide-react": "^1.41.0",

@@ -3,11 +3,14 @@ import { createRoot } from 'react-dom/client'
 import { HashRouter } from 'react-router'
 import './index.css'
 import App from './App.tsx'
+import { AuthProvider } from './online/identity'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <HashRouter>
-      <App />
-    </HashRouter>
+    <AuthProvider>
+      <HashRouter>
+        <App />
+      </HashRouter>
+    </AuthProvider>
   </StrictMode>,
 )

@@ -1,6 +1,7 @@
 import { ArrowRight, Bot, Dices, Heart, House, Monitor, Users } from 'lucide-react'
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
+import { HeaderAuth } from '../online/identity'
 import './HomePage.css'
 import './ChessPreview.css'
 import './PrismPreview.css'
@@ -76,6 +77,7 @@ export default function HomePage() {
         <span className="collection-free">
           <i /> Free to play. Always.
         </span>
+        <HeaderAuth />
       </header>
 
       <main className="collection-main">

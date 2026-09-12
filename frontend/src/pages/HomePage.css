@@ -55,6 +55,15 @@
   border-radius: 50%;
   background: #788c63;
 }
+.collection-signin {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
 .collection-main {
   max-width: 1180px;
   padding: 0 32px;
