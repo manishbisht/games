@@ -70,6 +70,27 @@ export class RoomDO extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS)
   }
 
+  /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
+  private pushLobby(record: RoomRecord): void {
+    if (record.visibility !== 'public') return
+    const lobby = this.env.LOBBY.getByName('global')
+    if (record.status === 'open') {
+      const seatsTaken = SEATS.filter((s) => record.seats[s]).length
+      this.ctx.waitUntil(
+        lobby.upsert({
+          code: record.code,
+          game: record.game,
+          hostName: record.hostName,
+          seatsTaken,
+          seatsTotal: SEATS.length,
+          createdAt: record.createdAt,
+        }),
+      )
+    } else {
+      this.ctx.waitUntil(lobby.remove(record.code))
+    }
+  }
+
   async create(input: {
     code: string
     game: GameId
@@ -77,7 +98,7 @@ export class RoomDO extends DurableObject<Env> {
     host: PlayerInfo
   }): Promise<boolean> {
     if (await this.load()) return false
-    await this.save({
+    const record: RoomRecord = {
       code: input.code,
       game: input.game,
       visibility: input.visibility,
@@ -87,7 +108,9 @@ export class RoomDO extends DurableObject<Env> {
       createdAt: Date.now(),
       seats: {},
       gameState: null,
-    })
+    }
+    await this.save(record)
+    this.pushLobby(record)
     return true
   }
 
@@ -228,6 +251,7 @@ export class RoomDO extends DurableObject<Env> {
     if (previous && previous !== seat) delete record.seats[previous]
     record.seats[seat] = { player, wantsRematch: false }
     await this.save(record)
+    this.pushLobby(record)
     this.broadcast(record)
   }
 
@@ -241,6 +265,7 @@ export class RoomDO extends DurableObject<Env> {
     record.status = 'playing'
     record.gameState = createGame({ mode: 'online', human: 'w', difficulty: 'medium', clock: 0 })
     await this.save(record)
+    this.pushLobby(record)
     this.broadcast(record)
   }
 
@@ -320,6 +345,9 @@ export class RoomDO extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_CODES.expired, 'ROOM_EXPIRED')
+    const record = await this.load()
+    if (record?.visibility === 'public')
+      await this.env.LOBBY.getByName('global').remove(record.code)
     this.cached = null
     await this.ctx.storage.deleteAll()
     await this.ctx.storage.deleteAlarm()

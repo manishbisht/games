@@ -47,6 +47,12 @@ export default {
       return env.ROOM.getByName(code).fetch(request)
     }
 
+    if (url.pathname === '/api/lobby' && request.method === 'GET') {
+      const game = url.searchParams.get('game') === 'chess' ? ('chess' as const) : undefined
+      const rooms = await env.LOBBY.getByName('global').list(game)
+      return json({ rooms }, 200, origin)
+    }
+
     return json({ error: 'not found' }, 404, origin)
   },
 } satisfies ExportedHandler<Env>
