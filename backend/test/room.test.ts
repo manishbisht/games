@@ -35,6 +35,30 @@ describe('room creation', () => {
     }
   })
 
+  it('does not mistake Object.prototype members for registered games', async () => {
+    // The registry is a plain object, so an unguarded lookup would answer
+    // `toString` with a function and carry it all the way to a 500.
+    for (const game of ['toString', '__proto__', 'constructor', 'hasOwnProperty', 'valueOf']) {
+      const res = await post({
+        game,
+        seats: 2,
+        visibility: 'private',
+        name: 'Ann',
+        guestId: crypto.randomUUID(),
+      })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'unknown game' })
+    }
+  })
+
+  it('ignores an unknown game filter on the lobby rather than answering for one', async () => {
+    for (const game of ['toString', '__proto__']) {
+      const res = await SELF.fetch(`https://api.test/api/lobby?game=${encodeURIComponent(game)}`)
+      expect(res.status).toBe(200)
+      expect(await res.json()).toHaveProperty('rooms')
+    }
+  })
+
   it('holds the host to the seat counts the adapter supports', async () => {
     for (const seats of [1, 3, 2.5, 'two']) {
       const res = await post({

@@ -14,13 +14,22 @@ const adapters: Partial<Record<GameId, GameAdapter>> = {
   chess: chessAdapter,
 }
 
+/**
+ * The one lookup, own-properties only. A plain `in` (or a bare index) would let
+ * `"toString"` and `"__proto__"` answer for `Object.prototype`'s members, and
+ * every caller here takes its key from an untrusted request.
+ */
+function lookup(game: string): GameAdapter | undefined {
+  return Object.prototype.hasOwnProperty.call(adapters, game) ? adapters[game as GameId] : undefined
+}
+
 export function getAdapter(game: GameId): GameAdapter | undefined {
-  return adapters[game]
+  return lookup(game)
 }
 
 /** Narrow an untrusted `game` field (request body, query string) to a playable game. */
 export function resolveGame(raw: unknown): GameId | null {
-  return typeof raw === 'string' && raw in adapters ? (raw as GameId) : null
+  return typeof raw === 'string' && lookup(raw) ? (raw as GameId) : null
 }
 
 /**

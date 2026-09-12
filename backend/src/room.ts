@@ -40,6 +40,11 @@ export interface RoomRecord {
   createdAt: number
   /** When the room forgets itself. Also the alarm's deadline of last resort. */
   expiresAt: number
+  /**
+   * When the game's current timed phase is due, stamped once as the phase is
+   * entered. Absent whenever the game is not sitting in one.
+   */
+  autoAt?: number
   /** The seats in play. Minted at creation, compacted onto the real headcount at start. */
   seatIds: SeatId[]
   /** The seat count the room was created for; `seatIds` may be shorter once compacted. */
@@ -92,12 +97,12 @@ export class RoomDO extends DurableObject<Env> {
   /**
    * One alarm serves two masters: the room's 24h expiry and the adapter's timed
    * presentation phases. Whichever comes first takes the slot, and `alarm()`
-   * re-arms for the other.
+   * re-arms for the other. Both deadlines are read off the record rather than
+   * recomputed, so an unrelated save — a disconnect stamping `awaySince`, say —
+   * cannot quietly push a phase's deadline further out.
    */
   private async armAlarm(record: RoomRecord): Promise<void> {
-    const pending = this.pendingPhase(record)
-    const autoAt = pending ? Date.now() + pending.afterMs : Infinity
-    await this.ctx.storage.setAlarm(Math.min(autoAt, record.expiresAt))
+    await this.ctx.storage.setAlarm(Math.min(record.autoAt ?? Infinity, record.expiresAt))
   }
 
   /**
@@ -115,9 +120,23 @@ export class RoomDO extends DurableObject<Env> {
     return { random: Math.random, now: Date.now() }
   }
 
+  /** A finished game has no phases left to wait out, whatever shape its last state is in. */
   private pendingPhase(record: RoomRecord): { afterMs: number; resolve(s: unknown, c: Ctx): unknown } | null {
-    if (record.gameState === null) return null
+    if (record.status !== 'playing' || record.gameState === null) return null
     return this.adapter(record).pending(record.gameState)
+  }
+
+  /**
+   * The one door the game state changes through: it settles the room's status
+   * and stamps the timed phase's deadline, once, as that phase is entered.
+   * Status is decided first so a game that just ended cannot leave a deadline
+   * behind for an alarm to chase.
+   */
+  private setGameState(record: RoomRecord, state: unknown): void {
+    record.gameState = state
+    if (this.adapter(record).isFinished(state)) record.status = 'finished'
+    const pending = this.pendingPhase(record)
+    record.autoAt = pending ? Date.now() + pending.afterMs : undefined
   }
 
   /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
@@ -373,10 +392,13 @@ export class RoomDO extends DurableObject<Env> {
     record.seats = seats
     record.seatIds = played
     record.status = 'playing'
-    record.gameState = adapter.create(
-      played.map((id) => ({ id, name: record.seats[id]!.player.name })),
-      record.options,
-      this.gameCtx(),
+    this.setGameState(
+      record,
+      adapter.create(
+        played.map((id) => ({ id, name: record.seats[id]!.player.name })),
+        record.options,
+        this.gameCtx(),
+      ),
     )
     await this.save(record)
     this.pushLobby(record)
@@ -399,8 +421,7 @@ export class RoomDO extends DurableObject<Env> {
     // Whether this seat is allowed to do this now is the game's business.
     const result = adapter.apply(record.gameState, seat, record.seatIds, action, this.gameCtx())
     if ('error' in result) return this.fail(ws, result.error, result.message)
-    record.gameState = result.state
-    if (adapter.isFinished(result.state)) record.status = 'finished'
+    this.setGameState(record, result.state)
     await this.save(record)
     this.broadcast(record)
   }
@@ -408,7 +429,8 @@ export class RoomDO extends DurableObject<Env> {
   private async handleRematch(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
     const seat = this.seatOf(record, player.id)
     if (!seat) return this.fail(ws, 'NOT_SEATED', 'Take a seat to play.')
-    if (record.status !== 'finished') return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
+    if (record.status !== 'finished' || record.gameState === null)
+      return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
     record.seats[seat] = { ...record.seats[seat]!, wantsRematch: true }
     const seated = record.seatIds.filter((s) => record.seats[s])
     if (seated.every((s) => record.seats[s]!.wantsRematch)) {
@@ -428,8 +450,8 @@ export class RoomDO extends DurableObject<Env> {
         record.seats = seats
       }
       for (const s of record.seatIds) if (record.seats[s]) record.seats[s]!.wantsRematch = false
-      record.gameState = state
       record.status = 'playing'
+      this.setGameState(record, state)
     }
     await this.save(record)
     this.broadcast(record)
@@ -465,19 +487,22 @@ export class RoomDO extends DurableObject<Env> {
 
     const ctx = this.gameCtx()
     let state = record.gameState
+    let forfeited = false
     for (const id of targets) {
       const settled = adapter.resolveAbsent(state, id, record.seatIds, ctx)
       // `null`: this game has no stand-in for an absent seat, so the claim ends
       // the game where it stands.
       if (settled === null) {
-        record.status = 'finished'
+        forfeited = true
         break
       }
       state = settled
       if (adapter.isFinished(state)) break
     }
-    record.gameState = state
-    if (adapter.isFinished(state)) record.status = 'finished'
+    // Settle the status before the state, so a game forfeited mid-phase does not
+    // leave an auto-advance deadline behind on a record nobody will play again.
+    if (forfeited) record.status = 'finished'
+    this.setGameState(record, state)
     await this.save(record)
     this.broadcast(record)
   }
@@ -522,16 +547,14 @@ export class RoomDO extends DurableObject<Env> {
    * same beat at the same time.
    */
   private async autoAdvance(record: RoomRecord): Promise<void> {
-    const adapter = this.adapter(record)
     const ctx = this.gameCtx()
     for (let step = 0; step < MAX_AUTO_ADVANCES; step++) {
       const pending = this.pendingPhase(record)
       // A phase that wants a delay of its own earns a fresh alarm; only the
       // zero-delay chains collapse into this single fire.
       if (!pending || (step > 0 && pending.afterMs > 0)) break
-      record.gameState = pending.resolve(record.gameState, ctx)
+      this.setGameState(record, pending.resolve(record.gameState, ctx))
     }
-    if (record.gameState !== null && adapter.isFinished(record.gameState)) record.status = 'finished'
     await this.save(record)
     this.broadcast(record)
   }

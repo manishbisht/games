@@ -2,26 +2,34 @@ import { env, runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare
 import { describe, expect, it, vi } from 'vitest'
 import { registerAdapter } from '@games/shared/online'
 import type { GameAdapter } from '@games/shared/online/adapter'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type { ServerMessage } from '@games/shared/protocol'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
 import { connect } from './helpers'
 
 const testEnv = env as unknown as Env
+/** Mirrors `MAX_AUTO_ADVANCES` in src/room.ts — the phases one alarm may resolve. */
+const MAX_AUTO_ADVANCES = 20
 
 /**
  * Pass-the-parcel: a two-to-four seat game whose only rule is that handing the
  * parcel on takes a moment. Chess never sits in a timed phase, so this stands in
- * to exercise the room's auto-advance alarm.
+ * to exercise the room's auto-advance alarm. One throw sends the parcel through
+ * `hops` pairs of hands: the first takes `afterMs`, the rest are instant, which
+ * is how the room's zero-delay chaining gets exercised.
  */
 interface ParcelState {
   seats: string[]
   holder: number
   passes: number
-  /** True while the parcel is in the air — the phase the room resolves on a timer. */
-  flying: boolean
+  /** Hands the parcel has left to travel through; zero means it has landed. */
+  left: number
   afterMs: number
+  hops: number
 }
+
+const flying = (state: ParcelState) => state.left > 0
 
 const parcelAdapter: GameAdapter<ParcelState, 'pass'> = {
   id: 'hearth',
@@ -30,38 +38,43 @@ const parcelAdapter: GameAdapter<ParcelState, 'pass'> = {
   requireFull: false,
   seatIds: (count) => Array.from({ length: count }, (_, i) => `p${i}`),
   validateOptions: (raw) => {
-    const afterMs = (raw as { afterMs?: unknown } | null)?.afterMs
-    return { afterMs: typeof afterMs === 'number' ? afterMs : 50 }
+    const { afterMs, hops } = (raw ?? {}) as { afterMs?: unknown; hops?: unknown }
+    return {
+      afterMs: typeof afterMs === 'number' ? afterMs : 50,
+      hops: typeof hops === 'number' ? hops : 1,
+    }
   },
   validateAction: (raw) => (raw === 'pass' ? 'pass' : null),
   create: (seats, options) => ({
     seats: seats.map((seat) => seat.id),
     holder: 0,
     passes: 0,
-    flying: false,
-    afterMs: (options as { afterMs: number }).afterMs,
+    left: 0,
+    ...(options as { afterMs: number; hops: number }),
   }),
   apply: (state, seat) =>
     state.seats[state.holder] === seat
-      ? { state: { ...state, flying: true } }
+      ? { state: { ...state, left: state.hops } }
       : { error: 'NOT_YOUR_TURN', message: 'You do not have the parcel.' },
   pending: (state) =>
-    state.flying
+    flying(state)
       ? {
-          afterMs: state.afterMs,
+          // Only the first hand waits; the parcel then flies on without pausing.
+          afterMs: state.left === state.hops ? state.afterMs : 0,
           resolve: (s) => ({
             ...s,
-            flying: false,
+            left: s.left - 1,
             holder: (s.holder + 1) % s.seats.length,
             passes: s.passes + 1,
           }),
         }
       : null,
   view: (state) => state,
-  isFinished: (state) => state.passes >= 3,
-  waitingOn: (state) => (state.flying ? [] : [state.seats[state.holder]]),
+  /** The parcel game has no end of its own; chess covers the finishing path. */
+  isFinished: () => false,
+  waitingOn: (state) => (flying(state) ? [] : [state.seats[state.holder]]),
   resolveAbsent: () => null,
-  rematch: (prev) => ({ state: { ...prev, holder: 0, passes: 0, flying: false } }),
+  rematch: (prev) => ({ state: { ...prev, holder: 0, passes: 0, left: 0 } }),
 }
 
 registerAdapter(parcelAdapter)
@@ -70,7 +83,7 @@ const parcel = (message: Extract<ServerMessage, { type: 'room' }>) =>
   message.snapshot.gameState as ParcelState
 
 /** A started two-seat parcel game with the parcel already in the air. */
-async function parcelGame(afterMs: number) {
+async function parcelGame(afterMs: number, hops = 1) {
   const guestId = crypto.randomUUID()
   const res = await SELF.fetch('https://api.test/api/rooms', {
     method: 'POST',
@@ -81,7 +94,7 @@ async function parcelGame(afterMs: number) {
       name: 'Ann',
       guestId,
       seats: 2,
-      options: { afterMs },
+      options: { afterMs, hops },
     }),
   })
   expect(res.status).toBe(201)
@@ -98,9 +111,11 @@ async function parcelGame(afterMs: number) {
   await host.waitRoom((m) => m.snapshot.status === 'playing')
 
   host.send({ type: 'action', action: 'pass' })
-  await host.waitRoom((m) => parcel(m).flying)
+  await host.waitRoom((m) => flying(parcel(m)))
   return { code, host, guest }
 }
+
+const fire = (code: string) => runDurableObjectAlarm(testEnv.ROOM.getByName(code))
 
 /** Milliseconds until the room's next alarm, whichever deadline currently owns it. */
 const alarmIn = (code: string) =>
@@ -109,15 +124,30 @@ const alarmIn = (code: string) =>
     async (_instance, state) => (await state.storage.getAlarm())! - Date.now(),
   )
 
+/** The alarm's absolute deadline, for checking it has not quietly moved. */
+const alarmAt = (code: string) =>
+  runInDurableObject(testEnv.ROOM.getByName(code), async (_instance, state) => state.storage.getAlarm())
+
+/** Rewrite part of the stored record, keeping the instance's cache coherent. */
+async function patchRecord(code: string, patch: (record: RoomRecord) => void) {
+  await runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
+    const record = (await state.storage.get<RoomRecord>('room'))!
+    patch(record)
+    await state.storage.put('room', record)
+    // Keep the in-memory cache coherent with storage (same-object contract).
+    ;(instance as unknown as { cached: RoomRecord }).cached = record
+  })
+}
+
 describe('the room alarm', () => {
   it('resolves a timed phase on its own, then hands the alarm back to the expiry', async () => {
     const { code, host } = await parcelGame(60_000)
     // The phase's minute, not the room's day, owns the alarm slot right now.
     expect(await alarmIn(code)).toBeLessThanOrEqual(60_000)
 
-    expect(await runDurableObjectAlarm(testEnv.ROOM.getByName(code))).toBe(true)
+    expect(await fire(code)).toBe(true)
     const advanced = await host.waitRoom((m) => parcel(m).passes === 1)
-    expect(parcel(advanced).flying).toBe(false)
+    expect(flying(parcel(advanced))).toBe(false)
     expect(parcel(advanced).holder).toBe(1)
     expect(advanced.snapshot.status).toBe('playing')
 
@@ -125,20 +155,68 @@ describe('the room alarm', () => {
     expect(await alarmIn(code)).toBeGreaterThan(23 * 60 * 60 * 1000)
   })
 
-  it('expires the room even with a phase still pending', async () => {
-    const { code, host } = await parcelGame(60_000)
-    const stub = testEnv.ROOM.getByName(code)
-    // Backdate the deadline: the parcel is still a minute from landing, so
-    // expiry is the only thing this alarm can be about.
-    await runInDurableObject(stub, async (instance, state) => {
-      const record = (await state.storage.get<RoomRecord>('room'))!
-      record.expiresAt = Date.now() - 1000
-      await state.storage.put('room', record)
-      // Keep the in-memory cache coherent with storage (same-object contract).
-      ;(instance as unknown as { cached: RoomRecord }).cached = record
+  it('keeps a phase deadline fixed when an unrelated save happens', async () => {
+    const { code, host, guest } = await parcelGame(60_000)
+    const before = await alarmAt(code)
+
+    // A disconnect writes the record (stamping awaySince) without touching the
+    // game — the parcel must still land when it was always going to.
+    guest.ws.close()
+    await host.waitRoom((m) => m.snapshot.seats.p1?.connected === false)
+    expect(await alarmAt(code)).toBe(before)
+  })
+
+  it('collapses a chain of instant phases into one fire', async () => {
+    const { code, host } = await parcelGame(60_000, 4)
+    expect(await fire(code)).toBe(true)
+    // One alarm: the first hand's minute, then three instant hands behind it.
+    const landed = await host.waitRoom((m) => !flying(parcel(m)))
+    expect(parcel(landed).passes).toBe(4)
+    expect(await alarmIn(code)).toBeGreaterThan(23 * 60 * 60 * 1000)
+  })
+
+  it('caps how many phases a single fire may resolve', async () => {
+    const { code, host } = await parcelGame(60_000, 21)
+    expect(await fire(code)).toBe(true)
+    // Without the cap the whole chain would collapse into this one fire and the
+    // room would only ever broadcast the landed parcel. A snapshot that stops
+    // dead on the twentieth hop is the cap, and it is asserted from the message
+    // log rather than live state: the room re-arms immediately for the rest of
+    // the chain, so anything read afterwards is a race.
+    const capped = await host.waitRoom((m) => parcel(m).passes === MAX_AUTO_ADVANCES)
+    expect(parcel(capped).left).toBe(1)
+    expect(capped.snapshot.status).toBe('playing')
+  })
+
+  it('stops chasing a phase deadline once the game is over', async () => {
+    // The parcel game has no stand-in for an absent player, so a claim forfeits
+    // it mid-flight: finished, but with state the adapter still calls pending.
+    const { code, host, guest } = await parcelGame(60_000)
+    guest.ws.close()
+    await host.waitRoom((m) => m.snapshot.seats.p1?.connected === false)
+    await patchRecord(code, (record) => {
+      record.seats.p1!.disconnectedAt = Date.now() - CLAIM_WIN_AFTER_MS - 1000
     })
 
-    expect(await runDurableObjectAlarm(stub)).toBe(true)
+    host.send({ type: 'claim' })
+    const over = await host.waitRoom((m) => m.snapshot.status === 'finished')
+    expect(flying(parcel(over))).toBe(true)
+    // The expiry owns the alarm again: a finished game has nothing to advance.
+    expect(await alarmIn(code)).toBeGreaterThan(23 * 60 * 60 * 1000)
+
+    expect(await fire(code)).toBe(true)
+    await vi.waitFor(() => expect(host.closes[0]?.code).toBe(4408))
+  })
+
+  it('expires the room even with a phase still pending', async () => {
+    const { code, host } = await parcelGame(60_000)
+    // Backdate the deadline: the parcel is still a minute from landing, so
+    // expiry is the only thing this alarm can be about.
+    await patchRecord(code, (record) => {
+      record.expiresAt = Date.now() - 1000
+    })
+
+    expect(await fire(code)).toBe(true)
     await vi.waitFor(() => expect(host.closes[0]?.code).toBe(4408))
     const back = await connect(code)
     await back.expectError('ROOM_NOT_FOUND')
