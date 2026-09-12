@@ -73,6 +73,10 @@ npm run dev
 
 Open the printed local address and choose a game from the homepage, or go directly to `http://localhost:5173/#/estate` and choose **Start game**. Rename players, choose local humans or computer opponents, and select classic or quick mode. No account or backend is needed.
 
+## Multiplayer & deployment
+
+For online multiplayer and deployment instructions, see [Deployment & setup](../docs/deployment.md).
+
 ## Deploy to GitHub Pages
 
 The repository's [deployment workflow](../.github/workflows/deploy.yml) installs dependencies with `npm ci`, runs lint and unit tests, builds the frontend using Node.js 24, and deploys `frontend/dist` to GitHub Pages.
