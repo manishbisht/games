@@ -1,11 +1,22 @@
 {
   "name": "games",
   "private": true,
-  "workspaces": ["frontend", "shared"],
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared"
+  ],
   "scripts": {
     "dev": "npm run dev -w frontend",
     "build": "npm run build -w frontend",
     "lint": "npm run lint -w frontend",
     "test": "npm run test --workspaces --if-present"
+  },
+  "allowScripts": {
+    "@clerk/shared@3.47.8": true,
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true,
+    "workerd@1.20260815.1": true,
+    "workerd@1.20260911.1": true
   }
 }
