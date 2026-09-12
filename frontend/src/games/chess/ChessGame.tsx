@@ -466,6 +466,10 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
     : game.options.mode === 'ai'
       ? game.options.human
       : game.turn
+  // Online there is no difficulty to name, so the result meta credits the person
+  // across the board — falling back to the plain word if we never saw their name.
+  const onlineOpponent =
+    (online?.myColor ? online.players[opposite(online.myColor)]?.name : undefined) || 'opponent'
   const turnStatus = menu
     ? 'The table is yours.'
     : isOver
@@ -718,7 +722,11 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
               <section className="ch-panel ch-session">
                 <div className="ch-session-label">
                   <p className="ch-eyebrow">
-                    {game.options.mode === 'ai' ? 'YOU & THE COMPUTER' : 'LOCAL MULTIPLAYER'}
+                    {online
+                      ? 'ONLINE MATCH'
+                      : game.options.mode === 'ai'
+                        ? 'YOU & THE COMPUTER'
+                        : 'LOCAL MULTIPLAYER'}
                   </p>
                   <span className={`ch-live-dot ${isOver ? 'ended' : ''}`} />
                 </div>
@@ -1116,7 +1124,11 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
             <span>{game.history.length} moves</span>
             <i />
             <span>
-              {game.options.mode === 'local' ? 'A friendly match' : `${game.options.difficulty} opponent`}
+              {online
+                ? onlineOpponent
+                : game.options.mode === 'local'
+                  ? 'A friendly match'
+                  : `${game.options.difficulty} opponent`}
             </span>
           </div>
           {online ? (
