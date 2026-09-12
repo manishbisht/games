@@ -1,3 +1,4 @@
 .superpowers/
-.idea/
+.idea/*
+!.idea/runConfigurations/
 node_modules/
