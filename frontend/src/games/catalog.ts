@@ -56,4 +56,18 @@ export const prismGame = {
   Component: lazy(() => import('./prism/PrismGame')),
 }
 
-export const games = [hearthGame, estateGame, chessGame, prismGame]
+export const wildriseGame = {
+  id: 'wildrise',
+  name: 'Wildrise',
+  path: '/wildrise',
+  aliases: ['/snakes-and-ladders', '/SnakesAndLadders'],
+  category: 'A little luck. A long way up.',
+  description:
+    'Take the scenic route across a beautiful woodland board. Climb ladders, slide down friendly snakes, and race your miniature to the top. Every roll is a new adventure.',
+  tags: ['Snakes & ladders', 'Local & fair-play AI'],
+  icon: 'wildrise.svg',
+  themeColor: '#f7f6ef',
+  Component: lazy(() => import('./wildrise/WildriseGame')),
+}
+
+export const games = [hearthGame, estateGame, chessGame, prismGame, wildriseGame]

@@ -1,0 +1,10 @@
+.collection-preview-wildrise { background: radial-gradient(ellipse at 40% 30%, #f4edd8, #dfe5d2); color: #718361; }
+.collection-preview-wildrise .collection-board { border-color: #ad8054; background: #e5e9d2; transform: perspective(600px) rotateX(22deg) rotateZ(-16deg); width: 194px; height: 194px; box-shadow: -4px 7px 0 #855e3b, -12px 21px 20px #4e45362b; }
+.collection-wildrise-grid { display: grid; grid-template-columns: repeat(10, 1fr); width: 100%; height: 100%; border: 1px solid #8b754b; }
+.collection-wildrise-grid > span { background: #e4e8ce; border: 0.5px solid #d2d7be; padding: 2px; color: #6e7c5a; font-size: 4px; }
+.collection-wildrise-grid > span:nth-child(3n) { background: #f4e9ce; }
+.collection-wildrise-grid > span:nth-child(3n + 1) { background: #e0e8db; }
+.collection-wildrise-grid svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.collection-wildrise-grid path { fill: none; stroke-width: 3.5px; stroke-linecap: round; filter: drop-shadow(0 1px 0.5px #39433144); }
+.collection-wildrise-grid .collection-wildrise-ladder { stroke: #b48b4f; stroke-width: 1.5px; }
+.collection-preview-wildrise .collection-preview-dice { color: #a58a60; }

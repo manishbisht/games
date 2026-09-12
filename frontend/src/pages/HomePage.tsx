@@ -5,13 +5,19 @@ import { HeaderAuth } from '../online/identity'
 import './HomePage.css'
 import './ChessPreview.css'
 import './PrismPreview.css'
+import './WildrisePreview.css'
 
 function BoardPreview({ game }: { game: string }) {
   return (
     <div className={`collection-preview collection-preview-${game}`} aria-hidden="true">
       <span className="collection-preview-caption">THE TABLE IS SET</span>
       <div className="collection-board">
-        {game === 'prism' ? (
+        {game === 'wildrise' ? (
+          <div className="collection-wildrise-grid">
+            {Array.from({ length: 100 }, (_, i) => <span key={i}>{Math.floor(i / 10) % 2 === 0 ? 100 - i : 81 - Math.floor(i / 10) * 10 + i % 10 + 10}</span>)}
+            <svg viewBox="0 0 100 100"><path d="M21 18C4 38 45 39 28 60S49 75 41 89" stroke="#668e78" /><path d="M81 10C95 26 62 22 70 39S86 53 66 68" stroke="#a182ad" /><path d="m15 79 38-61m-32 65 38-61M20 74l6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4" className="collection-wildrise-ladder" /><circle cx="21" cy="18" r="3.4" fill="#668e78" /><circle cx="81" cy="10" r="3.4" fill="#a182ad" /></svg>
+          </div>
+        ) : game === 'prism' ? (
           <div className="collection-prism-hand">
             {['7', '⇄', '✦', '+2'].map((symbol, i) => <div key={symbol} className={`collection-prism-card collection-prism-card-${i}`}><small>{symbol}</small><strong>{symbol}</strong><span>PRISM</span></div>)}
           </div>
