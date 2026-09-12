@@ -1,5 +1,5 @@
 import { CLOSE_CODES } from '@games/shared/protocol'
-import type { ChessSeat, ErrorCode, RoomSnapshot, ServerMessage, YouInfo } from '@games/shared/protocol'
+import type { ErrorCode, RoomSnapshot, SeatId, ServerMessage, YouInfo } from '@games/shared/protocol'
 
 export type RoomPhase = 'connecting' | 'connected' | 'reconnecting' | 'notfound' | 'full' | 'expired'
 
@@ -53,7 +53,7 @@ export const isFatal = (phase: RoomPhase): boolean =>
   phase === 'notfound' || phase === 'full' || phase === 'expired'
 
 export interface PresenceEvent {
-  seat: ChessSeat
+  seat: SeatId
   name: string
   connected: boolean
 }
@@ -67,7 +67,7 @@ export interface PresenceEvent {
 export function presenceEvents(prev: RoomSnapshot | null, next: RoomSnapshot | null): PresenceEvent[] {
   if (!prev || !next) return []
   const events: PresenceEvent[] = []
-  for (const seat of ['w', 'b'] as const) {
+  for (const seat of next.seatIds) {
     const before = prev.seats[seat]
     const after = next.seats[seat]
     if (!before || !after) continue

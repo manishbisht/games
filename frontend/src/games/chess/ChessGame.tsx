@@ -56,7 +56,7 @@ import type {
   Square,
 } from '@games/shared/chess/types'
 import type { OnlineChessSession } from './online/session'
-import OnlinePanel from './online/OnlinePanel'
+import OnlinePanel from '../../online/OnlinePanel'
 import './ChessGame.css'
 
 const STORAGE = 'gambit-game-v1',
@@ -753,7 +753,7 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
                 <p className="ch-setup-note">
                   <ShieldCheck size={13} /> Standard rules. Extraordinary possibilities.
                 </p>
-                {!online && <OnlinePanel />}
+                {!online && <OnlinePanel game="chess" basePath="/chess" />}
               </section>
             ) : (
               <section className="ch-panel ch-session">

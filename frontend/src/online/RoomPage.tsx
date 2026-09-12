@@ -1,35 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
-import type { ChessSeat, RoomSnapshot, SeatInfo } from '@games/shared/protocol'
+import type { RoomSnapshot, SeatId } from '@games/shared/protocol'
 import type { ReactNode } from 'react'
-import { useIdentity } from '../../online/identity'
-import { useRoom } from '../../online/useRoom'
-import { presenceEvents } from '../../online/roomState'
-import ChessGame from './ChessGame'
-import type { OnlineChessSession } from './online/session'
-import './ChessGame.css'
+import { useIdentity } from './identity'
+import { useRoom } from './useRoom'
+import { onlineGame } from './games'
+import type { OnlineGame } from './games'
+import { presenceEvents } from './roomState'
+import './online.css'
 
-const other = (seat: ChessSeat): ChessSeat => (seat === 'w' ? 'b' : 'w')
-const player = (seat?: SeatInfo) =>
-  seat ? { name: seat.player.name, connected: seat.connected, awaySince: seat.awaySince } : undefined
 const TOAST_MS = 4000
 
-export default function ChessRoomPage() {
+export default function RoomPage({ game }: { game: string }) {
   const { code: raw } = useParams()
   const identity = useIdentity()
+  const config = onlineGame(game)
   const code = normalizeRoomCode(raw ?? '')
-  if (!code)
+  if (!config)
     return (
       <Notice title="That link looks wrong.">
-        <Link to="/chess">Back to Gambit</Link>
+        <Link to="/">All games</Link>
       </Notice>
     )
+  if (!code) return <Fatal config={config} title="That link looks wrong." />
   // `Room` owns the socket, and the join frame carries our identity — so don't
   // mount it (or prompt for a name we may not need) until the identity settles.
   if (!identity.isReady) return <p role="status">Joining room {code}…</p>
   if (!identity.name) return <NamePrompt />
-  return <Room code={code} />
+  return <Room code={code} config={config} />
 }
 
 function Notice({ title, children }: { title: string; children?: ReactNode }) {
@@ -40,6 +39,12 @@ function Notice({ title, children }: { title: string; children?: ReactNode }) {
     </main>
   )
 }
+
+const Fatal = ({ config, title }: { config: OnlineGame; title: string }) => (
+  <Notice title={title}>
+    <Link to={config.basePath}>Back to {config.name}</Link>
+  </Notice>
+)
 
 function NamePrompt() {
   const identity = useIdentity()
@@ -59,11 +64,11 @@ function NamePrompt() {
   )
 }
 
-function Room({ code }: { code: string }) {
+function Room({ code, config }: { code: string; config: OnlineGame }) {
   const navigate = useNavigate()
   const { room, api } = useRoom(code)
   const { snapshot, you } = room
-  const leave = () => navigate('/chess')
+  const leave = () => navigate(config.basePath)
 
   // Presence toasts: announce the other seats' disconnects/reconnects.
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([])
@@ -102,61 +107,33 @@ function Room({ code }: { code: string }) {
     </div>
   )
 
-  const session = useMemo<OnlineChessSession | null>(() => {
-    if (!snapshot?.gameState || !you) return null
-    const mySeat = you.seat
-    return {
-      state: snapshot.gameState,
-      myColor: mySeat,
-      players: { w: player(snapshot.seats.w), b: player(snapshot.seats.b) },
-      rematch: {
-        mine: mySeat ? (snapshot.seats[mySeat]?.wantsRematch ?? false) : false,
-        theirs: mySeat ? (snapshot.seats[other(mySeat)]?.wantsRematch ?? false) : false,
-      },
-      send: { move: api.move, resign: api.resign, rematch: api.rematch, claimWin: api.claimWin },
-      leave,
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, you, api])
-
   if (room.phase === 'notfound')
-    return (
-      <Notice title="This room doesn't exist (or has expired).">
-        <Link to="/chess">Back to Gambit</Link>
-      </Notice>
-    )
-  if (room.phase === 'expired')
-    return (
-      <Notice title="This room has expired.">
-        <Link to="/chess">Back to Gambit</Link>
-      </Notice>
-    )
-  if (room.phase === 'full')
-    return (
-      <Notice title="This room already has two players.">
-        <Link to="/chess">Back to Gambit</Link>
-      </Notice>
-    )
+    return <Fatal config={config} title="This room doesn't exist (or has expired)." />
+  if (room.phase === 'expired') return <Fatal config={config} title="This room has expired." />
+  if (room.phase === 'full') return <Fatal config={config} title="This room is full." />
   if (!snapshot) return <p role="status">Joining room {code}…</p>
 
-  if (session)
+  // The game is on: hand the table over to the game itself.
+  const RoomView = config.RoomView
+  if (snapshot.gameState !== null && you)
     return (
       <>
-        <ChessGame online={session} />
+        <RoomView snapshot={snapshot} you={you} api={api} leave={leave} />
         {toastStack}
       </>
     )
 
-  const seatButton = (seat: ChessSeat, label: string) => {
+  const seatButton = (seat: SeatId, index: number) => {
     const occupant = snapshot.seats[seat]
     const mine = you?.seat === seat
     return (
       <button
+        key={seat}
         className={`ch-room-seat ${mine ? 'ch-room-seat-mine' : ''}`}
         disabled={Boolean(occupant) && !mine}
         onClick={() => (mine ? api.leaveSeat() : api.sit(seat))}
       >
-        <strong>{mine ? 'Leave seat' : label}</strong>
+        <strong>{mine ? 'Leave seat' : config.seatLabel(seat, index)}</strong>
         <span>
           {occupant ? `${occupant.player.name}${occupant.connected ? '' : ' (away)'}` : 'Open seat'}
         </span>
@@ -165,7 +142,7 @@ function Room({ code }: { code: string }) {
   }
 
   const isHost = Boolean(you?.isHost)
-  const ready = Boolean(snapshot.seats.w && snapshot.seats.b)
+  const ready = snapshot.seatIds.every((seat) => snapshot.seats[seat])
   return (
     <main className="ch-room">
       <h1>Room {snapshot.code}</h1>
@@ -178,18 +155,15 @@ function Room({ code }: { code: string }) {
           Copy link
         </button>
       </p>
-      <div className="ch-room-seats">
-        {seatButton('w', 'Play as White')}
-        {seatButton('b', 'Play as Black')}
-      </div>
+      <div className="ch-room-seats">{snapshot.seatIds.map(seatButton)}</div>
       {isHost ? (
         <button className="ch-room-start" disabled={!ready} onClick={api.start}>
-          {ready ? 'Start the game' : 'Waiting for both seats…'}
+          {ready ? 'Start the game' : 'Waiting for every seat…'}
         </button>
       ) : (
         <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
       )}
-      <Link to="/chess">Leave room</Link>
+      <Link to={config.basePath}>Leave room</Link>
       {toastStack}
     </main>
   )

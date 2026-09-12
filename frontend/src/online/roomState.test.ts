@@ -3,11 +3,12 @@ import type { RoomSnapshot } from '@games/shared/protocol'
 import { initialRoomState, isFatal, presenceEvents, roomReducer } from './roomState'
 
 const snapshot: RoomSnapshot = {
-  protocol: 1,
+  protocol: 2,
   code: 'KX3F9M',
   game: 'chess',
   visibility: 'private',
   status: 'open',
+  seatIds: ['w', 'b'],
   seats: {},
   gameState: null,
 }
@@ -78,5 +79,17 @@ describe('presenceEvents', () => {
 
   it('ignores a seat that changed occupants', () => {
     expect(presenceEvents(seated(true, 'Ben'), seated(false, 'Eve'))).toEqual([])
+  })
+
+  it('walks whatever seats the room says it has', () => {
+    const table = (connected: boolean): RoomSnapshot => ({
+      ...snapshot,
+      seatIds: ['p0', 'p1', 'p2'],
+      seats: {
+        p0: { player: { name: 'Ann', isGuest: true }, connected: true, wantsRematch: false },
+        p2: { player: { name: 'Cat', isGuest: true }, connected, wantsRematch: false },
+      },
+    })
+    expect(presenceEvents(table(true), table(false))).toEqual([{ seat: 'p2', name: 'Cat', connected: false }])
   })
 })

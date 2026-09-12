@@ -3,7 +3,7 @@ import { matchPath, Navigate, Route, Routes, useLocation } from 'react-router'
 import { games } from './games/catalog'
 import HomePage from './pages/HomePage'
 
-const ChessRoomPage = lazy(() => import('./games/chess/ChessRoomPage'))
+const RoomPage = lazy(() => import('./online/RoomPage'))
 
 export default function App() {
   const { pathname } = useLocation()
@@ -37,7 +37,11 @@ export default function App() {
         {games.flatMap(({ path, aliases }) =>
           aliases.map((alias) => <Route key={alias} path={alias} element={<Navigate to={path} replace />} />),
         )}
-        <Route path="/chess/room/:code" element={<ChessRoomPage />} />
+        {games
+          .filter((entry) => entry.online)
+          .map(({ id, path }) => (
+            <Route key={`${path}/room`} path={`${path}/room/:code`} element={<RoomPage game={id} />} />
+          ))}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

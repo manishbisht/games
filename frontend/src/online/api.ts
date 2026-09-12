@@ -14,11 +14,12 @@ export async function createRoom(
   visibility: RoomVisibility,
   name: string,
   credentials: IdentityCredentials,
+  seats?: number,
 ): Promise<string> {
   const res = await fetch(`${API_URL}/api/rooms`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ game, visibility, name, ...credentials }),
+    body: JSON.stringify({ game, visibility, name, ...credentials, ...(seats ? { seats } : {}) }),
   })
   if (!res.ok) throw new Error('Could not create a room right now.')
   const { code } = (await res.json()) as { code: string }

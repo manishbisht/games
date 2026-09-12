@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import type { PublicRoomSummary, RoomVisibility } from '@games/shared/protocol'
+import type { GameId, PublicRoomSummary, RoomVisibility } from '@games/shared/protocol'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
-import { createRoom, fetchLobby } from '../../../online/api'
-import { useIdentity } from '../../../online/identity'
+import { createRoom, fetchLobby } from './api'
+import { useIdentity } from './identity'
+import './online.css'
 
-export default function OnlinePanel() {
+export interface OnlinePanelProps {
+  game: GameId
+  /** Where this game lives, e.g. `/chess`; rooms hang off `${basePath}/room/:code`. */
+  basePath: string
+  /** Table sizes the host may pick between. Games with one fixed size omit it. */
+  seatChoices?: number[]
+}
+
+export default function OnlinePanel({ game, basePath }: OnlinePanelProps) {
   const navigate = useNavigate()
   const identity = useIdentity()
   const [name, setName] = useState(identity.name)
@@ -16,14 +25,14 @@ export default function OnlinePanel() {
   const [error, setError] = useState('')
 
   const refresh = () =>
-    fetchLobby('chess')
+    fetchLobby(game)
       .then(setRooms)
       .catch(() => setRooms(null))
   useEffect(() => {
-    fetchLobby('chess')
+    fetchLobby(game)
       .then(setRooms)
       .catch(() => setRooms(null))
-  }, [])
+  }, [game])
 
   const playerName = identity.isSignedIn ? identity.name : name.trim()
   // Until the identity is settled we'd send a guest id that a signed-in user is
@@ -39,8 +48,8 @@ export default function OnlinePanel() {
     setError('')
     try {
       rememberName()
-      const code = await createRoom('chess', visibility, playerName, await identity.credentials())
-      navigate(`/chess/room/${code}`)
+      const code = await createRoom(game, visibility, playerName, await identity.credentials())
+      navigate(`${basePath}/room/${code}`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Something went wrong.')
     } finally {
@@ -55,7 +64,7 @@ export default function OnlinePanel() {
       return
     }
     rememberName()
-    navigate(`/chess/room/${normalized}`)
+    navigate(`${basePath}/room/${normalized}`)
   }
 
   return (

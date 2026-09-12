@@ -1,6 +1,22 @@
 import { lazy } from 'react'
+import type { ComponentType, LazyExoticComponent } from 'react'
 
-export const hearthGame = {
+export interface GameEntry {
+  id: string
+  name: string
+  path: string
+  aliases: string[]
+  category: string
+  description: string
+  tags: string[]
+  icon: string
+  themeColor: string
+  /** Has an online mode, so `${path}/room/:code` routes to the shared room page. */
+  online?: boolean
+  Component: LazyExoticComponent<ComponentType>
+}
+
+export const hearthGame: GameEntry = {
   id: 'hearth',
   name: 'Hearth & Home',
   path: '/hearth-and-home',
@@ -14,7 +30,7 @@ export const hearthGame = {
   Component: lazy(() => import('./hearth/HearthGame')),
 }
 
-export const estateGame = {
+export const estateGame: GameEntry = {
   id: 'estate',
   name: 'Estate',
   path: '/estate',
@@ -28,7 +44,7 @@ export const estateGame = {
   Component: lazy(() => import('./monopoly/MonopolyGame')),
 }
 
-export const chessGame = {
+export const chessGame: GameEntry = {
   id: 'chess',
   name: 'Gambit',
   path: '/chess',
@@ -39,10 +55,11 @@ export const chessGame = {
   tags: ['Chess & strategy', 'Local & three AI levels'],
   icon: 'chess.svg',
   themeColor: '#f8f7f2',
+  online: true,
   Component: lazy(() => import('./chess/ChessGame')),
 }
 
-export const prismGame = {
+export const prismGame: GameEntry = {
   id: 'prism',
   name: 'Prism',
   path: '/prism',
@@ -56,7 +73,7 @@ export const prismGame = {
   Component: lazy(() => import('./prism/PrismGame')),
 }
 
-export const wildriseGame = {
+export const wildriseGame: GameEntry = {
   id: 'wildrise',
   name: 'Wildrise',
   path: '/wildrise',
@@ -70,4 +87,4 @@ export const wildriseGame = {
   Component: lazy(() => import('./wildrise/WildriseGame')),
 }
 
-export const games = [hearthGame, estateGame, chessGame, prismGame, wildriseGame]
+export const games: GameEntry[] = [hearthGame, estateGame, chessGame, prismGame, wildriseGame]

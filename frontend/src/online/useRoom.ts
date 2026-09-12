@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
-import type { ChessSeat, ClientMessage, ServerMessage } from '@games/shared/protocol'
+import type { ClientMessage, SeatId, ServerMessage } from '@games/shared/protocol'
 import { roomSocketUrl } from './api'
 import { initialRoomState, isFatal, roomReducer } from './roomState'
 import type { RoomClientState } from './roomState'
 import { useIdentity } from './identity'
 
 export interface RoomApi {
-  sit: (seat: ChessSeat) => void
+  sit: (seat: SeatId) => void
   leaveSeat: () => void
   start: () => void
-  move: (from: string, to: string, promotion?: 'q' | 'r' | 'b' | 'n') => void
-  resign: () => void
+  /** The game's own move/decision payload; the server's adapter validates it. */
+  action: (payload: unknown) => void
   rematch: () => void
-  claimWin: () => void
+  claim: () => void
   dismissError: () => void
 }
 
@@ -102,10 +102,9 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
       sit: (seat) => send({ type: 'sit', seat }),
       leaveSeat: () => send({ type: 'leaveSeat' }),
       start: () => send({ type: 'start' }),
-      move: (from, to, promotion) => send({ type: 'action', action: { kind: 'move', from, to, promotion } }),
-      resign: () => send({ type: 'action', action: { kind: 'resign' } }),
+      action: (payload) => send({ type: 'action', action: payload }),
       rematch: () => send({ type: 'rematch' }),
-      claimWin: () => send({ type: 'claimWin' }),
+      claim: () => send({ type: 'claim' }),
       dismissError: () => dispatch({ type: 'dismiss-error' }),
     }),
     [send],
