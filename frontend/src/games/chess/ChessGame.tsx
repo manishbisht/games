@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { PlayersOnlineBadge } from '../../online/playersOnline'
 import {
   ArrowLeft,
   ArrowRight,
@@ -554,6 +555,7 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
           <small>THE GAME OF POSSIBILITIES</small>
         </Link>
         <nav aria-label="Game navigation">
+          <PlayersOnlineBadge game="chess" className="ch-online-badge" />
           <Link to="/" className="ch-all-games">
             <ArrowLeft size={15} /> All games
           </Link>
@@ -1013,8 +1015,7 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
             </p>
             <p>
               <strong>Draws:</strong> Stalemate and insufficient material end the game. In this casual
-              version, threefold repetition and the fifty-move rule are adjudicated automatically. Local
-              players can also agree to a draw.
+              version, threefold repetition and the fifty-move rule are adjudicated automatically.
             </p>
           </details>
           <details>
@@ -1030,7 +1031,7 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
             </p>
             <p>
               Clocks keep running while you choose a promotion, open a dialog, switch tabs, or close the page.
-              Undo is available in local play and restores the position and clocks from before the last move.
+              Reopen your room link to reconnect to the same game.
             </p>
           </details>
           <button className="ch-primary" onClick={() => setDialog(null)}>

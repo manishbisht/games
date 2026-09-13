@@ -8,8 +8,12 @@ export const PALETTES = {
   yellow: { name: 'Yellow', animal: 'Bear', color: '#be903c', pale: '#f6edcf', symbol: 'bear' },
 }
 export const DEFAULT_RULES: Rules = {
-  exactFinish: true, extraTurnOnSix: false, allowSharedSquares: true,
-  startingPosition: 0, snakeCount: 6, ladderCount: 6,
+  exactFinish: true,
+  extraTurnOnSix: false,
+  allowSharedSquares: true,
+  startingPosition: 0,
+  snakeCount: 6,
+  ladderCount: 6,
 }
 export const SNAKES: Route[] = [
   { from: 98, to: 78, color: '#547e9f' },

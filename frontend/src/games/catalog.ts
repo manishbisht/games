@@ -24,7 +24,7 @@ export const hearthGame: GameEntry = {
   category: 'A little luck. A long way home.',
   description:
     'Race your pieces around a colorful board, send rivals back to their nests, and bring everyone home. A familiar favorite with a cozy twist.',
-  tags: ['Race & strategy', 'Classic, quick & custom', 'Online multiplayer'],
+  tags: ['Race & strategy', 'Classic, quick & custom'],
   icon: 'hearth.svg',
   themeColor: '#faf9f5',
   online: true,
@@ -39,7 +39,7 @@ export const estateGame: GameEntry = {
   category: 'A little luck. A lot of strategy.',
   description:
     'Build a property empire, strike a deal, and make every roll count. Gather your friends and see who ends up owning the neighborhood.',
-  tags: ['Property & trading', 'Classic & quick', 'Online multiplayer'],
+  tags: ['Property & trading', 'Classic & quick'],
   icon: 'estate.svg',
   themeColor: '#111722',
   online: true,
@@ -53,12 +53,12 @@ export const chessGame: GameEntry = {
   aliases: ['/Gambit'],
   category: 'A quiet moment. A world of possibility.',
   description:
-    'A timeless game in a new dimension. Settle in at a beautiful 3D chessboard, challenge a friend or the computer, and find your next great move.',
-  tags: ['Chess & strategy', 'Local & three AI levels'],
+    'A timeless game in a new dimension. Meet at a beautiful 3D chessboard, invite a friend to your room or join an open table, and find your next great move.',
+  tags: ['Chess & strategy', 'Online with friends'],
   icon: 'chess.svg',
   themeColor: '#f8f7f2',
   online: true,
-  Component: lazy(() => import('./chess/ChessGame')),
+  Component: lazy(() => import('./chess/ChessLobby')),
 }
 
 export const prismGame: GameEntry = {
@@ -69,7 +69,7 @@ export const prismGame: GameEntry = {
   category: 'A little color. A little chaos.',
   description:
     'Match a color, change the direction, and keep your friends guessing. A colorful 3D card game with a little friendly rivalry in every hand.',
-  tags: ['Cards & color', 'Local, AI or online', 'Online multiplayer'],
+  tags: ['Cards & color', 'Bots & online rooms'],
   icon: 'prism.svg',
   themeColor: '#142b24',
   online: true,
@@ -83,10 +83,11 @@ export const wildriseGame: GameEntry = {
   aliases: ['/snakes-and-ladders', '/SnakesAndLadders'],
   category: 'A little luck. A long way up.',
   description:
-    'Take the scenic route across a beautiful woodland board. Climb ladders, slide down friendly snakes, and race your miniature to the top. Every roll is a new adventure.',
-  tags: ['Snakes & ladders', 'Local & fair-play AI'],
+    'Take the scenic route across a beautiful woodland board. Climb ladders, slide down friendly snakes, and race your miniature to the top. Play against bots or invite friends to your own room.',
+  tags: ['Snakes & ladders', 'Bots & online rooms'],
   icon: 'wildrise.svg',
   themeColor: '#f7f6ef',
+  online: true,
   Component: lazy(() => import('./wildrise/WildriseGame')),
 }
 

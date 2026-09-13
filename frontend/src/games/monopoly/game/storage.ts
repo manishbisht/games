@@ -85,6 +85,9 @@ export function loadGame(): GameState {
         s.players.filter((p) => !p.bankrupt).length !== 1)
     )
       return createGame()
+    // Same-device multiplayer is no longer a playable mode. Keep the old save
+    // untouched until the player starts a new bot game, but return to setup.
+    if (s.players[0].isBot || s.players.slice(1).some((p) => !p.isBot)) return createGame()
     // Palette updates are presentation changes; preserve all saved gameplay progress.
     s.players = s.players.map((p) => ({
       ...p,

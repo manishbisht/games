@@ -127,6 +127,7 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   const guestWire = watchSocket(guest)
 
   await host.goto('/#/prism')
+  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name').fill('Ann')
   // Two seats: the smallest table Prism offers, and the one this test can drive.
   await host.getByRole('group', { name: 'Table size' }).getByRole('button', { name: '2' }).click()
@@ -211,6 +212,7 @@ test('a table made for four deals to the two who turned up', async ({ browser })
   const guest = await newPlayer(browser, errors)
 
   await host.goto('/#/prism')
+  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name').fill('Ann')
   await host.getByRole('group', { name: 'Table size' }).getByRole('button', { name: '4' }).click()
   await host.getByRole('button', { name: 'Create room' }).click()

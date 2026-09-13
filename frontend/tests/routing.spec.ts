@@ -52,7 +52,7 @@ for (const [oldPath, canonicalPath, heading] of [
   })
 }
 
-for (const path of ['/hearth-and-home', '/estate', '/chess', '/prism']) {
+for (const path of ['/hearth-and-home', '/estate', '/chess', '/prism', '/wildrise']) {
   test(`a bogus room code under ${path} reaches the room page, not the 404 redirect`, async ({ page }) => {
     // "ABCDEF" is well-formed (six letters from the room-code alphabet) but no such
     // room exists, so this exercises the room page's own UI rather than the invalid-
@@ -63,12 +63,16 @@ for (const path of ['/hearth-and-home', '/estate', '/chess', '/prism']) {
   })
 }
 
-test('Wildrise has no room route, so a room-shaped URL falls through to the home redirect', async ({
+test('a room code that is not six characters is turned away by the room page itself', async ({
   page,
 }) => {
+  // The route matches, so this is the room page saying no rather than the
+  // catch-all redirect: a malformed code never becomes a lookup.
   await page.goto('/#/wildrise/room/ABC')
-  await expect(page).toHaveURL('/#/')
-  await expect(page.getByRole('heading', { name: 'Pick your next game.' })).toBeVisible()
+  await expect(page).toHaveURL('/#/wildrise/room/ABC')
+  await expect(page.getByRole('heading', { name: 'That link looks wrong.' })).toBeVisible()
+  await page.getByRole('link', { name: 'Back to Wildrise' }).click()
+  await expect(page).toHaveURL('/#/wildrise')
 })
 
 test('the collection is usable on mobile and after visiting both games', async ({ page }) => {

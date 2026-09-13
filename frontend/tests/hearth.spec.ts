@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('starts a local game, rolls six, enters a piece and grants a bonus turn', async ({ page }) => {
+test('starts a bot game, rolls six, enters a piece and grants a bonus turn', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(() => {
@@ -11,7 +11,6 @@ test('starts a local game, rolls six, enters a piece and grants a bonus turn', a
   await expect(page.getByRole('heading', { name: 'Gather around.' })).toBeVisible()
   await page.screenshot({ path: 'test-results/hearth-desktop-setup.png', fullPage: true })
   await page.getByRole('button', { name: '2 players', exact: true }).click()
-  await page.getByLabel('Blue player type').selectOption('human')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Red’s turn' })).toBeVisible()
   await page.getByRole('button', { name: 'Roll dice', exact: true }).click()
@@ -42,7 +41,8 @@ test('mobile setup, rules and custom settings remain usable', async ({ page }) =
   await page.screenshot({ path: 'test-results/hearth-mobile-game.png', fullPage: true })
 })
 
-test('AI opponents play alternating turns through victory and can play again', async ({ page }) => {
+test('the human and a bot alternate turns through victory and can play again', async ({ page }) => {
+  test.setTimeout(90000)
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(() => {
@@ -56,11 +56,19 @@ test('AI opponents play alternating turns through victory and can play again', a
   await page.getByLabel('Exact roll to finish').uncheck()
   await page.getByLabel('Bonus roll on 6').uncheck()
   await page.getByLabel('Allow captures').uncheck()
-  await page.getByLabel('Red player type').selectOption('hard')
   await page.getByLabel('Blue player type').selectOption('medium')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Blue’s turn' })).toBeVisible({ timeout: 10000 })
-  await expect(page.getByRole('dialog', { name: 'Red wins!' })).toBeVisible({ timeout: 45000 })
+  const result = page.getByRole('dialog', { name: 'Red wins!' })
+  const roll = page.locator('.hh-roll-button')
+  for (let turn = 0; turn < 15; turn++) {
+    await expect
+      .poll(async () => (await result.isVisible()) || (await roll.isEnabled()), { timeout: 10000 })
+      .toBe(true)
+    if (await result.isVisible()) break
+    await roll.click()
+    await expect(roll).toBeDisabled()
+  }
+  await expect(result).toBeVisible()
   await expect(page.getByRole('dialog')).toContainText('1/1 home')
   await page.screenshot({ path: 'test-results/hearth-victory.png', fullPage: true })
   await page.getByRole('button', { name: 'Play again', exact: true }).click()

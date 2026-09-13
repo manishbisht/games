@@ -74,6 +74,7 @@ async function seatedTable(browser: Browser, errors: string[]) {
   // The lobby lives where a game is set up, which for Estate is the setup dialog.
   await host.goto('/#/estate')
   await host.getByRole('button', { name: 'Start game' }).click()
+  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name').fill('Ann')
   // Two seats: the smallest table Estate offers, and the one this test can drive.
   await host.getByRole('group', { name: 'Table size' }).getByRole('button', { name: '2' }).click()

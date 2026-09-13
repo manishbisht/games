@@ -30,10 +30,11 @@ describe('room creation', () => {
   })
 
   it('only books games that have an adapter registered', async () => {
-    // A name is not a game: `wildrise` is in the catalog and plays locally, but
-    // the protocol has never heard of it and the registry has no adapter for it.
-    // (Every id `GameId` does name now has one, so that case cannot be staged.)
-    for (const game of ['wildrise', 'nope', 42, undefined]) {
+    // A name is not a game. Every id `GameId` names has an adapter today, so
+    // what is left to refuse is everything that is not one of them — and the
+    // gate is the registry, not the type, which is what keeps a game that only
+    // has a name from having rooms made for it.
+    for (const game of ['ludo', 'nope', 42, undefined]) {
       const res = await post({ game, visibility: 'private', name: 'Ann', guestId: crypto.randomUUID() })
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({ error: 'unknown game' })

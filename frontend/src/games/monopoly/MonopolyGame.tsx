@@ -46,7 +46,6 @@ import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { loadGame, saveGame } from './game/storage'
 import { playSound, unlockAudio } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
-import OnlinePanel from '../../online/OnlinePanel'
 import { cardKeyOf, claimTarget, onlineDispatch, tradeKeyOf } from './online/session'
 import type { OnlineEstateSession } from './online/session'
 import BoardScene from './scene/BoardScene'
@@ -446,7 +445,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         <div className="header-right">
           <PlayersOnlineBadge game="estate" className="header-online" />
           <span className="local-label">
-            <i /> {online ? 'ONLINE TABLE' : 'LOCAL MULTIPLAYER'}
+            <i /> {online ? 'ONLINE TABLE' : 'PLAY VS BOTS'}
           </span>
           <button className="header-help" onClick={() => setModal('rules')}>
             <CircleHelp size={17} />
@@ -672,7 +671,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                                   ? presence(online, p.id)
                                   : p.isBot
                                     ? 'Computer'
-                                    : 'Local player'}
+                                    : 'You'}
                           </span>
                         </div>
                         <div className="player-money">
@@ -820,9 +819,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         </div>
       )}
       {modal === 'setup' && (
-        <SetupDialog onClose={() => setModal(null)} onStart={startGame} inProgress={!isSetup}>
-          {!online && <OnlinePanel game="estate" basePath={estateGame.path} seatChoices={[2, 3, 4]} />}
-        </SetupDialog>
+        <SetupDialog onClose={() => setModal(null)} onStart={startGame} inProgress={!isSetup} />
       )}
       {modal === 'portfolio' && (
         <PortfolioDialog

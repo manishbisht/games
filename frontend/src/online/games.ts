@@ -63,6 +63,13 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     seatLabel: (_seat, index) => `Take seat ${index + 1}`,
     RoomView: lazy(() => import('../games/prism/online/PrismRoomView')),
   },
+  wildrise: {
+    minSeats: 2,
+    // Colours are handed out at the start, once the room knows who turned up, so
+    // a seat taken beforehand cannot promise one.
+    seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    RoomView: lazy(() => import('../games/wildrise/online/WildriseRoomView')),
+  },
 }
 
 /** The room config for a catalog id, or undefined when that game has no online mode. */

@@ -1,22 +1,20 @@
 import { useState } from 'react'
-import type { ReactNode } from 'react'
 import { ArrowRight, Check, Minus, Plus, Sparkles, Users } from 'lucide-react'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
 import { DEFAULT_PLAYERS, PLAYER_STYLES } from '@games/shared/estate/board'
 import TokenIcon from './TokenIcon'
 import Dialog from './Dialog'
+import PlayOptions from '../../../online/PlayOptions'
+import { estateGame } from '../../catalog'
 
 export default function SetupDialog({
   onClose,
   onStart,
   inProgress,
-  children,
 }: {
   onClose: () => void
   onStart: (players: PlayerConfig[], mode: GameState['mode']) => void
   inProgress: boolean
-  /** Anything that belongs with setting a table up — the online lobby, so far. */
-  children?: ReactNode
 }) {
   const [players, setPlayers] = useState(DEFAULT_PLAYERS),
     [mode, setMode] = useState<GameState['mode']>('classic')
@@ -32,86 +30,80 @@ export default function SetupDialog({
       <p className="dialog-description">
         A little luck, a good investment, and some friendly rivalry. Make this game your own.
       </p>
-      <div className="section-label">
-        <span>
-          <Users size={16} /> PLAYERS
-        </span>
-        <div className="stepper">
-          <button
-            aria-label="Remove player"
-            disabled={players.length <= 2}
-            onClick={() => setPlayers((p) => p.slice(0, -1))}
-          >
-            <Minus size={15} />
-          </button>
-          <strong>{players.length}</strong>
-          <button
-            aria-label="Add player"
-            disabled={players.length >= 4}
-            onClick={() => setPlayers((p) => [...p, DEFAULT_PLAYERS[p.length]])}
-          >
-            <Plus size={15} />
-          </button>
-        </div>
-      </div>
-      <div className="setup-players">
-        {players.map((p, i) => (
-          <div className="setup-player" key={i}>
-            <div
-              className="token-well"
-              style={{ '--player-color': PLAYER_STYLES[i].color } as React.CSSProperties}
+      <PlayOptions game="estate" basePath={estateGame.path} seatChoices={[2, 3, 4]}>
+        <div className="section-label">
+          <span>
+            <Users size={16} /> PLAYERS
+          </span>
+          <div className="stepper">
+            <button
+              aria-label="Remove player"
+              disabled={players.length <= 2}
+              onClick={() => setPlayers((p) => p.slice(0, -1))}
             >
-              <TokenIcon {...PLAYER_STYLES[i]} size={40} />
-            </div>
-            <input
-              aria-label={`Player ${i + 1} name`}
-              value={p.name}
-              maxLength={18}
-              onChange={(e) => update(i, { name: e.target.value })}
-            />
-            <select
-              aria-label={`Player ${i + 1} control`}
-              value={p.isBot ? 'computer' : 'human'}
-              onChange={(e) => update(i, { isBot: e.target.value === 'computer' })}
+              <Minus size={15} />
+            </button>
+            <strong>{players.length}</strong>
+            <button
+              aria-label="Add player"
+              disabled={players.length >= 4}
+              onClick={() => setPlayers((p) => [...p, DEFAULT_PLAYERS[p.length]])}
             >
-              <option value="human">Local player</option>
-              <option value="computer">Computer</option>
-            </select>
+              <Plus size={15} />
+            </button>
           </div>
-        ))}
-      </div>
-      <div className="section-label">
-        <span>
-          <Sparkles size={16} /> YOUR GAME, YOUR PACE
-        </span>
-      </div>
-      <div className="mode-options">
-        {(['classic', 'quick'] as const).map((m) => (
-          <button
-            key={m}
-            className={`mode-option ${mode === m ? 'selected' : ''}`}
-            onClick={() => setMode(m)}
-          >
-            <span>
-              {m === 'classic' ? 'The classic' : 'Quick & spirited'}
-              {mode === m && <Check size={16} />}
-            </span>
-            <small>
-              {m === 'classic'
-                ? '$1,500 starting cash. The full experience.'
-                : '$1,000 starting cash. Rents rise from round 15.'}
-            </small>
-          </button>
-        ))}
-      </div>
-      {inProgress && (
-        <p className="warning-copy">Starting a new game will replace the saved game at this table.</p>
-      )}
-      <button className="primary-button full-width" onClick={() => onStart(players, mode)}>
-        Start game <ArrowRight size={19} />
-      </button>
-      <p className="dialog-footnote">2–4 players · Local multiplayer · Automatically saved</p>
-      {children}
+        </div>
+        <div className="setup-players">
+          {players.map((p, i) => (
+            <div className="setup-player" key={i}>
+              <div
+                className="token-well"
+                style={{ '--player-color': PLAYER_STYLES[i].color } as React.CSSProperties}
+              >
+                <TokenIcon {...PLAYER_STYLES[i]} size={40} />
+              </div>
+              <input
+                aria-label={`Player ${i + 1} name`}
+                value={p.name}
+                maxLength={18}
+                onChange={(e) => update(i, { name: e.target.value })}
+              />
+              <span className="play-options-role">{i === 0 ? 'You' : 'Bot'}</span>
+            </div>
+          ))}
+        </div>
+        <div className="section-label">
+          <span>
+            <Sparkles size={16} /> YOUR GAME, YOUR PACE
+          </span>
+        </div>
+        <div className="mode-options">
+          {(['classic', 'quick'] as const).map((m) => (
+            <button
+              key={m}
+              className={`mode-option ${mode === m ? 'selected' : ''}`}
+              onClick={() => setMode(m)}
+            >
+              <span>
+                {m === 'classic' ? 'The classic' : 'Quick & spirited'}
+                {mode === m && <Check size={16} />}
+              </span>
+              <small>
+                {m === 'classic'
+                  ? '$1,500 starting cash. The full experience.'
+                  : '$1,000 starting cash. Rents rise from round 15.'}
+              </small>
+            </button>
+          ))}
+        </div>
+        {inProgress && (
+          <p className="warning-copy">Starting a new game will replace the saved game at this table.</p>
+        )}
+        <button className="primary-button full-width" onClick={() => onStart(players, mode)}>
+          Start game <ArrowRight size={19} />
+        </button>
+        <p className="dialog-footnote">2–4 players · You + bot opponents · Automatically saved</p>
+      </PlayOptions>
     </Dialog>
   )
 }

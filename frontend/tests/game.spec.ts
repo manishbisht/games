@@ -8,7 +8,7 @@ function fixture() {
     type: 'START',
     players: [
       { name: 'Alex', isBot: false },
-      { name: 'Sam', isBot: false },
+      { name: 'Sam', isBot: true },
     ],
     mode: 'classic',
     seed: 42,
@@ -31,7 +31,6 @@ test('renders the 3D board and supports setup, rolling, buying, and continued tu
   await page.getByRole('button', { name: 'Start game' }).click()
   await page.getByRole('button', { name: 'Remove player' }).click()
   await page.getByRole('button', { name: 'Remove player' }).click()
-  await page.getByLabel('Player 2 control').selectOption('human')
   await page.getByLabel('Player 1 name').fill('Alex')
   await page.getByLabel('Player 2 name').fill('Sam')
   await page.getByRole('button', { name: /Quick & spirited/ }).click()
@@ -137,7 +136,7 @@ test('builds, sells, and mortgages with clear balances and ownership', async ({ 
   await expect(page.getByRole('button', { name: /Alex, \$1,505/ })).toBeVisible()
 })
 
-test('trading waits for both confirmations and exchanges assets', async ({ page }) => {
+test('a bot evaluates the offered trade and exchanges assets', async ({ page }) => {
   const s = fixture()
   s.properties[1] = { owner: 0, level: 0, mortgaged: false }
   s.properties[3] = { owner: 1, level: 0, mortgaged: false }
@@ -147,8 +146,8 @@ test('trading waits for both confirmations and exchanges assets', async ({ page 
   await page.getByRole('checkbox', { name: /Maple Lane/ }).check()
   await page.getByRole('checkbox', { name: /Cedar Court/ }).check()
   await page.getByRole('button', { name: 'Confirm & send offer' }).click()
-  await expect(page.getByText('Pass the device to Sam to review and confirm.')).toBeVisible()
-  await page.getByRole('button', { name: 'Accept as Sam' }).click()
+  await expect(page.getByText('Your computer opponent is considering the offer…')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Accept as Sam' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Alex, \$1,400/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Sam, \$1,600/ })).toBeVisible()
   await expect(page.locator('.activity-event').first()).toContainText('Assets exchanged')
@@ -158,8 +157,9 @@ test('restores a pending trade after reloading', async ({ page }) => {
   const s = fixture()
   s.trade = { from: 0, to: 1, giveCash: 100, getCash: 0, giveProperties: [], getProperties: [] }
   await loadFixture(page, s)
-  await expect(page.getByRole('button', { name: 'Accept as Sam' })).toBeVisible()
-  await page.getByRole('button', { name: 'Decline' }).click()
+  await expect(page.getByText('Your computer opponent is considering the offer…')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Alex, \$1,400/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Roll dice/ })).toBeEnabled()
 })
 

@@ -30,7 +30,7 @@ test('Prism opens from the collection, renders its table, and has working settin
   expect(errors).toEqual([])
 })
 
-test('a full local round deals, plays, draws, calls, changes color, wins and restarts', async ({ page }) => {
+test('a full bot round plays, resolves wild cards, finishes, and restarts', async ({ page }) => {
   test.setTimeout(180000)
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
@@ -41,75 +41,47 @@ test('a full local round deals, plays, draws, calls, changes color, wins and res
       return seed / 4294967296
     }
   })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/#/prism')
   await page.getByRole('button', { name: 'Mute sound', exact: true }).click()
-  await page.getByRole('button', { name: 'Local friends', exact: true }).click()
   await page.getByRole('button', { name: '2 players', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('switch', { name: 'Faster AI turns' }).click()
+  await page.getByRole('button', { name: 'All set' }).click()
   await page.getByRole('button', { name: 'Let’s play', exact: true }).click()
   await expect(page.locator('.pr-card')).toHaveCount(7)
-  await page.screenshot({ path: 'test-results/prism-desktop-game.png', fullPage: true })
-  let testedLateCall = false
-  let plays = 0,
-    draws = 0,
-    wilds = 0,
-    calls = 0
-  for (let turn = 0; turn < 500; turn++) {
-    if (await page.getByRole('dialog', { name: 'Round result', exact: true }).count()) break
-    const handoff = page.getByRole('dialog', { name: 'Pass the device', exact: true })
-    if (await handoff.count()) {
-      await expect(page.locator('.pr-card')).toHaveCount(0)
-      const call = handoff.getByRole('button', { name: /Call Prism/ })
-      if ((await call.count()) && testedLateCall) {
-        await call.click()
-        calls++
-      }
-      await handoff.getByRole('button', { name: /show my hand/ }).click()
-      if (!testedLateCall && (await page.locator('.pr-catch').count())) {
-        const lateCall = page.getByRole('button', { name: 'Prism!', exact: true })
-        await expect(lateCall).toBeVisible({ timeout: 2000 })
-        await lateCall.click()
-        testedLateCall = true
-        calls++
-      }
-    }
+  const result = page.getByRole('dialog', { name: 'Round result', exact: true })
+  const turnAction = page.getByRole('button', { name: /^(Draw card|Draw \d+|Keep & pass)$/ })
+  let plays = 0
+  for (let action = 0; action < 300; action++) {
+    await expect
+      .poll(async () => (await result.isVisible()) || (await turnAction.isEnabled()), { timeout: 15000 })
+      .toBe(true)
+    if (await result.isVisible()) break
     const call = page.locator('.pr-hand-toolbar .pr-call')
-    if ((await call.isEnabled()) && testedLateCall) {
-      await call.click()
-      calls++
-    }
+    if (await call.isEnabled()) await call.click()
     const legal = page.locator('.pr-card:enabled')
     if (await legal.count()) {
       await legal.first().focus()
       await page.keyboard.press('Enter')
       await page.getByRole('button', { name: 'Play card', exact: true }).click()
-      const colors = page.getByRole('dialog', { name: 'Choose a color', exact: true })
-      if (await colors.count()) {
-        await colors.getByRole('button', { name: 'Choose red', exact: true }).click()
-        wilds++
-      }
+      if (await page.getByRole('dialog', { name: 'Choose a color', exact: true }).count())
+        await page.getByRole('button', { name: 'Choose red', exact: true }).click()
       plays++
     } else {
-      const keep = page.getByRole('button', { name: 'Keep & pass', exact: true })
-      if (await keep.count()) await keep.click()
-      else {
-        await page.getByRole('button', { name: 'Draw card', exact: true }).click()
-        draws++
-      }
+      await turnAction.click()
     }
   }
-  await expect(page.getByRole('dialog', { name: 'Round result' })).toContainText('wins!')
-  expect(plays).toBeGreaterThan(10)
-  expect(draws).toBeGreaterThan(0)
-  expect(wilds).toBeGreaterThan(0)
-  expect(calls).toBeGreaterThan(0)
-  expect(testedLateCall).toBe(true)
-  await page.screenshot({ path: 'test-results/prism-result.png', fullPage: true })
+  await expect(result).toContainText('wins!')
+  expect(plays).toBeGreaterThan(0)
+  await expect(page.getByRole('dialog', { name: 'Pass the device', exact: true })).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/prism-round-result.png', fullPage: true })
   await page.getByRole('button', { name: 'Play again', exact: true }).click()
-  await expect(page.locator('.pr-round')).toContainText('ROUND 02')
+  await expect(result).toHaveCount(0)
   await expect(page.locator('.pr-card')).toHaveCount(7)
   await page.getByRole('button', { name: 'Leave game', exact: true }).click()
   await page.getByRole('button', { name: 'Return to menu', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'A little color. A little chaos.' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Play vs bot', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 

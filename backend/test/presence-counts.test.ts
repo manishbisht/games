@@ -53,7 +53,9 @@ describe('presence counts', () => {
     expect(moved).toEqual({ total: 1, byGame: {} })
   })
 
-  it('accepts wildrise even though it has no online play', async () => {
+  it('counts a visitor on any game in the catalog', async () => {
+    // Presence keys on catalog ids rather than the online-only `GameId`, so a
+    // game that only ever plays locally still has its page's visitors counted.
     const result = await counts({ clientId: 'client-aaaaaaaa', tabId: 'tab-11111111', game: 'wildrise' })
     expect(result.byGame).toEqual({ wildrise: 1 })
   })

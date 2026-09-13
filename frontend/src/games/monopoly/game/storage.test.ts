@@ -27,6 +27,13 @@ describe('saved game recovery', () => {
     saveGame(s)
     expect(loadGame()).toEqual(s)
   })
+  it('returns old same-device multiplayer to setup without replacing the save', () => {
+    const s = started()
+    s.players[1].isBot = false
+    saveGame(s)
+    expect(loadGame().status).toBe('setup')
+    expect(JSON.parse(records.get('estate-game-v1')!).players[1].isBot).toBe(false)
+  })
   it('refreshes legacy token colors without losing saved progress', () => {
     const s = started()
     s.players[0].color = '#e9ad72'

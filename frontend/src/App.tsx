@@ -19,7 +19,7 @@ export default function App() {
       ?.setAttribute(
         'content',
         game?.description ??
-          'Play Hearth & Home and Estate, a collection of free tabletop games for your browser. Gather local friends or challenge the computer. No downloads or accounts needed.',
+          'Play Hearth & Home and Estate, a collection of free tabletop games for your browser. Meet friends in online rooms or challenge the computer. No downloads or accounts needed.',
       )
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', game?.themeColor ?? '#faf9f5')
     document

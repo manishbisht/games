@@ -4,9 +4,10 @@ import type { Env } from './env'
 /** A visitor drops out of the counts after three missed 30s heartbeats. */
 export const PRESENCE_TTL_MS = 90_000
 
-// Mirrors the catalog ids in frontend/src/games/catalog.ts — including
-// wildrise, which has no online play. Presence counts page visitors, so it
-// deliberately keys on catalog ids rather than the online-only `GameId`.
+// Mirrors the catalog ids in frontend/src/games/catalog.ts. Presence counts the
+// people on a game's page, whether or not they ever open a room, so it
+// deliberately keys on catalog ids rather than the online-only `GameId` — a
+// game can be in the catalog long before it has an adapter to play over.
 const PRESENCE_GAMES = new Set(['hearth', 'estate', 'chess', 'prism', 'wildrise'])
 const ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/
 

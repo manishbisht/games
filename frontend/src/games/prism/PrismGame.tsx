@@ -42,8 +42,6 @@ import type { SetupOptions } from './components/Setup'
 import CardFace from './components/CardFace'
 import Dialog from './components/Dialog'
 import Rules from './components/Rules'
-import OnlinePanel from '../../online/OnlinePanel'
-import { prismGame } from '../catalog'
 import { claimTarget } from './online/session'
 import type { OnlinePrismSession } from './online/session'
 import './PrismGame.css'
@@ -60,8 +58,8 @@ const DEFAULT_OPTIONS: SetupOptions = {
 type Session = { game: GameState; menu: boolean; viewer: number }
 function seats(options: SetupOptions) {
   return Array.from({ length: options.count }, (_, i) => ({
-    name: options.mode === 'ai' ? AI_NAMES[i] : options.names[i],
-    kind: options.mode === 'ai' && i ? ('ai' as const) : ('human' as const),
+    name: AI_NAMES[i],
+    kind: i ? ('ai' as const) : ('human' as const),
   }))
 }
 
@@ -603,18 +601,13 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
           </>
         )}
       </main>
-      {menu && !online && (
-        <section className="pr-online-panel">
-          <OnlinePanel game="prism" basePath={prismGame.path} seatChoices={[2, 3, 4]} />
-        </section>
-      )}
       <footer className="pr-footer">
         <span>A LITTLE PLAY GOES A LONG WAY.</span>
         <span>
           <i />{' '}
           {menu
             ? 'Made for good company'
-            : `${online ? 'Online table' : options.mode === 'ai' ? `${options.difficulty} AI` : 'Pass & play'} · ${game.players.length} players`}{' '}
+            : `${online ? 'Online table' : `${options.difficulty} bots`} · ${game.players.length} players`}{' '}
           <span className="pr-footer-star">✦</span>
         </span>
       </footer>

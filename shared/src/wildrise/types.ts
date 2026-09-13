@@ -9,7 +9,11 @@ export interface Player {
   climbs: number
   slides: number
 }
-export interface Route { from: number; to: number; color: string }
+export interface Route {
+  from: number
+  to: number
+  color: string
+}
 export interface Rules {
   exactFinish: boolean
   extraTurnOnSix: boolean
@@ -25,12 +29,17 @@ export interface GameConfig {
   firstPlayer?: number
   rules?: Partial<Rules>
 }
+/**
+ * A move in flight. One beat covers the whole thing, so `path` is the route and
+ * how far along it the token has got is the renderer's to work out from its own
+ * clock — nothing here is an animation cursor, which is what lets a server
+ * broadcast this state without also broadcasting a frame number.
+ */
 export interface Motion {
   kind: 'walk' | 'snake' | 'ladder'
   from: number
   to: number
   path: number[]
-  index: number
 }
 export interface GameEvent {
   id: number
@@ -55,6 +64,6 @@ export interface GameState {
 export type Action =
   | { type: 'ROLL'; value: number }
   | { type: 'DICE_SETTLED' }
-  | { type: 'STEP_DONE' }
+  | { type: 'MOVE_DONE' }
   | { type: 'TRANSPORT_DONE' }
   | { type: 'NEXT_TURN' }

@@ -3,6 +3,7 @@ import { estateAdapter } from '../estate/adapter'
 import { hearthAdapter } from '../hearth/adapter'
 import { prismAdapter } from '../prism/adapter'
 import type { GameId } from '../protocol/types'
+import { wildriseAdapter } from '../wildrise/adapter'
 import type { GameAdapter } from './adapter'
 
 /**
@@ -18,6 +19,7 @@ const adapters: Partial<Record<GameId, GameAdapter>> = {
   estate: estateAdapter,
   hearth: hearthAdapter,
   prism: prismAdapter,
+  wildrise: wildriseAdapter,
 }
 
 /**

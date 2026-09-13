@@ -126,6 +126,11 @@
   max-height: 1250px;
   overflow: hidden;
 }
+.pr-is-menu .pr-arena {
+  height: auto;
+  min-height: max(714px, calc(100dvh - 126px));
+  max-height: none;
+}
 .pr-scene-wrap {
   position: absolute;
   inset: 0;
@@ -180,6 +185,7 @@
   z-index: 2;
   margin-left: max(42px, calc((100vw - 1400px) / 2));
   padding-top: clamp(44px, 7vh, 95px);
+  padding-bottom: 36px;
 }
 .pr-eyebrow {
   display: flex;

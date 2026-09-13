@@ -1,12 +1,12 @@
 export const PROTOCOL_VERSION = 2
 
-export type GameId = 'chess' | 'hearth' | 'estate' | 'prism'
+export type GameId = 'chess' | 'hearth' | 'estate' | 'prism' | 'wildrise'
 /**
  * Every game the protocol has a name for. A game only becomes playable online
  * once its adapter is registered (see `../online/registry`) — this list is the
  * vocabulary, the registry is the guest list.
  */
-export const GAME_IDS: readonly GameId[] = ['chess', 'hearth', 'estate', 'prism']
+export const GAME_IDS: readonly GameId[] = ['chess', 'hearth', 'estate', 'prism', 'wildrise']
 export type RoomVisibility = 'private' | 'public'
 export type RoomStatus = 'open' | 'playing' | 'finished'
 /** `'w' | 'b'` for chess; `'p0'..'p3'` elsewhere. The adapter mints them. */

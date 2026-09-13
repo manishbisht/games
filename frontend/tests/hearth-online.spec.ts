@@ -64,6 +64,7 @@ test('two browsers create, join, and play a server-paced hearth table', async ({
   const guest = await newPlayer(browser, errors)
 
   await host.goto('/#/hearth-and-home')
+  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name').fill('Ann')
   // Two seats: the smallest table Hearth offers, and the one this test can drive.
   await host.getByRole('group', { name: 'Table size' }).getByRole('button', { name: '2' }).click()
@@ -124,6 +125,7 @@ test('a table made for three plays with the two who turned up', async ({ browser
   const guest = await newPlayer(browser, errors)
 
   await host.goto('/#/hearth-and-home')
+  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name').fill('Ann')
   await host.getByRole('group', { name: 'Table size' }).getByRole('button', { name: '3' }).click()
   await host.getByRole('button', { name: 'Create room' }).click()

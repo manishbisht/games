@@ -1,5 +1,7 @@
-import { ArrowRight, Bot, Check, Sparkles, Users } from 'lucide-react'
+import { ArrowRight, Check, Sparkles, Users } from 'lucide-react'
 import type { Difficulty } from '@games/shared/prism/types'
+import PlayOptions from '../../../online/PlayOptions'
+import { prismGame } from '../../catalog'
 
 export interface SetupOptions {
   mode: 'ai' | 'local'
@@ -35,30 +37,23 @@ export default function Setup({
         Bring a little friendly rivalry to the table.
       </p>
       <div className="pr-setup-card">
-        <div className="pr-mode-switch" aria-label="Game mode">
-          <button aria-pressed={options.mode === 'ai'} onClick={() => update({ mode: 'ai' })}>
-            <Bot size={17} /> Play vs AI
-          </button>
-          <button aria-pressed={options.mode === 'local'} onClick={() => update({ mode: 'local' })}>
-            <Users size={17} /> Local friends
-          </button>
-        </div>
-        <div className="pr-setup-field">
-          <div className="pr-field-title">
-            <span>Seats at the table</span>
-            <small>Including you</small>
+        <PlayOptions game="prism" basePath={prismGame.path} seatChoices={[2, 3, 4]}>
+          <div className="pr-setup-field">
+            <div className="pr-field-title">
+              <span>Seats at the table</span>
+              <small>Including you</small>
+            </div>
+            <div className="pr-seats">
+              {[2, 3, 4].map((n) => (
+                <button key={n} aria-pressed={options.count === n} onClick={() => update({ count: n })}>
+                  <Users size={18} />
+                  <strong>{n} players</strong>
+                  {options.count === n && <Check size={13} />}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="pr-seats">
-            {[2, 3, 4].map((n) => (
-              <button key={n} aria-pressed={options.count === n} onClick={() => update({ count: n })}>
-                <Users size={18} />
-                <strong>{n} players</strong>
-                {options.count === n && <Check size={13} />}
-              </button>
-            ))}
-          </div>
-        </div>
-        {options.mode === 'ai' ? (
+
           <div className="pr-setup-field">
             <div className="pr-field-title">
               <span>A little competition?</span>
@@ -82,31 +77,16 @@ export default function Setup({
                   : 'A sharper table. Every card counts.'}
             </p>
           </div>
-        ) : (
-          <div className="pr-name-grid">
-            {Array.from({ length: options.count }, (_, i) => (
-              <label key={i}>
-                Player {i + 1}
-                <input
-                  value={options.names[i]}
-                  maxLength={20}
-                  onChange={(e) =>
-                    update({ names: options.names.map((n, j) => (j === i ? e.target.value : n)) })
-                  }
-                />
-              </label>
-            ))}
+          <button className="pr-primary pr-start" onClick={onStart}>
+            Let’s play <ArrowRight size={19} />
+          </button>
+          <div className="pr-setup-foot">
+            <span>
+              <i /> Classic rules
+            </span>
+            <span>About 10 minutes</span>
           </div>
-        )}
-        <button className="pr-primary pr-start" onClick={onStart}>
-          Let’s play <ArrowRight size={19} />
-        </button>
-        <div className="pr-setup-foot">
-          <span>
-            <i /> Classic rules
-          </span>
-          <span>About 10 minutes</span>
-        </div>
+        </PlayOptions>
       </div>
       <button className="pr-help-link" onClick={onHelp}>
         New to the table?{' '}

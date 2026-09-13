@@ -8,6 +8,9 @@ import { useRoom } from './useRoom'
 import { onlineGame } from './games'
 import type { OnlineGame } from './games'
 import { presenceEvents } from './roomState'
+import { Check, Copy, Link2 } from 'lucide-react'
+import ChessShell from '../games/chess/ChessShell'
+import { chessGame } from '../games/catalog'
 import './online.css'
 
 const TOAST_MS = 4000
@@ -26,30 +29,49 @@ export default function RoomPage({ game }: { game: string }) {
   if (!code) return <Fatal config={config} title="That link looks wrong." />
   // `Room` owns the socket, and the join frame carries our identity — so don't
   // mount it (or prompt for a name we may not need) until the identity settles.
-  if (!identity.isReady) return <p role="status">Joining room {code}…</p>
-  if (!identity.name) return <NamePrompt />
+  if (!identity.isReady)
+    return (
+      <RoomFrame config={config}>
+        <p className="ch-room-loading" role="status">
+          Joining room {code}…
+        </p>
+      </RoomFrame>
+    )
+  if (!identity.name) return <NamePrompt config={config} />
   return <Room code={code} config={config} />
 }
 
-function Notice({ title, children }: { title: string; children?: ReactNode }) {
+function RoomFrame({ config, children }: { config?: OnlineGame; children: ReactNode }) {
+  return config?.basePath === chessGame.path ? <ChessShell>{children}</ChessShell> : <>{children}</>
+}
+
+function Notice({ title, children, config }: { title: string; children?: ReactNode; config?: OnlineGame }) {
   return (
-    <main className="ch-room-notice">
-      <h1>{title}</h1>
-      {children}
-    </main>
+    <RoomFrame config={config}>
+      <main className="ch-room-notice">
+        {config?.basePath === chessGame.path && (
+          <span className="ch-room-emblem" aria-hidden="true">
+            ♞
+          </span>
+        )}
+        <h1>{title}</h1>
+        {children}
+      </main>
+    </RoomFrame>
   )
 }
 
 const Fatal = ({ config, title }: { config: OnlineGame; title: string }) => (
-  <Notice title={title}>
+  <Notice title={title} config={config}>
     <Link to={config.basePath}>Back to {config.name}</Link>
   </Notice>
 )
 
-function NamePrompt() {
+function NamePrompt({ config }: { config: OnlineGame }) {
   const identity = useIdentity()
   return (
-    <Notice title="Pick a name to join the table.">
+    <Notice title="Pick a name to join the table." config={config}>
+      <p>Your seat is just a name away. No account needed.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -57,9 +79,18 @@ function NamePrompt() {
           identity.setName(String(data.get('name') ?? ''))
         }}
       >
-        <input name="name" maxLength={24} placeholder="Your name" aria-label="Your name" />
+        <input
+          name="name"
+          maxLength={24}
+          required
+          pattern=".*\S.*"
+          autoComplete="nickname"
+          placeholder="Your name"
+          aria-label="Your name"
+        />
         <button type="submit">Join room</button>
       </form>
+      <Link to={config.basePath}>Back to {config.name}</Link>
     </Notice>
   )
 }
@@ -69,8 +100,11 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   const { room, api } = useRoom(code)
   const { snapshot, you } = room
   const leave = () => navigate(config.basePath)
+  const isChess = config.basePath === chessGame.path
 
   // Presence toasts: announce the other seats' disconnects/reconnects.
+  const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([])
   const toastId = useRef(0)
   const prevSnapshot = useRef<RoomSnapshot | null>(null)
@@ -111,7 +145,14 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
     return <Fatal config={config} title="This room doesn't exist (or has expired)." />
   if (room.phase === 'expired') return <Fatal config={config} title="This room has expired." />
   if (room.phase === 'full') return <Fatal config={config} title="This room is full." />
-  if (!snapshot) return <p role="status">Joining room {code}…</p>
+  if (!snapshot)
+    return (
+      <RoomFrame config={config}>
+        <p className="ch-room-loading" role="status">
+          Joining room {code}…
+        </p>
+      </RoomFrame>
+    )
 
   // The game is on: hand the table over to the game itself.
   const RoomView = config.RoomView
@@ -133,6 +174,11 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
         disabled={Boolean(occupant) && !mine}
         onClick={() => (mine ? api.leaveSeat() : api.sit(seat))}
       >
+        {config.basePath === chessGame.path && (
+          <span className={`ch-room-piece ch-room-piece-${seat}`} aria-hidden="true">
+            {seat === 'w' ? '♔' : '♚'}
+          </span>
+        )}
         <strong>{mine ? 'Leave seat' : config.seatLabel(seat, index)}</strong>
         <span>
           {occupant ? `${occupant.player.name}${occupant.connected ? '' : ' (away)'}` : 'Open seat'}
@@ -147,31 +193,58 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   const taken = snapshot.seatIds.filter((seat) => snapshot.seats[seat]).length
   const ready = taken >= config.minSeats
   return (
-    <main className="ch-room">
-      <h1>Room {snapshot.code}</h1>
-      <p>
-        Share this link with a friend:{' '}
-        <button
-          className="ch-room-copy"
-          onClick={() => void navigator.clipboard.writeText(window.location.href)}
-        >
-          Copy link
-        </button>
-      </p>
-      <div className="ch-room-seats">{snapshot.seatIds.map(seatButton)}</div>
-      {isHost ? (
-        <button className="ch-room-start" disabled={!ready} onClick={api.start}>
-          {!ready
-            ? 'Waiting for players…'
-            : taken === snapshot.seatIds.length
-              ? 'Start the game'
-              : `Start with ${taken} players`}
-        </button>
-      ) : (
-        <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
-      )}
-      <Link to={config.basePath}>Leave room</Link>
-      {toastStack}
-    </main>
+    <RoomFrame config={config}>
+      <main className="ch-room">
+        {isChess && <p className="ch-eyebrow">A GOOD GAME IS ONE INVITE AWAY</p>}
+        <h1>Room {snapshot.code}</h1>
+        {isChess && <p className="ch-room-intro">Share a link. Choose a side. Meet at the board.</p>}
+        <div className="ch-room-invite">
+          <label htmlFor="room-invite">
+            <Link2 size={15} /> Invite a friend
+          </label>
+          <div>
+            <input
+              id="room-invite"
+              readOnly
+              value={window.location.href}
+              onFocus={(event) => event.target.select()}
+            />
+            <button
+              className="ch-room-copy"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(window.location.href)
+                  setCopied(true)
+                  setCopyError(false)
+                } catch {
+                  setCopyError(true)
+                }
+              }}
+            >
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+          </div>
+          {copyError && <p role="status">Select and copy the invite link above to share it.</p>}
+        </div>
+        {isChess && <p className="ch-room-seat-label">CHOOSE YOUR SIDE</p>}
+        <div className="ch-room-seats">{snapshot.seatIds.map(seatButton)}</div>
+        {isHost ? (
+          <button className="ch-room-start" disabled={!ready} onClick={api.start}>
+            {!ready
+              ? 'Waiting for players…'
+              : taken === snapshot.seatIds.length
+                ? 'Start the game'
+                : `Start with ${taken} players`}
+          </button>
+        ) : (
+          <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
+        )}
+        <Link className="ch-room-leave" to={config.basePath}>
+          Leave room
+        </Link>
+        {toastStack}
+      </main>
+    </RoomFrame>
   )
 }

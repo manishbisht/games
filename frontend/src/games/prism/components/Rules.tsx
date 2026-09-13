@@ -67,7 +67,7 @@ export default function Rules({ onClose }: { onClose: () => void }) {
       <p className="pr-fine-print">
         Seven cards per player. A numbered card opens the round; action cards stay in the shuffled deck. Empty
         deck? We recycle the discards, keeping the top card. If all cards are held and nobody can play, the
-        round is a draw. Local friends pass the device between turns.
+        round is a draw. Play against bots or meet friends in an online room.
       </p>
       <button className="pr-primary" onClick={onClose}>
         Back to the table <ArrowRight size={17} />

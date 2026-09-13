@@ -2,6 +2,7 @@ import { ArrowRight, Bot, Dices, Heart, House, Monitor, Users } from 'lucide-rea
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
 import { HeaderAuth } from '../online/identity'
+import { PlayersOnlineBadge } from '../online/playersOnline'
 import './HomePage.css'
 import './ChessPreview.css'
 import './PrismPreview.css'
@@ -14,12 +15,31 @@ function BoardPreview({ game }: { game: string }) {
       <div className="collection-board">
         {game === 'wildrise' ? (
           <div className="collection-wildrise-grid">
-            {Array.from({ length: 100 }, (_, i) => <span key={i}>{Math.floor(i / 10) % 2 === 0 ? 100 - i : 81 - Math.floor(i / 10) * 10 + i % 10 + 10}</span>)}
-            <svg viewBox="0 0 100 100"><path d="M21 18C4 38 45 39 28 60S49 75 41 89" stroke="#668e78" /><path d="M81 10C95 26 62 22 70 39S86 53 66 68" stroke="#a182ad" /><path d="m15 79 38-61m-32 65 38-61M20 74l6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4" className="collection-wildrise-ladder" /><circle cx="21" cy="18" r="3.4" fill="#668e78" /><circle cx="81" cy="10" r="3.4" fill="#a182ad" /></svg>
+            {Array.from({ length: 100 }, (_, i) => (
+              <span key={i}>
+                {Math.floor(i / 10) % 2 === 0 ? 100 - i : 81 - Math.floor(i / 10) * 10 + (i % 10) + 10}
+              </span>
+            ))}
+            <svg viewBox="0 0 100 100">
+              <path d="M21 18C4 38 45 39 28 60S49 75 41 89" stroke="#668e78" />
+              <path d="M81 10C95 26 62 22 70 39S86 53 66 68" stroke="#a182ad" />
+              <path
+                d="m15 79 38-61m-32 65 38-61M20 74l6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4m-1-12 6 4"
+                className="collection-wildrise-ladder"
+              />
+              <circle cx="21" cy="18" r="3.4" fill="#668e78" />
+              <circle cx="81" cy="10" r="3.4" fill="#a182ad" />
+            </svg>
           </div>
         ) : game === 'prism' ? (
           <div className="collection-prism-hand">
-            {['7', '⇄', '✦', '+2'].map((symbol, i) => <div key={symbol} className={`collection-prism-card collection-prism-card-${i}`}><small>{symbol}</small><strong>{symbol}</strong><span>PRISM</span></div>)}
+            {['7', '⇄', '✦', '+2'].map((symbol, i) => (
+              <div key={symbol} className={`collection-prism-card collection-prism-card-${i}`}>
+                <small>{symbol}</small>
+                <strong>{symbol}</strong>
+                <span>PRISM</span>
+              </div>
+            ))}
           </div>
         ) : game === 'chess' ? (
           <div className="collection-chess-grid">
@@ -58,7 +78,9 @@ function BoardPreview({ game }: { game: string }) {
         )}
       </div>
       <div className="collection-preview-dice">
-        {game === 'prism' ? <span className="collection-prism-spark">✦</span> : game === 'chess' ? (
+        {game === 'prism' ? (
+          <span className="collection-prism-spark">✦</span>
+        ) : game === 'chess' ? (
           <span className="collection-chess-knight">♞</span>
         ) : (
           <Dices size={40} strokeWidth={1.4} />
@@ -83,6 +105,7 @@ export default function HomePage() {
         <span className="collection-free">
           <i /> Free to play. Always.
         </span>
+        <PlayersOnlineBadge className="collection-online" />
         <HeaderAuth />
       </header>
 
@@ -137,9 +160,16 @@ export default function HomePage() {
                     <div className="collection-player-info">
                       <Users size={17} />
                       <span>
-                        {game.id === 'chess' ? '1–2 players' : '2–4 players'}
-                        <small>{game.online ? 'Local, AI or online friends' : 'Local friends or AI'}</small>
+                        {game.id === 'chess' ? '2 players' : '2–4 players'}
+                        <small>
+                          {game.id === 'chess'
+                            ? 'Online with friends'
+                            : game.online
+                              ? 'Bots or online friends'
+                              : 'Play against bots'}
+                        </small>
                       </span>
+                      <PlayersOnlineBadge game={game.id} className="collection-card-online" />
                     </div>
                     <Link to={game.path} className="collection-play" aria-label={`Play ${game.name}`}>
                       Let’s play <ArrowRight size={17} />
@@ -154,7 +184,8 @@ export default function HomePage() {
         <aside className="collection-note">
           <Heart size={17} strokeWidth={1.6} />
           <p>
-            Same device. Shared moments. <span>No accounts required, no downloads — just one more round.</span>
+            Your favorite games. Shared moments.{' '}
+            <span>No accounts required, no downloads — just one more round.</span>
           </p>
         </aside>
       </main>

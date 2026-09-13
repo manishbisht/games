@@ -39,7 +39,6 @@ import SetupPanel from './components/SetupPanel'
 import RulesDialog from './components/RulesDialog'
 import Modal from './components/Modal'
 import Die from './components/Die'
-import OnlinePanel from '../../online/OnlinePanel'
 import { claimTarget } from './online/session'
 import type { OnlineHearthSession } from './online/session'
 import './HearthGame.css'
@@ -440,7 +439,6 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
             {!started ? (
               <>
                 <SetupPanel initialConfig={config} onStart={start} onPreview={preview} />
-                {!online && <OnlinePanel game="hearth" basePath={hearthGame.path} seatChoices={[2, 3, 4]} />}
               </>
             ) : (
               <>
@@ -750,8 +748,12 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
             </div>
             <div>
               <span>
-                <strong>{online ? 'Online table' : 'Local multiplayer'}</strong>
-                <small>{online ? 'Every seat has its own device.' : 'Players share this device.'}</small>
+                <strong>{online ? 'Online table' : 'You and the bots'}</strong>
+                <small>
+                  {online
+                    ? 'Every seat has its own device.'
+                    : 'You play while the bots take their own turns.'}
+                </small>
               </span>
               <Users size={18} />
             </div>
