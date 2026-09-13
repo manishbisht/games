@@ -1043,6 +1043,76 @@
 .pr-hand-hidden .pr-hand-toolbar {
   visibility: hidden;
 }
+/* An online seat that has gone quiet: the countdown, then the offer to play on. */
+.pr-abandon {
+  position: absolute;
+  z-index: 6;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  background: #24382e;
+  border: 1px solid #dfc28b3d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 6px 20px #071a1950;
+  font-size: 11px;
+}
+.pr-abandon button {
+  border-radius: 4px;
+  background: #ddc393;
+  color: #2b382b;
+  padding: 5px 10px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+/* Rooms live below the table on the menu screen, under the setup column. */
+.pr-online-panel {
+  max-width: 470px;
+  margin: 0 auto;
+  padding: 0 24px 54px;
+  font-size: 12px;
+}
+.pr-online-panel h3 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+.pr-online-panel .ch-online {
+  border-top-color: #d9e4d31f;
+  color: #c7cfbf;
+}
+.pr-online-panel .ch-online-name {
+  display: grid;
+  gap: 6px;
+}
+.pr-online-panel input {
+  font: inherit;
+  color: inherit;
+  background: #ffffff0d;
+  border: 1px solid #d4ddce29;
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.pr-online-panel button {
+  color: inherit;
+  background: #ffffff0d;
+  border: 1px solid #d4ddce29;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.pr-online-panel button:hover:not(:disabled) {
+  border-color: #dfc28b70;
+}
+.pr-online-panel .ch-online-visibility {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
 
 /* Native modal dialogs provide focus trapping and keep local hands private. */
 .pr-dialog {

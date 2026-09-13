@@ -49,6 +49,13 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     seatLabel: (_seat, index) => `Take seat ${index + 1}`,
     RoomView: lazy(() => import('../games/hearth/online/HearthRoomView')),
   },
+  prism: {
+    minSeats: 2,
+    // Seats are numbered, not dealt: which hand a seat gets is the shuffle's to
+    // decide, once the room knows who turned up.
+    seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    RoomView: lazy(() => import('../games/prism/online/PrismRoomView')),
+  },
 }
 
 /** The room config for a catalog id, or undefined when that game has no online mode. */

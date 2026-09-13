@@ -71,6 +71,7 @@ export const prismGame: GameEntry = {
   tags: ['Cards & color', 'Local & three AI levels'],
   icon: 'prism.svg',
   themeColor: '#142b24',
+  online: true,
   Component: lazy(() => import('./prism/PrismGame')),
 }
 

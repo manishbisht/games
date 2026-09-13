@@ -25,12 +25,14 @@ import {
   Trophy,
   Volume2,
   VolumeX,
+  WifiOff,
   X,
 } from 'lucide-react'
 import { act, cardName, cardPoints, createGame, handView, playableCards } from '@games/shared/prism'
 import { chooseMove } from '@games/shared/prism/ai'
 import { COLOR_HEX, COLORS } from '@games/shared/prism/types'
 import type { Card, Command, GameState } from '@games/shared/prism/types'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { sound } from './game/audio'
 import TableScene from './scene/TableScene'
 import type { TableApi } from './scene/createScene'
@@ -39,6 +41,10 @@ import type { SetupOptions } from './components/Setup'
 import CardFace from './components/CardFace'
 import Dialog from './components/Dialog'
 import Rules from './components/Rules'
+import OnlinePanel from '../../online/OnlinePanel'
+import { prismGame } from '../catalog'
+import { claimTarget } from './online/session'
+import type { OnlinePrismSession } from './online/session'
 import './PrismGame.css'
 
 const AI_NAMES = ['You', 'Jules', 'Cleo', 'Milo']
@@ -58,7 +64,46 @@ function seats(options: SetupOptions) {
   }))
 }
 
-export default function PrismGame() {
+/**
+ * The countdown before an away player's seat can be played without them, and the
+ * claim itself. The server stamps `awaySince` and re-validates the claim, so
+ * drift here only shifts what the banner says, never what the room allows.
+ */
+function AbandonmentNotice({
+  name,
+  awaySince,
+  onClaim,
+}: {
+  name: string
+  awaySince?: number
+  onClaim: () => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const ticker = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(ticker)
+  }, [])
+  const remaining = Math.max(0, CLAIM_WIN_AFTER_MS - (now - (awaySince ?? now)))
+  const seconds = Math.ceil(remaining / 1000)
+  return (
+    <div className="pr-abandon" role="status">
+      <WifiOff size={15} />
+      {remaining > 0 ? (
+        <span>
+          {name} stepped away — the table can play on without them in {Math.floor(seconds / 60)}:
+          {String(seconds % 60).padStart(2, '0')}.
+        </span>
+      ) : (
+        <>
+          <span>{name} seems to be gone.</span>
+          <button onClick={onClaim}>Play on without them</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
   const [options, setOptions] = useState<SetupOptions>(DEFAULT_OPTIONS)
   const [session, setSession] = useState<Session>(() => ({
     game: createGame(seats(DEFAULT_OPTIONS)),
@@ -76,14 +121,22 @@ export default function PrismGame() {
   const [showFeed, setShowFeed] = useState(false)
   const [sort, setSort] = useState(false)
   const table = useRef<Pick<TableApi, 'zoom'>>(null)
-  const { game, menu, viewer } = session
+  // Online the room is the only source of truth: the local session above never
+  // moves, the table is already dealt, and the hand this browser is shown is the
+  // only one in the state that is real.
+  const game = online ? online.state : session.game
+  const menu = online ? false : session.menu
+  /** Someone watching has no hand of their own, so they look over seat one's shoulder. */
+  const watching = online ? online.viewer === null : false
+  const viewer = online ? (online.viewer ?? 0) : session.viewer
   const active = game.players[game.currentPlayer],
     me = game.players[viewer]
   const handoff =
-    !menu && options.mode === 'local' && viewer !== game.currentPlayer && game.status === 'playing'
+    !menu && !online && options.mode === 'local' && viewer !== game.currentPlayer && game.status === 'playing'
   const enabled =
     !menu &&
     !handoff &&
+    !watching &&
     !dialog &&
     !wildCard &&
     game.status === 'playing' &&
@@ -93,9 +146,13 @@ export default function PrismGame() {
   const selectedCard = me.hand.find((c) => c.id === selected)
   const canCall =
     !menu &&
+    !watching &&
     game.status === 'playing' &&
     ((game.callWindow === viewer && !me.called) ||
       (enabled && me.hand.length === 2 && game.preCalled !== viewer))
+  /** A watcher is shown seat one's hand, and it arrives already face-down. */
+  const hideHand = handoff || watching
+  const awayBlocking = online ? claimTarget(online) : null
   const previousSound = useRef(game.sequence)
   const visibleHand = useMemo(() => {
     const cards = handView(game, viewer)
@@ -109,16 +166,24 @@ export default function PrismGame() {
       : cards
   }, [game, viewer, sort])
 
-  const send = useCallback((command: Command) => {
-    setSession((current) => {
-      const next = act(current.game, command)
-      return next === current.game ? current : { ...current, game: next }
-    })
-    if (command.type === 'play' || command.type === 'draw' || command.type === 'pass') setSelected(null)
-  }, [])
+  const send = useCallback(
+    (command: Command) => {
+      // Online nothing is applied here: the command goes to the room, and the
+      // table moves when the room says it did.
+      if (online) online.send.command(command)
+      else
+        setSession((current) => {
+          const next = act(current.game, command)
+          return next === current.game ? current : { ...current, game: next }
+        })
+      if (command.type === 'play' || command.type === 'draw' || command.type === 'pass') setSelected(null)
+    },
+    [online],
+  )
 
   useEffect(() => {
-    if (menu || dialog || wildCard || handoff || game.status !== 'playing' || active.kind !== 'ai') return
+    if (online || menu || dialog || wildCard || handoff || game.status !== 'playing' || active.kind !== 'ai')
+      return
     const timer = window.setTimeout(
       () => {
         setSession((current) => {
@@ -135,7 +200,7 @@ export default function PrismGame() {
       game.callWindow !== null ? 2400 : fast ? 650 : 1400,
     )
     return () => window.clearTimeout(timer)
-  }, [game, menu, dialog, wildCard, handoff, active.kind, options.difficulty, fast])
+  }, [game, menu, dialog, wildCard, handoff, active.kind, options.difficulty, fast, online])
 
   useEffect(() => {
     const recent = game.events.filter((e) => e.id > previousSound.current)
@@ -150,13 +215,15 @@ export default function PrismGame() {
   }, [game.sequence, game.events, menu, muted])
 
   useEffect(() => {
-    if (menu || game.status !== 'playing') return
+    // Online there is nothing to lose by reloading: the room holds the round and
+    // the seat comes back with it, so the warning would only be in the way.
+    if (menu || online || game.status !== 'playing') return
     const beforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
     }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [menu, game.status])
+  }, [menu, game.status, online])
 
   function start(again = false) {
     const next = createGame(
@@ -186,12 +253,19 @@ export default function PrismGame() {
   }
   const top = game.discardPile.at(-1)!
   const lastEvent = game.events.at(-1)
+  /** True when the seat on turn is this browser's to play — never a watcher's. */
+  const mine = !watching && active.id === viewer
+  /** Only the viewer's own leftovers can be counted: the rest stay face-down. */
+  const leftovers = (player: (typeof game.players)[number]) =>
+    player.hand.reduce((sum, c) => sum + cardPoints(c), 0)
   const ranks = [...game.players].sort((a, b) =>
     a.id === game.winner
       ? -1
       : b.id === game.winner
         ? 1
-        : a.hand.reduce((s, c) => s + cardPoints(c), 0) - b.hand.reduce((s, c) => s + cardPoints(c), 0),
+        : online
+          ? a.hand.length - b.hand.length
+          : leftovers(a) - leftovers(b),
   )
 
   return (
@@ -294,6 +368,9 @@ export default function PrismGame() {
                     <div className="pr-opponent-info">
                       <strong>
                         {p.name} {p.kind === 'ai' && <Bot size={12} />}
+                        {online && online.players[p.id]?.connected === false && (
+                          <WifiOff size={12} aria-label="away" />
+                        )}
                       </strong>
                       <span>
                         {p.hand.length === 1 ? (
@@ -343,7 +420,7 @@ export default function PrismGame() {
                     ? 'A round well played.'
                     : handoff
                       ? `Pass to ${active.name}`
-                      : active.id === viewer
+                      : mine
                         ? 'Your turn. Make it colorful.'
                         : `${active.name}’s turn`}
                 </strong>
@@ -352,7 +429,7 @@ export default function PrismGame() {
                     ? 'Good cards. Better company.'
                     : handoff
                       ? 'Keep your cards close.'
-                      : active.id !== viewer
+                      : !mine
                         ? 'A good move is worth the wait.'
                         : game.pendingPenalty
                           ? `Take ${game.pendingPenalty.count} or play a matching penalty.`
@@ -393,7 +470,7 @@ export default function PrismGame() {
                 <Plus size={15} />
               </button>
             </div>
-            <section className={`pr-hand-area ${handoff ? 'pr-hand-hidden' : ''}`} aria-label="Your hand">
+            <section className={`pr-hand-area ${hideHand ? 'pr-hand-hidden' : ''}`} aria-label="Your hand">
               <div className="pr-hand-topline">
                 <span>
                   <Hand size={14} /> {me.name === 'You' ? 'YOUR HAND' : `${me.name.toUpperCase()}’S HAND`}{' '}
@@ -408,7 +485,7 @@ export default function PrismGame() {
                   className={`pr-hand ${me.hand.length > 10 ? 'pr-hand-many' : ''}`}
                   style={{ '--count': visibleHand.length } as CSSProperties}
                 >
-                  {!handoff &&
+                  {!hideHand &&
                     visibleHand.map((card, i) => (
                       <button
                         key={card.id}
@@ -493,7 +570,7 @@ export default function PrismGame() {
             {game.callWindow !== null &&
               game.callWindow !== viewer &&
               active.kind === 'human' &&
-              !handoff && (
+              !hideHand && (
                 <button
                   className="pr-catch"
                   onClick={() => send({ type: 'catch', player: viewer, target: game.callWindow! })}
@@ -501,23 +578,37 @@ export default function PrismGame() {
                   <Flag size={16} /> Catch {game.players[game.callWindow].name} — no call!
                 </button>
               )}
-            {game.callWindow !== null && (game.callWindow === viewer || options.mode === 'local') && (
-              <div className="pr-call-notice">
-                <Megaphone size={17} />
-                <span>{game.players[game.callWindow].name}: one card left. Call Prism!</span>
-                <button onClick={() => send({ type: 'call', player: game.callWindow! })}>Prism!</button>
-              </div>
+            {game.callWindow !== null &&
+              !watching &&
+              (game.callWindow === viewer || options.mode === 'local') && (
+                <div className="pr-call-notice">
+                  <Megaphone size={17} />
+                  <span>{game.players[game.callWindow].name}: one card left. Call Prism!</span>
+                  <button onClick={() => send({ type: 'call', player: game.callWindow! })}>Prism!</button>
+                </div>
+              )}
+            {awayBlocking && (
+              <AbandonmentNotice
+                name={awayBlocking.name}
+                awaySince={awayBlocking.awaySince}
+                onClaim={() => online?.send.claim()}
+              />
             )}
           </>
         )}
       </main>
+      {menu && !online && (
+        <section className="pr-online-panel">
+          <OnlinePanel game="prism" basePath={prismGame.path} seatChoices={[2, 3, 4]} />
+        </section>
+      )}
       <footer className="pr-footer">
         <span>A LITTLE PLAY GOES A LONG WAY.</span>
         <span>
           <i />{' '}
           {menu
             ? 'Made for good company'
-            : `${options.mode === 'ai' ? `${options.difficulty} AI` : 'Pass & play'} · ${game.players.length} players`}{' '}
+            : `${online ? 'Online table' : options.mode === 'ai' ? `${options.difficulty} AI` : 'Pass & play'} · ${game.players.length} players`}{' '}
           <span className="pr-footer-star">✦</span>
         </span>
       </footer>
@@ -579,14 +670,24 @@ export default function PrismGame() {
             <LogOut />
           </span>
           <h2>Leave the table?</h2>
-          <p className="pr-dialog-copy">This round will end. There’s always room for another game.</p>
+          <p className="pr-dialog-copy">
+            {online
+              ? 'The round plays on without you. Your seat is yours to come back to.'
+              : 'This round will end. There’s always room for another game.'}
+          </p>
           <div className="pr-dialog-actions">
             <button className="pr-secondary" onClick={() => setDialog(null)}>
               Keep playing
             </button>
-            <button className="pr-primary" onClick={returnToMenu}>
-              Return to menu
-            </button>
+            {online ? (
+              <button className="pr-primary" onClick={online.leave}>
+                Leave room
+              </button>
+            ) : (
+              <button className="pr-primary" onClick={returnToMenu}>
+                Return to menu
+              </button>
+            )}
           </div>
         </Dialog>
       )}
@@ -687,7 +788,7 @@ export default function PrismGame() {
           <div className="pr-ranking">
             <div className="pr-ranking-label">
               <span>ROUND {game.round}</span>
-              <span>CARDS / POINTS LEFT</span>
+              <span>{online ? 'CARDS LEFT' : 'CARDS / POINTS LEFT'}</span>
             </div>
             {ranks.map((p, i) => (
               <div key={p.id}>
@@ -700,18 +801,39 @@ export default function PrismGame() {
                   <small>{p.totalScore} total points</small>
                 </strong>
                 <span>
-                  {p.hand.length} <small>/ {p.hand.reduce((sum, c) => sum + cardPoints(c), 0)}</small>
+                  {p.hand.length}
+                  {/* Online a hand stays face-down to the end, so only this seat's
+                      own leftovers can honestly be counted up. */}
+                  {(!online || p.id === viewer) && <small> / {leftovers(p)}</small>}
                 </span>
                 {p.id === game.winner && <Trophy size={14} />}
               </div>
             ))}
           </div>
-          <button className="pr-primary" onClick={() => start(true)}>
-            <RotateCcw size={16} /> Play again
-          </button>
-          <button className="pr-text-button" onClick={returnToMenu}>
-            Return to menu
-          </button>
+          {online ? (
+            <>
+              <button className="pr-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>
+                <RotateCcw size={16} />{' '}
+                {online.rematch.mine
+                  ? 'Waiting for the table…'
+                  : online.rematch.theirs
+                    ? 'Accept another round'
+                    : 'Another round'}
+              </button>
+              <button className="pr-text-button" onClick={online.leave}>
+                Leave room
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="pr-primary" onClick={() => start(true)}>
+                <RotateCcw size={16} /> Play again
+              </button>
+              <button className="pr-text-button" onClick={returnToMenu}>
+                Return to menu
+              </button>
+            </>
+          )}
         </Dialog>
       )}
     </div>
