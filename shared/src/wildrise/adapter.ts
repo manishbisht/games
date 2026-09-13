@@ -93,6 +93,9 @@ export const wildriseAdapter: GameAdapter<GameState, WildriseOnlineAction> = {
     return gameReducer(state, { type: 'ROLL', value: rollDie(ctx) })
   },
 
+  /** Filled in by a later task; chess keeps `null` until Step 4. */
+  bots: null,
+
   /** Same table, same colours: a seat in a race carries no advantage to rotate. */
   rematch: (_prev, seats, _options, ctx) => ({ state: table(seats, ctx) }),
 }

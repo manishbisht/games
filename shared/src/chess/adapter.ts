@@ -69,6 +69,9 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
    */
   resolveAbsent: (state, seat, _seats, ctx) => resign(state, ctx.now, color(seat)),
 
+  /** Chess bots land in a later round; see the online-bots design. */
+  bots: null,
+
   rematch: (_prev, _seats, _options, ctx) => ({
     state: createGame(ONLINE_OPTIONS, undefined, ctx.now),
     seatRemap: { w: 'b', b: 'w' },

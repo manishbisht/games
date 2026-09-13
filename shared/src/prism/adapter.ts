@@ -191,6 +191,9 @@ export const prismAdapter: GameAdapter<GameState, PrismOnlineAction> = {
     return act(state, chooseMove(state, STAND_IN_SKILL, ctx.random), ctx.random)
   },
 
+  /** Filled in by a later task; chess keeps `null` until Step 4. */
+  bots: null,
+
   /**
    * Prism is played in rounds, not games: a rematch deals the next one and the
    * running totals come with it. Same seats, same order — the deal rotates by

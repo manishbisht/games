@@ -111,6 +111,9 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
     return move ? gameReducer(state, { type: 'MOVE', pieceId: move.pieceId }) : state
   },
 
+  /** Filled in by a later task; chess keeps `null` until Step 4. */
+  bots: null,
+
   /** Same table, same colours: a Ludo seat carries no advantage worth rotating. */
   rematch: (_prev, seats) => ({ state: table(seats) }),
 }

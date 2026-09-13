@@ -304,6 +304,9 @@ export const estateAdapter: GameAdapter<GameState, EstateOnlineAction> = {
     return action ? gameReducer(state, action) : state
   },
 
+  /** Filled in by a later task; chess keeps `null` until Step 4. */
+  bots: null,
+
   /**
    * Same table, same order, a new city. The seed is fresh — a rematch that
    * replayed the first game's dice would be a strange kind of rematch — and it
