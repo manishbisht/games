@@ -443,7 +443,8 @@ describe('bots', () => {
     expect(prismAdapter.bots!.decide(onHuman, 'p1', seats, 'medium', ctx)).toBe(onHuman)
   })
 
-  it('offers three skills, easiest first', () => {
+  it('offers three skills, easiest first, and names its bots', () => {
     expect(prismAdapter.bots!.skills).toEqual(['easy', 'medium', 'hard'])
+    expect(prismAdapter.bots!.name('p1', 0)).toBe('Jules')
   })
 })
