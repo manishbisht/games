@@ -1,10 +1,11 @@
 import type { Ctx, GameAdapter, OnlineSeat } from '../online/adapter'
+import { botName } from '../online/bots'
 import type { ErrorCode, SeatId } from '../protocol/types'
 import { chooseMove } from './ai'
 import { act, createGame } from './engine'
 import type { PrismOnlineAction } from './online'
 import { COLORS } from './types'
-import type { Card, Color, Command, GameState, Player } from './types'
+import type { Card, Color, Command, Difficulty, GameState, Player } from './types'
 
 /** How well a seat is played while its owner is away — the middle of the AI's three. */
 const STAND_IN_SKILL = 'medium'
@@ -182,17 +183,23 @@ export const prismAdapter: GameAdapter<GameState, PrismOnlineAction> = {
 
   /**
    * There is no forfeiting a hand of cards — a player who leaves gets played
-   * for, one decision at a time, until they come back. The room calls this again
-   * on each of their turns, so a single decision is all it settles.
+   * for, one decision at a time, until they come back.
    */
-  resolveAbsent(state, seat, seats, ctx) {
-    // Any other seat has nothing outstanding; being away is not itself a move.
-    if (state.status !== 'playing' || seats[state.currentPlayer] !== seat) return state
-    return act(state, chooseMove(state, STAND_IN_SKILL, ctx.random), ctx.random)
-  },
+  resolveAbsent: (state, seat, seats, ctx) =>
+    prismAdapter.bots!.decide(state, seat, seats, STAND_IN_SKILL, ctx),
 
-  /** Filled in by a later task; chess keeps `null` until Step 4. */
-  bots: null,
+  /**
+   * A seat the room plays. The policy sees only legal cards, its own hand and
+   * public counts — the same information a person at that seat has.
+   */
+  bots: {
+    skills: ['easy', 'medium', 'hard'],
+    name: (_seat, index) => botName(index),
+    decide(state, seat, seats, skill, ctx) {
+      if (state.status !== 'playing' || seats[state.currentPlayer] !== seat) return state
+      return act(state, chooseMove(state, skill as Difficulty, ctx.random), ctx.random)
+    },
+  },
 
   /**
    * Prism is played in rounds, not games: a rematch deals the next one and the

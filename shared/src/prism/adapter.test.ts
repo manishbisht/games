@@ -416,3 +416,34 @@ describe('prism adapter absences and rematches', () => {
     expect(state.roundScore).toBe(0)
   })
 })
+
+describe('bots', () => {
+  const ctx = { random: () => 0.5, now: 0 }
+
+  it('plays a card for the bot whose turn it is', () => {
+    const seats = ['p0', 'p1']
+    const state = prismAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const onBot = { ...state, currentPlayer: 1 }
+    const after = prismAdapter.bots!.decide(onBot, 'p1', seats, 'medium', ctx)
+    expect(after).not.toBe(onBot)
+  })
+
+  it("leaves a seat alone when it is not that seat's turn", () => {
+    const seats = ['p0', 'p1']
+    const state = prismAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const onHuman = { ...state, currentPlayer: 0 }
+    expect(prismAdapter.bots!.decide(onHuman, 'p1', seats, 'medium', ctx)).toBe(onHuman)
+  })
+
+  it('offers three skills, easiest first', () => {
+    expect(prismAdapter.bots!.skills).toEqual(['easy', 'medium', 'hard'])
+  })
+})
