@@ -1,4 +1,4 @@
-import { env, runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare:test'
+import { env, runInDurableObject, SELF } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { phasePause } from '@games/shared/hearth'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
@@ -38,8 +38,31 @@ const seeNext = (client: Client, from: number, predicate: (m: RoomMessage) => bo
  * Run the beat the room is holding. The return value is deliberately not
  * asserted: workerd delivers due alarms itself, so whether this fire or that one
  * moved the table is a race — the broadcast that follows is not.
+ *
+ * Firing happens immediately rather than waiting out the real deadline, so
+ * this backdates `autoAt` first: `alarm()` refuses to resolve a phase before
+ * `autoAt` is due (a guard against a DO alarm retry or race, see
+ * `AUTO_AT_TOLERANCE_MS` in src/room.ts), and a legitimately-fired alarm's
+ * deadline has always already passed. Inlined as one `runInDurableObject`
+ * round trip (mirroring `runDurableObjectAlarm`'s own get/delete/call
+ * sequence) rather than a separate patch-then-fire — real workerd alarms can
+ * also land for these rooms in the background, so the shorter this takes,
+ * the less that race gets to decide the outcome instead of the test.
  */
-const fire = (code: string) => runDurableObjectAlarm(testEnv.ROOM.getByName(code))
+const fire = (code: string) =>
+  runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
+    if ((await state.storage.getAlarm()) === null) return false
+    const record = await state.storage.get<RoomRecord>('room')
+    if (record?.autoAt !== undefined && record.autoAt > Date.now()) {
+      record.autoAt = Date.now()
+      await state.storage.put('room', record)
+      // Keep the in-memory cache coherent with storage (same-object contract).
+      ;(instance as unknown as { cached: RoomRecord }).cached = record
+    }
+    await state.storage.deleteAlarm()
+    await instance.alarm()
+    return true
+  })
 const alarmIn = (code: string) =>
   runInDurableObject(
     testEnv.ROOM.getByName(code),
@@ -61,11 +84,12 @@ async function patchRecord(code: string, patch: (record: RoomRecord) => void) {
   })
 }
 
-// The server rolls with `Math.random`, and it may roll on an alarm workerd
-// delivers rather than one a test fires — so the number is pinned for the whole
-// window instead of just around the fire. Room codes come from the same source
-// and are minted before any test pins it, so they stay distinct.
-const chance = Math.random
+// The server rolls off `secureRandom` (crypto.getRandomValues), and it may
+// roll on an alarm workerd delivers rather than one a test fires — so the
+// number is pinned for the whole window instead of just around the fire.
+// Room codes come from `crypto.randomUUID`, a separate API this mock never
+// touches, so they stay distinct.
+const realGetRandomValues = crypto.getRandomValues.bind(crypto)
 let pinned: number | null = null
 /** Pin what the server's next die comes up with; `null` hands it back to chance. */
 const useDie = (value: number | null) => {
@@ -73,7 +97,15 @@ const useDie = (value: number | null) => {
 }
 beforeEach(() => {
   pinned = null
-  vi.spyOn(Math, 'random').mockImplementation(() => (pinned === null ? chance() : (pinned - 0.5) / 6))
+  vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => {
+    if (pinned === null) return realGetRandomValues(array)
+    // `secureRandom` turns one crypto uint32 into a [0, 1) fraction; land it on
+    // the same midpoint the old `Math.random` mock used, so a pinned value of
+    // `n` still rolls the die face `n`.
+    const fraction = (pinned - 0.5) / 6
+    if (array instanceof Uint32Array) array[0] = Math.floor(fraction * 2 ** 32)
+    return array
+  })
 })
 afterEach(() => {
   vi.restoreAllMocks()

@@ -152,7 +152,37 @@ async function parcelGame(afterMs: number, hops = 1) {
   return { code, host, guest }
 }
 
-const fire = (code: string) => runDurableObjectAlarm(testEnv.ROOM.getByName(code))
+/**
+ * Fire the room's alarm the way these tests need to: right now, rather than
+ * waiting out a real deadline. `alarm()` refuses to resolve a phase or
+ * stand-in before `autoAt` is due — a guard against a DO alarm retry or race,
+ * see `AUTO_AT_TOLERANCE_MS` in src/room.ts — so this backdates `autoAt`
+ * first to model the one thing a legitimately-fired alarm always has: its
+ * deadline has already passed. Inlined as one `runInDurableObject` round trip
+ * (mirroring `runDurableObjectAlarm`'s own get/delete/call sequence) rather
+ * than a separate patch-then-fire, since real workerd alarms can also land
+ * for these rooms in the background — the shorter this takes, the less that
+ * race gets to decide the outcome instead of the test.
+ * `fireEarly` below calls the alarm directly, skipping the backdate, to
+ * exercise the guard itself.
+ */
+const fire = (code: string) =>
+  runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
+    if ((await state.storage.getAlarm()) === null) return false
+    const record = await state.storage.get<RoomRecord>('room')
+    if (record?.autoAt !== undefined && record.autoAt > Date.now()) {
+      record.autoAt = Date.now()
+      await state.storage.put('room', record)
+      // Keep the in-memory cache coherent with storage (same-object contract).
+      ;(instance as unknown as { cached: RoomRecord }).cached = record
+    }
+    await state.storage.deleteAlarm()
+    await instance.alarm()
+    return true
+  })
+
+/** Fire the alarm without backdating `autoAt` — a deadline that has not arrived yet. */
+const fireEarly = (code: string) => runDurableObjectAlarm(testEnv.ROOM.getByName(code))
 
 /** Milliseconds until the room's next alarm, whichever deadline currently owns it. */
 const alarmIn = (code: string) =>
@@ -195,6 +225,32 @@ describe('the room alarm', () => {
 
     // Nothing left to resolve, so the expiry takes the slot back.
     expect(await alarmIn(code)).toBeGreaterThan(23 * 60 * 60 * 1000)
+  })
+
+  it('refuses to resolve a phase before its deadline, and re-arms instead of dropping it', async () => {
+    // A DO alarm retry or a race with a concurrent save's re-arm can call
+    // `alarm()` back before the deadline it named — `fireEarly` reproduces
+    // that directly, skipping `fire()`'s backdate.
+    const { code, host } = await parcelGame(60_000)
+    const before = (await readRecord(code))!
+    expect(before.autoAt).toBeGreaterThan(Date.now())
+    const scheduledAt = await alarmAt(code)
+
+    expect(await fireEarly(code)).toBe(true)
+
+    // The parcel never left the hand it was in: an early fire is not a free
+    // resolve, whatever the adapter would have done with it.
+    const after = (await readRecord(code))!
+    expect(after.gameState).toEqual(before.gameState)
+    expect(after.autoAt).toBe(before.autoAt)
+    // And the deadline was not dropped when the runtime consumed the fired
+    // alarm: `alarm()` put a fresh one back for the exact same time.
+    expect(await alarmAt(code)).toBe(scheduledAt)
+
+    // The same deadline still lands the parcel once it is actually due.
+    expect(await fire(code)).toBe(true)
+    const landed = await host.waitRoom((m) => parcel(m).passes === 1)
+    expect(flying(parcel(landed))).toBe(false)
   })
 
   it('keeps a phase deadline fixed when an unrelated save happens', async () => {

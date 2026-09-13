@@ -1,4 +1,4 @@
-import { env, runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare:test'
+import { env, runInDurableObject, SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type { ServerMessage } from '@games/shared/protocol'
@@ -51,7 +51,31 @@ const seeError = (client: Client, from: number, code: string) =>
     return error!
   })
 
-const fire = (code: string) => runDurableObjectAlarm(testEnv.ROOM.getByName(code))
+/**
+ * Firing happens immediately rather than waiting out the real deadline, so
+ * this backdates `autoAt` first: `alarm()` refuses to resolve a phase before
+ * `autoAt` is due (a guard against a DO alarm retry or race, see
+ * `AUTO_AT_TOLERANCE_MS` in src/room.ts), and a legitimately-fired alarm's
+ * deadline has always already passed. Inlined as one `runInDurableObject`
+ * round trip (mirroring `runDurableObjectAlarm`'s own get/delete/call
+ * sequence) rather than a separate patch-then-fire — real workerd alarms can
+ * also land for these rooms in the background, so the shorter this takes,
+ * the less that race gets to decide the outcome instead of the test.
+ */
+const fire = (code: string) =>
+  runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
+    if ((await state.storage.getAlarm()) === null) return false
+    const record = await state.storage.get<RoomRecord>('room')
+    if (record?.autoAt !== undefined && record.autoAt > Date.now()) {
+      record.autoAt = Date.now()
+      await state.storage.put('room', record)
+      // Keep the in-memory cache coherent with storage (same-object contract).
+      ;(instance as unknown as { cached: RoomRecord }).cached = record
+    }
+    await state.storage.deleteAlarm()
+    await instance.alarm()
+    return true
+  })
 
 /** Milliseconds until the room's next alarm, whichever deadline currently owns it. */
 const alarmIn = (code: string) =>

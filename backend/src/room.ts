@@ -25,6 +25,26 @@ const MAX_AUTO_ADVANCES = 20
  * enough to read as a player thinking, short enough that the table keeps moving.
  */
 const STAND_IN_DELAY_MS = 1200
+/**
+ * How early an alarm fire may land and still count as "on time". `armAlarm`
+ * always schedules at or after `autoAt`, so normal flow never comes anywhere
+ * near this window — it exists for a DO alarm retry or a race with a
+ * concurrent `save()`'s re-arm, either of which can call `alarm()` back a
+ * hair before the deadline it named.
+ */
+const AUTO_AT_TOLERANCE_MS = 50
+
+/**
+ * Cryptographically-sourced uniform draw in [0, 1), matching `Math.random`'s
+ * contract so it drops straight into `Ctx.random`. Game seeds and shuffles
+ * are decided here, server-side and once, so they use workerd's Web Crypto
+ * RNG rather than `Math.random`, which carries no such guarantee.
+ */
+export function secureRandom(): number {
+  const bytes = new Uint32Array(1)
+  crypto.getRandomValues(bytes)
+  return bytes[0] / 2 ** 32
+}
 
 interface StoredSeat {
   player: PlayerInfo
@@ -97,7 +117,22 @@ export class RoomDO extends DurableObject<Env> {
   private cached: RoomRecord | null | undefined
 
   private async load(): Promise<RoomRecord | null> {
-    if (this.cached === undefined) this.cached = (await this.ctx.storage.get<RoomRecord>('room')) ?? null
+    if (this.cached === undefined) {
+      const stored = (await this.ctx.storage.get<RoomRecord>('room')) ?? null
+      // A room created by the chess-only backend this branch supersedes has
+      // no `seatIds` (or `expiresAt`) in storage — every handler below reads
+      // `record.seatIds` unconditionally, so treating that record as present
+      // would crash deep inside a handler (e.g. `seatOf`'s `.filter`) instead
+      // of failing clean. It cannot be played either way, so the answer is
+      // the same as no room at all: forget it and say so.
+      if (stored && !Array.isArray(stored.seatIds)) {
+        await this.ctx.storage.deleteAll()
+        await this.ctx.storage.deleteAlarm()
+        this.cached = null
+      } else {
+        this.cached = stored
+      }
+    }
     return this.cached
   }
 
@@ -131,7 +166,7 @@ export class RoomDO extends DurableObject<Env> {
 
   /** The game's outside world: injected so adapters stay pure and replayable. */
   private gameCtx(): Ctx {
-    return { random: Math.random, now: Date.now() }
+    return { random: secureRandom, now: Date.now() }
   }
 
   /** A finished game has no phases left to wait out, whatever shape its last state is in. */
@@ -601,6 +636,12 @@ export class RoomDO extends DurableObject<Env> {
     // and after it, the room's time has simply run out.
     const record = await this.load()
     if (record && Date.now() < record.expiresAt) {
+      // Normal flow never lands here early — see `AUTO_AT_TOLERANCE_MS`. An
+      // early fire re-arms for the same deadline instead of resolving on the
+      // spot, so a retry or race costs a wasted alarm rather than a beat
+      // everyone was shown ahead of time.
+      const due = record.autoAt === undefined || Date.now() >= record.autoAt - AUTO_AT_TOLERANCE_MS
+      if (!due) return this.armAlarm(record)
       if (this.pendingPhase(record)) return this.autoAdvance(record)
       if (this.standInSeat(record)) return this.playStandIn(record)
     }

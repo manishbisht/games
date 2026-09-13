@@ -1,8 +1,11 @@
-import { SELF } from 'cloudflare:test'
+import { env, runInDurableObject, SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import { ROOM_CODE_ALPHABET } from '@games/shared/protocol/codes'
+import type { Env } from '../src/env'
 import { connect, createRoom } from './helpers'
+
+const testEnv = env as unknown as Env
 
 const post = (body: unknown) =>
   SELF.fetch('https://api.test/api/rooms', {
@@ -92,6 +95,38 @@ describe('joining and seats', () => {
     const client = await connect('KX3F9M')
     await client.expectError('ROOM_NOT_FOUND')
     await vi.waitFor(() => expect(client.closes[0]?.code).toBe(4404))
+  })
+
+  it('treats a pre-v2 stored record (no seatIds) as absent, and forgets it', async () => {
+    // The shape a room created by the currently-deployed chess-only backend
+    // has in storage: no `seatIds`, no `expiresAt`. A v2 handler that trusted
+    // this would crash on `record.seatIds.filter(...)` deep inside
+    // `webSocketMessage` instead of answering cleanly.
+    const code = 'PREV2A'
+    const stub = testEnv.ROOM.getByName(code)
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put('room', {
+        code,
+        game: 'chess',
+        visibility: 'private',
+        status: 'open',
+        hostId: 'guest:old-host',
+        hostName: 'Ann',
+        createdAt: Date.now(),
+        options: {},
+        seats: {},
+        gameState: null,
+      })
+    })
+
+    const client = await connect(code)
+    await client.expectError('ROOM_NOT_FOUND')
+    await vi.waitFor(() => expect(client.closes[0]?.code).toBe(4404))
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      expect(await state.storage.get('room')).toBeUndefined()
+      expect(await state.storage.getAlarm()).toBeNull()
+    })
   })
 
   it('joins, sits, and receives authoritative snapshots', async () => {
