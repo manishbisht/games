@@ -17,6 +17,7 @@
     "./prism": "./src/prism/engine.ts",
     "./prism/types": "./src/prism/types.ts",
     "./prism/ai": "./src/prism/ai.ts",
+    "./prism/online": "./src/prism/online.ts",
     "./online": "./src/online/registry.ts",
     "./online/adapter": "./src/online/adapter.ts",
     "./protocol": "./src/protocol/types.ts",
