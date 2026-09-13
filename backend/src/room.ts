@@ -235,6 +235,8 @@ export class RoomDO extends DurableObject<Env> {
           seatsTaken,
           seatsTotal: record.seatsTotal,
           createdAt: record.createdAt,
+          // Placeholder: no bot seats exist yet. Task 11 counts them for real.
+          bots: 0,
         }),
       )
     } else {

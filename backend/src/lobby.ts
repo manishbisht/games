@@ -21,6 +21,8 @@ const toSummary = (row: Row): PublicRoomSummary => ({
   seatsTaken: row.seats_taken,
   seatsTotal: row.seats_total,
   createdAt: row.created_at,
+  // Placeholder: the rooms table has no bots column yet. Task 11 counts them for real.
+  bots: 0,
 })
 
 export class LobbyDO extends DurableObject<Env> {
