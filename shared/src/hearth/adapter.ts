@@ -1,9 +1,10 @@
 import type { Ctx, GameAdapter, OnlineSeat } from '../online/adapter'
+import { botName } from '../online/bots'
 import type { SeatId } from '../protocol/types'
 import { chooseAIMove } from './ai'
 import { createGame, gameReducer, motionDuration, phasePause } from './engine'
 import type { HearthOnlineAction } from './online'
-import type { GameState } from './types'
+import type { Control, GameState } from './types'
 
 /** A beat of slack after the board's animation so the last step lands, not cuts. */
 const MOTION_GRACE_MS = 300
@@ -99,20 +100,26 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
 
   /**
    * There is no resigning from a race — a player who leaves simply gets played
-   * for, one decision at a time, until they come back. The room calls this again
-   * on each of their turns, so a single pending decision is all it settles.
+   * for, one decision at a time, until they come back.
    */
-  resolveAbsent(state, seat, seats, ctx) {
-    // Any other seat has nothing outstanding; being away is not itself a move.
-    if (state.phase === 'won' || seatedPlayer(state, seats) !== seat) return state
-    if (state.phase === 'roll') return gameReducer(state, { type: 'ROLL_START' })
-    if (state.phase !== 'choose') return state
-    const move = chooseAIMove(state, STAND_IN_SKILL, ctx.random())
-    return move ? gameReducer(state, { type: 'MOVE', pieceId: move.pieceId }) : state
-  },
+  resolveAbsent: (state, seat, seats, ctx) =>
+    hearthAdapter.bots!.decide(state, seat, seats, STAND_IN_SKILL, ctx),
 
-  /** Filled in by a later task; chess keeps `null` until Step 4. */
-  bots: null,
+  /**
+   * A seat the room plays. Same decisions a person makes — roll, then choose a
+   * piece — which is why `resolveAbsent` below is now just this at a fixed skill.
+   */
+  bots: {
+    skills: ['easy', 'medium', 'hard'],
+    name: (_seat, index) => botName(index),
+    decide(state, seat, seats, skill, ctx) {
+      if (state.phase === 'won' || seatedPlayer(state, seats) !== seat) return state
+      if (state.phase === 'roll') return gameReducer(state, { type: 'ROLL_START' })
+      if (state.phase !== 'choose') return state
+      const move = chooseAIMove(state, skill as Control, ctx.random())
+      return move ? gameReducer(state, { type: 'MOVE', pieceId: move.pieceId }) : state
+    },
+  },
 
   /** Same table, same colours: a Ludo seat carries no advantage worth rotating. */
   rematch: (_prev, seats) => ({ state: table(seats) }),

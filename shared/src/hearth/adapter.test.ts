@@ -198,3 +198,34 @@ describe('hearth adapter absences and rematches', () => {
     expect(hearthAdapter.waitingOn(won, SEATS)).toEqual([])
   })
 })
+
+describe('bots', () => {
+  const ctx = { random: () => 0.5, now: 0 }
+  const seats = ['p0', 'p1']
+
+  it('rolls for a bot seat whose turn it is to roll', () => {
+    const state = hearthAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const onRoll = { ...state, phase: 'roll' as const, currentPlayer: 1 }
+    const after = hearthAdapter.bots!.decide(onRoll, 'p1', seats, 'medium', ctx)
+    expect(after.phase).toBe('rolling')
+  })
+
+  it('leaves a seat alone when the game is not waiting on it', () => {
+    const state = hearthAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const onRoll = { ...state, phase: 'roll' as const, currentPlayer: 0 }
+    expect(hearthAdapter.bots!.decide(onRoll, 'p1', seats, 'medium', ctx)).toBe(onRoll)
+  })
+
+  it('offers three skills, easiest first, and names its bots', () => {
+    expect(hearthAdapter.bots!.skills).toEqual(['easy', 'medium', 'hard'])
+    expect(hearthAdapter.bots!.name('p1', 0)).toBe('Jules')
+  })
+})
