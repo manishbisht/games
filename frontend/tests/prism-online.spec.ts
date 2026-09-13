@@ -11,6 +11,12 @@ import type { Browser, Page } from '@playwright/test'
 const turnLine = (page: Page) => page.locator('.pr-turn-announcement strong')
 const myTurn = (page: Page) => page.getByText('Your turn. Make it colorful.', { exact: true })
 const cards = (page: Page) => page.locator('.pr-card')
+/**
+ * The table arrives as its own chunk — three.js and all — fetched only once the
+ * room has a game to show, so the first paint is the one wait here that is about
+ * a download rather than about the room.
+ */
+const tableIsUp = (page: Page) => expect(page.locator('.pr-is-playing')).toBeVisible({ timeout: 30000 })
 
 async function newPlayer(browser: Browser, errors: string[]) {
   const context = await browser.newContext()
@@ -98,6 +104,8 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   await expect(host.getByRole('button', { name: 'Start the game' })).toBeEnabled()
   await host.getByRole('button', { name: 'Start the game' }).click()
 
+  await tableIsUp(host)
+  await tableIsUp(guest)
   // Seven cards each, dealt on the server — and each browser holds exactly its
   // own seven. Fourteen in this DOM would mean the other hand came with them.
   await expect(cards(host)).toHaveCount(7)
@@ -134,6 +142,7 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   // — and the hand comes back because the room, not the browser, was holding it.
   const held = await cards(guest).count()
   await guest.reload()
+  await tableIsUp(guest)
   await expect(cards(guest)).toHaveCount(held)
   await expect(turnLine(guest)).toHaveText('Ann’s turn')
   await expect(guest.getByRole('button', { name: 'Draw card', exact: true })).toBeDisabled()
@@ -170,6 +179,8 @@ test('a table made for four deals to the two who turned up', async ({ browser })
   await host.getByRole('button', { name: 'Start with 2 players' }).click()
 
   // The two who came slide onto the first two seats, in the order they sat.
+  await tableIsUp(host)
+  await tableIsUp(guest)
   await expect(cards(host)).toHaveCount(7)
   await expect(host.locator('.pr-opponent')).toHaveCount(1)
   await expect(host.locator('.pr-opponent')).toContainText('Ben')

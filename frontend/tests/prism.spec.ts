@@ -8,7 +8,12 @@ test('Prism opens from the collection, renders its table, and has working settin
   await page.goto('/')
   await page.getByRole('link', { name: 'Play Prism', exact: true }).click()
   await expect(page).toHaveURL('/#/prism')
-  await expect(page.getByRole('heading', { name: 'A little color. A little chaos.' })).toBeVisible()
+  // The table is its own chunk, fetched on the way in. Under a cold dev server
+  // the router keeps the collection on screen until it lands, which can take a
+  // good deal longer than the default wait allows.
+  await expect(page.getByRole('heading', { name: 'A little color. A little chaos.' })).toBeVisible({
+    timeout: 30000,
+  })
   await expect(page.locator('.pr-table-render canvas')).toBeVisible()
   await page.screenshot({ path: 'test-results/prism-desktop-menu.png', fullPage: true })
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
