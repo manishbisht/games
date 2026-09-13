@@ -42,6 +42,13 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     seatLabel: (seat) => (seat === 'w' ? 'Play as White' : 'Play as Black'),
     RoomView: lazy(() => import('../games/chess/online/ChessRoomView')),
   },
+  estate: {
+    minSeats: 2,
+    // Tokens and colours are handed out at the start, once the room knows who
+    // turned up, so a seat taken beforehand cannot promise one.
+    seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    RoomView: lazy(() => import('../games/monopoly/online/EstateRoomView')),
+  },
   hearth: {
     minSeats: 2,
     // Colours are handed out at the start, once the room knows who turned up, so

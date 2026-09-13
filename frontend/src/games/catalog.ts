@@ -42,6 +42,7 @@ export const estateGame: GameEntry = {
   tags: ['Property & trading', 'Classic & quick'],
   icon: 'estate.svg',
   themeColor: '#111722',
+  online: true,
   Component: lazy(() => import('./monopoly/MonopolyGame')),
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowDownUp,
@@ -32,10 +32,22 @@ import {
 import { Link } from 'react-router'
 import { estateGame } from '../catalog'
 import { BOARD, money } from '@games/shared/estate/board'
-import { botAcceptsTrade, botAction, debtCapacity, gameReducer, netWorth, ownedSpaces } from '@games/shared/estate'
+import {
+  botAcceptsTrade,
+  botAction,
+  createGame,
+  debtCapacity,
+  gameReducer,
+  netWorth,
+  ownedSpaces,
+} from '@games/shared/estate'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { loadGame, saveGame } from './game/storage'
 import { playSound, unlockAudio } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
+import OnlinePanel from '../../online/OnlinePanel'
+import { claimTarget, onlineDispatch } from './online/session'
+import type { OnlineEstateSession } from './online/session'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
 import TokenIcon from './components/TokenIcon'
@@ -89,8 +101,64 @@ const rules = [
   },
 ]
 
-function MonopolyGame() {
-  const [state, dispatch] = useReducer(gameReducer, undefined, loadGame)
+/** Where a seat's player is, in the line the local game uses to say what they are. */
+function presence(online: OnlineEstateSession, id: number): string {
+  const seat = online.players[id]
+  if (!seat) return 'Empty seat'
+  if (seat.abandoned) return 'Played by the table'
+  return seat.connected ? 'At the table' : 'Away'
+}
+
+/**
+ * The countdown before an away player's seat can be claimed, and the claim
+ * itself. The server stamps `awaySince` and re-validates the claim, so drift
+ * here only shifts what the banner says, never what the room allows.
+ */
+function AbandonmentNotice({
+  name,
+  awaySince,
+  onClaim,
+}: {
+  name: string
+  awaySince?: number
+  onClaim: () => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const ticker = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(ticker)
+  }, [])
+  const remaining = Math.max(0, CLAIM_WIN_AFTER_MS - (now - (awaySince ?? now)))
+  const seconds = Math.ceil(remaining / 1000)
+  return (
+    <div className="abandon-notice" role="status">
+      {remaining > 0 ? (
+        <span>
+          {name} stepped away — the table can play on without them in {Math.floor(seconds / 60)}:
+          {String(seconds % 60).padStart(2, '0')}.
+        </span>
+      ) : (
+        <>
+          <span>{name} seems to be gone.</span>
+          <button onClick={onClaim}>Play on without them</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
+  // Online the room is the only source of truth: the reducer below never runs,
+  // this device's saved game is neither read nor written, and the table is
+  // already under way by the time this component mounts.
+  const [localState, localDispatch] = useReducer(gameReducer, online, (session) =>
+    session ? createGame() : loadGame(),
+  )
+  const state = online ? online.state : localState
+  // The dialogs take a `dispatch` and know nothing about rooms. Online it is the
+  // wire: everything a person may decide goes down it, and the beats the room
+  // paces for itself are dropped rather than sent (see `./online/session`).
+  const dispatch = useMemo(() => (online ? onlineDispatch(online) : localDispatch), [online, localDispatch])
   const [modal, setModal] = useState<Modal>(() => (state.trade ? 'trade' : null)),
     [selected, setSelected] = useState<number | null>(null)
   const [portfolioPlayer, setPortfolioPlayer] = useState<number | undefined>(),
@@ -105,15 +173,47 @@ function MonopolyGame() {
     isSetup = state.status === 'setup',
     isFinished = state.status === 'finished'
   const busy = state.phase === 'rolling' || state.phase === 'moving'
-  const humanTurn = !player.isBot && !isSetup && !isFinished
+  /** Whose inputs this browser may make: its own seat online, the shared one locally. */
+  const humanTurn = !player.isBot && !isSetup && !isFinished && (!online || online.mySeat === state.current)
   const lastEvent = state.events[0],
     pauseGame = paused || modal !== null || selected !== null
   const canTrade =
     humanTurn && ['ready', 'end'].includes(state.phase) && state.players.filter((p) => !p.bankrupt).length > 1
+  /** The seat the table is stuck on, if its player has gone and can be claimed. */
+  const awayBlocking = online ? claimTarget(online) : null
+  // Online every fresh game shows its own result — a rematch arrives as a new
+  // state rather than through the local restart that would have cleared this.
+  const [wasFinished, setWasFinished] = useState(isFinished)
+  if (online && wasFinished !== isFinished) {
+    setWasFinished(isFinished)
+    if (!isFinished) setWinnerDismissed(false)
+  }
+  /**
+   * An offer crosses the table, so online it has to open its own review: the
+   * seat it was made to has no dialog open and no turn coming. Keyed on the two
+   * seats rather than on `state.trade`, which is a fresh object in every
+   * snapshot — watching its identity would fire on every unrelated broadcast
+   * and shut an offer that was still being composed.
+   */
+  const tradeKey = online && state.trade ? `${state.trade.from}-${state.trade.to}` : ''
+  const [tradeShown, setTradeShown] = useState(tradeKey)
+  if (online && tradeShown !== tradeKey) {
+    setTradeShown(tradeKey)
+    const parties = tradeKey ? tradeKey.split('-').map(Number) : []
+    // Mine to answer: open it. Settled, or somebody else's business: close it.
+    if (online.mySeat !== null && parties.includes(online.mySeat)) setModal('trade')
+    else setModal((open) => (open === 'trade' ? null : open))
+  }
   useEffect(() => {
+    // The room holds this device's game; nothing about it belongs on this disk.
+    if (online) return
     saveGame(state)
-  }, [state])
+  }, [state, online])
   useEffect(() => {
+    // Online every one of these beats is the server's to keep, so that the whole
+    // table sees the same dice at the same moment — and the computer opponents
+    // this schedules for are a local game's, never a room's.
+    if (online) return
     if (pauseGame || state.status !== 'playing' || state.trade) return
     let action = botAction(state),
       delay = fast ? 420 : 1100
@@ -127,15 +227,18 @@ function MonopolyGame() {
     if (!action) return
     const timer = window.setTimeout(() => dispatch(action), delay)
     return () => window.clearTimeout(timer)
-  }, [state, fast, pauseGame])
+  }, [state, fast, pauseGame, online, dispatch])
   useEffect(() => {
+    // An online offer is answered by the person it was made to, or by the room
+    // on their behalf once their seat has been claimed. Never by this browser.
+    if (online) return
     if (!state.trade || !state.players[state.trade.to].isBot) return
     const timer = window.setTimeout(() => {
       dispatch({ type: botAcceptsTrade(state, state.trade!) ? 'ACCEPT_TRADE' : 'REJECT_TRADE' })
       setModal(null)
     }, 1800)
     return () => clearTimeout(timer)
-  }, [state])
+  }, [state, online, dispatch])
   useEffect(() => {
     if (!muted && lastEvent && ['purchase', 'money'].includes(lastEvent.type))
       playSound(lastEvent.type as 'purchase' | 'money')
@@ -172,7 +275,7 @@ function MonopolyGame() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modal, selected, isSetup, humanTurn, paused, state])
+  }, [modal, selected, isSetup, humanTurn, paused, state, dispatch])
   function startGame(players: PlayerConfig[], mode: GameState['mode']) {
     unlockAudio()
     dispatch({ type: 'START', players, mode })
@@ -189,7 +292,10 @@ function MonopolyGame() {
   function primaryAction() {
     unlockAudio()
     if (isSetup || isFinished) {
-      setModal('setup')
+      // Online there is nothing to set up: the next game is the room's to deal,
+      // once everyone still at the table has asked for one.
+      if (online) online.send.rematch()
+      else setModal('setup')
       return
     }
     if (paused) {
@@ -301,7 +407,7 @@ function MonopolyGame() {
         <span className="brand-description">The classic. A new dimension.</span>
         <div className="header-right">
           <span className="local-label">
-            <i /> LOCAL MULTIPLAYER
+            <i /> {online ? 'ONLINE TABLE' : 'LOCAL MULTIPLAYER'}
           </span>
           <button className="header-help" onClick={() => setModal('rules')}>
             <CircleHelp size={17} />
@@ -424,6 +530,13 @@ function MonopolyGame() {
                 </div>
               )}
             </div>
+            {awayBlocking && (
+              <AbandonmentNotice
+                name={awayBlocking.name}
+                awaySince={awayBlocking.awaySince}
+                onClaim={() => online?.send.claim()}
+              />
+            )}
             <div className="action-dock">
               <div className="turn-avatar" style={{ '--player-color': player.color } as React.CSSProperties}>
                 <TokenIcon token={player.token} color={player.color} size={45} />
@@ -504,16 +617,20 @@ function MonopolyGame() {
                         <div className="player-identity">
                           <strong>
                             {p.name}
-                            {p.name === 'You' && <span className="you-label">YOU</span>}
+                            {(online ? online.mySeat === p.id : p.name === 'You') && (
+                              <span className="you-label">YOU</span>
+                            )}
                           </strong>
                           <span>
                             {p.bankrupt
                               ? 'Out of the game'
                               : p.jailed
                                 ? 'In jail'
-                                : p.isBot
-                                  ? 'Computer'
-                                  : 'Local player'}
+                                : online
+                                  ? presence(online, p.id)
+                                  : p.isBot
+                                    ? 'Computer'
+                                    : 'Local player'}
                           </span>
                         </div>
                         <div className="player-money">
@@ -601,7 +718,13 @@ function MonopolyGame() {
               </div>
               <div className="activity-footer">
                 <ShieldCheck size={13} />
-                <span>{isSetup ? 'A fresh start for everyone.' : 'Your game is saved automatically.'}</span>
+                <span>
+                  {online
+                    ? 'The room keeps this game. Close the tab and come back to it.'
+                    : isSetup
+                      ? 'A fresh start for everyone.'
+                      : 'Your game is saved automatically.'}
+                </span>
               </div>
             </div>
           </aside>
@@ -645,7 +768,9 @@ function MonopolyGame() {
         </div>
       )}
       {modal === 'setup' && (
-        <SetupDialog onClose={() => setModal(null)} onStart={startGame} inProgress={!isSetup} />
+        <SetupDialog onClose={() => setModal(null)} onStart={startGame} inProgress={!isSetup}>
+          {!online && <OnlinePanel game="estate" basePath={estateGame.path} seatChoices={[2, 3, 4]} />}
+        </SetupDialog>
       )}
       {modal === 'portfolio' && (
         <PortfolioDialog
@@ -754,13 +879,20 @@ function MonopolyGame() {
           <div className="settings-note">
             <ShieldCheck size={19} />
             <p>
-              Your game saves on this device after each completed move. You can close the tab and pick up
-              where you left off.
+              {online
+                ? 'The room holds this game for everyone at the table. You can close the tab and come back to the same city.'
+                : 'Your game saves on this device after each completed move. You can close the tab and pick up where you left off.'}
             </p>
           </div>
-          <button className="secondary-button full-width" onClick={() => setModal('setup')}>
-            <RotateCcw size={17} /> Start a new game
-          </button>
+          {online ? (
+            <button className="secondary-button full-width" onClick={online.leave}>
+              <ArrowLeft size={17} /> Leave the room
+            </button>
+          ) : (
+            <button className="secondary-button full-width" onClick={() => setModal('setup')}>
+              <RotateCcw size={17} /> Start a new game
+            </button>
+          )}
         </Dialog>
       )}
       {state.phase === 'card' && state.card && !modal && selected === null && !paused && (
@@ -843,12 +975,32 @@ function MonopolyGame() {
               <strong>{money(netWorth(state, state.winner!))}</strong>
             </div>
           </div>
-          <button className="primary-button full-width" onClick={() => setModal('setup')}>
-            One more round? <RotateCcw size={18} />
-          </button>
+          {online ? (
+            <button
+              className="primary-button full-width"
+              onClick={online.send.rematch}
+              disabled={online.rematch.mine}
+            >
+              {online.rematch.mine
+                ? online.rematch.theirs
+                  ? 'Dealing a new city…'
+                  : 'Waiting for the table…'
+                : 'One more round?'}{' '}
+              <RotateCcw size={18} />
+            </button>
+          ) : (
+            <button className="primary-button full-width" onClick={() => setModal('setup')}>
+              One more round? <RotateCcw size={18} />
+            </button>
+          )}
           <button className="text-button" onClick={() => setWinnerDismissed(true)}>
             Take a look at the final board
           </button>
+          {online && (
+            <button className="text-button" onClick={online.leave}>
+              Leave the room
+            </button>
+          )}
         </Dialog>
       )}
     </div>

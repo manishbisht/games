@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { ArrowRight, Check, Minus, Plus, Sparkles, Users } from 'lucide-react'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
 import { DEFAULT_PLAYERS, PLAYER_STYLES } from '@games/shared/estate/board'
@@ -9,10 +10,13 @@ export default function SetupDialog({
   onClose,
   onStart,
   inProgress,
+  children,
 }: {
   onClose: () => void
   onStart: (players: PlayerConfig[], mode: GameState['mode']) => void
   inProgress: boolean
+  /** Anything that belongs with setting a table up — the online lobby, so far. */
+  children?: ReactNode
 }) {
   const [players, setPlayers] = useState(DEFAULT_PLAYERS),
     [mode, setMode] = useState<GameState['mode']>('classic')
@@ -107,6 +111,7 @@ export default function SetupDialog({
         Start game <ArrowRight size={19} />
       </button>
       <p className="dialog-footnote">2–4 players · Local multiplayer · Automatically saved</p>
+      {children}
     </Dialog>
   )
 }

@@ -1890,6 +1890,86 @@ kbd {
     translate: 0 -20px;
   }
 }
+
+/* An online table: the claim banner, and the shared lobby panel in a dark dialog. */
+.abandon-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid #6a5a3a66;
+  border-radius: 10px;
+  background: #2a2418c9;
+  color: #d6c49c;
+  font-size: 11px;
+  line-height: 1.7;
+  text-align: center;
+}
+.abandon-notice button {
+  padding: 8px 13px;
+  border: 1px solid #8a7442;
+  border-radius: 7px;
+  background: #3a3120;
+  color: #f0e2c2;
+  font-size: 10px;
+}
+.abandon-notice button:hover {
+  background: #4a3e28;
+}
+.setup-dialog .ch-online {
+  margin-top: 18px;
+  border-top-color: #3a4453;
+  color: #9eacbf;
+  font-size: 12px;
+}
+.setup-dialog .ch-online h3 {
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.setup-dialog .ch-online-name {
+  display: grid;
+  gap: 6px;
+}
+.setup-dialog .ch-online input {
+  font: inherit;
+  color: var(--text);
+  background: #141c27;
+  border: 1px solid #3b4758;
+  border-radius: 7px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.setup-dialog .ch-online button {
+  color: #c4ceda;
+  background: #242f3e;
+  border: 1px solid #3b4758;
+  border-radius: 7px;
+  padding: 9px 13px;
+  font-size: 11px;
+}
+.setup-dialog .ch-online button:hover:not(:disabled) {
+  background: #303d4e;
+  border-color: #6a7381;
+}
+.setup-dialog .ch-online button:disabled {
+  opacity: 0.5;
+}
+.setup-dialog .ch-online-seats .selected {
+  outline-color: #be9f7a;
+}
+.setup-dialog .ch-online-visibility {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.setup-dialog .ch-online-error {
+  color: #dba2a2;
+}
 @media (min-width: 1500px) {
   .site-header {
     padding-inline: 54px;
