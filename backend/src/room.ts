@@ -541,11 +541,12 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
     record.seats[seat] = { ...record.seats[seat]!, wantsRematch: true }
     const seated = record.seatIds.filter((s) => record.seats[s])
-    // A seat the room is playing for cannot ask for anything, so waiting on it
-    // would strand the table forever. Consensus is the players still here; the
-    // abandoned seat rides into the next game, still abandoned, still played for
-    // — and still theirs to reclaim, which is what clears the flag.
-    const voting = seated.filter((s) => !record.seats[s]!.abandoned)
+    // A seat the room plays cannot ask for anything, so waiting on it would
+    // strand the table forever — true of an abandoned seat and of a bot alike.
+    // Consensus is the players still here; the abandoned seat rides into the
+    // next game, still abandoned, still played for — and still theirs to
+    // reclaim, which is what clears the flag.
+    const voting = seated.filter((s) => !record.seats[s]!.abandoned && !record.seats[s]!.bot)
     if (voting.length && voting.every((s) => record.seats[s]!.wantsRematch)) {
       const adapter = this.adapter(record)
       const { state, seatRemap } = adapter.rematch(
@@ -579,7 +580,8 @@ export class RoomDO extends DurableObject<Env> {
     // Who the claim is aimed at: the seats the game is blocked on, or — when
     // the game is waiting on the claimant themselves, as chess is between their
     // own moves — everyone else still at the table.
-    const others = record.seatIds.filter((id) => id !== seat && record.seats[id])
+    // A bot is never away, so there is nothing to claim against it.
+    const others = record.seatIds.filter((id) => id !== seat && record.seats[id] && !record.seats[id]!.bot)
     const waiting = adapter.waitingOn(record.gameState, record.seatIds).filter((id) => others.includes(id))
     const targets = waiting.length ? waiting : others
     if (!targets.length) return this.fail(ws, 'CLAIM_REJECTED', 'There is no opponent to claim against.')
@@ -636,7 +638,8 @@ export class RoomDO extends DurableObject<Env> {
     let changed = false
     for (const seat of record.seatIds) {
       const stored = record.seats[seat]
-      if (stored && !connected.has(stored.player.id) && !stored.disconnectedAt) {
+      // A bot has no socket to lose, so absence means nothing for it.
+      if (stored && !stored.bot && !connected.has(stored.player.id) && !stored.disconnectedAt) {
         stored.disconnectedAt = Date.now()
         changed = true
       }

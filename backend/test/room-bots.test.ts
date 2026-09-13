@@ -1,5 +1,5 @@
 import { env, runInDurableObject, SELF } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { registerAdapter } from '@games/shared/online'
 import type { GameAdapter } from '@games/shared/online/adapter'
 import type { GameId } from '@games/shared/protocol'
@@ -196,5 +196,71 @@ describe('seats the room plays', () => {
     expect(after.snapshot.seats.p1?.connected).toBe(true)
     expect(after.snapshot.seats.p1?.awaySince).toBeUndefined()
     expect(after.snapshot.seats.p1?.bot).toEqual({ skill: 'casual' })
+  })
+})
+
+describe('a bot is not an absent human', () => {
+  it('never marks a bot seat as away when someone else leaves', async () => {
+    const { code, host } = await botGame()
+    host.ws.close()
+    // Wait for the departure to actually land rather than racing it on a timer.
+    await vi.waitFor(async () => {
+      const record = await readRecord(code)
+      expect(record!.seats.p0?.disconnectedAt).toBeDefined()
+    })
+    const record = await readRecord(code)
+    expect(record!.seats.p1?.disconnectedAt).toBeUndefined()
+  })
+
+  it('refuses a claim aimed at a bot', async () => {
+    const { host } = await botGame()
+    host.send({ type: 'claim' })
+    await host.expectError('CLAIM_REJECTED')
+  })
+
+  it('does not wait on a bot to agree to a rematch', async () => {
+    const { code, host } = await botGame()
+    await patchRecord(code, (record) => {
+      record.status = 'finished'
+      ;(record.gameState as { phase: string }).phase = 'won'
+    })
+    host.send({ type: 'rematch' })
+    // The only voting seat is the human, so agreeing alone starts the next
+    // game. Poll storage rather than `waitRoom`: the host's message history
+    // already contains an earlier 'playing' snapshot from the original
+    // `start`, so `findLast` on `status === 'playing'` would match that stale
+    // message immediately and never actually observe this rematch land.
+    await vi.waitFor(async () => {
+      const record = await readRecord(code)
+      expect(record!.status).toBe('playing')
+    })
+    const record = await readRecord(code)
+    expect(record!.seats.p1?.bot).toEqual({ skill: 'casual' })
+  })
+
+  it('refuses to seat a person on a bot seat', async () => {
+    // A four-seat room, so there is somewhere for a latecomer to connect at all.
+    const guestId = crypto.randomUUID()
+    const res = await SELF.fetch('https://api.test/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ game: 'wildrise', visibility: 'private', name: 'Ann', guestId, seats: 4 }),
+    })
+    const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', guestId)
+    host.send({ type: 'sit', seat: 'p0' })
+    await host.waitRoom((m) => m.you.seat === 'p0')
+    await patchRecord(code, (record) => {
+      record.seats.p1 = {
+        player: { id: 'bot:p1', name: 'Jules', isGuest: true },
+        wantsRematch: false,
+        bot: { skill: 'casual' },
+      }
+    })
+    const late = await connect(code)
+    late.join('Cara')
+    late.send({ type: 'sit', seat: 'p1' })
+    await late.expectError('SEAT_TAKEN')
   })
 })
