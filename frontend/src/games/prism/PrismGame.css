@@ -2043,3 +2043,20 @@
     transition: none !important;
   }
 }
+
+.pr-online-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 8px;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: #8ea295;
+  white-space: nowrap;
+}
+.pr-online-badge i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #80a6be;
+}

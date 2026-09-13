@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { PlayersOnlineBadge } from '../../online/playersOnline'
 import {
   ArrowLeft,
   ArrowRight,
@@ -335,6 +336,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           </button>
         </nav>
         <div className="hh-header-actions">
+          <PlayersOnlineBadge game="hearth" className="hh-online-badge" />
           <span className="hh-local-badge">
             <span />
             {online ? 'Playing together, apart' : 'Made for good company'}

@@ -2075,3 +2075,23 @@
     scroll-behavior: auto !important;
   }
 }
+
+.hh-online-badge {
+  font-size: 10px;
+  color: #7e8577;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.hh-online-badge i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #879d70;
+  display: inline-block;
+}
+@media (max-width: 1150px) {
+  .hh-header-actions .hh-online-badge {
+    display: none;
+  }
+}

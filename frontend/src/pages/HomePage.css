@@ -55,6 +55,36 @@
   border-radius: 50%;
   background: #788c63;
 }
+.collection-online {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.collection-online i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #788c63;
+}
+.collection-card-online {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid #e4e6da;
+  border-radius: 999px;
+  color: #66745e;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.collection-card-online i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #788c63;
+}
 .collection-signin {
   border: 1px solid currentColor;
   border-radius: 999px;

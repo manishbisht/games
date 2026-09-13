@@ -35,3 +35,22 @@ export async function fetchLobby(game: GameId): Promise<PublicRoomSummary[]> {
 export function roomSocketUrl(code: string): string {
   return `${API_URL.replace(/^http/, 'ws')}/api/rooms/${code}`
 }
+
+export interface PresenceCounts {
+  total: number
+  byGame: Record<string, number>
+}
+
+export async function presenceBeat(
+  clientId: string,
+  tabId: string,
+  game?: string,
+): Promise<PresenceCounts> {
+  const res = await fetch(`${API_URL}/api/presence`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ clientId, tabId, ...(game ? { game } : {}) }),
+  })
+  if (!res.ok) throw new Error('Could not report presence.')
+  return (await res.json()) as PresenceCounts
+}

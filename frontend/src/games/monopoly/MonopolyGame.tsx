@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { PlayersOnlineBadge } from '../../online/playersOnline'
 import {
   ArrowLeft,
   ArrowDownUp,
@@ -443,6 +444,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         <div className="header-divider" />
         <span className="brand-description">The classic. A new dimension.</span>
         <div className="header-right">
+          <PlayersOnlineBadge game="estate" className="header-online" />
           <span className="local-label">
             <i /> {online ? 'ONLINE TABLE' : 'LOCAL MULTIPLAYER'}
           </span>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { PlayersOnlineBadge } from '../../online/playersOnline'
 import { Link } from 'react-router'
 import {
   ArrowDownToLine,
@@ -289,6 +290,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
         </div>
         <span className="pr-header-note">GOOD CARDS. BETTER COMPANY.</span>
         <nav className="pr-header-actions" aria-label="Game controls">
+          <PlayersOnlineBadge game="prism" className="pr-online-badge" />
           <button
             className="pr-icon"
             aria-label={muted ? 'Turn sound on' : 'Mute sound'}
