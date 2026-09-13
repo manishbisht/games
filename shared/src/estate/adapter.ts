@@ -311,7 +311,7 @@ export const estateAdapter: GameAdapter<GameState, EstateOnlineAction> = {
               type: botAcceptsTrade(state, state.trade) ? 'ACCEPT_TRADE' : 'REJECT_TRADE',
             })
           : state
-      // A bot idles off its own turn; sitting it out is not itself a missed move.
+      // Consulted off-turn, a bot is a no-op, not a missed move — it only acts when the turn is actually its own.
       if (state.current !== player) return state
       const action = botAction(asBot(state, player))
       return action ? gameReducer(state, action) : state
