@@ -138,7 +138,7 @@ export default function HomePage() {
                       <Users size={17} />
                       <span>
                         {game.id === 'chess' ? '1–2 players' : '2–4 players'}
-                        <small>Local friends or AI</small>
+                        <small>{game.online ? 'Local, AI or online friends' : 'Local friends or AI'}</small>
                       </span>
                     </div>
                     <Link to={game.path} className="collection-play" aria-label={`Play ${game.name}`}>
@@ -154,7 +154,7 @@ export default function HomePage() {
         <aside className="collection-note">
           <Heart size={17} strokeWidth={1.6} />
           <p>
-            Same device. Shared moments. <span>No accounts, no downloads — just one more round.</span>
+            Same device. Shared moments. <span>No accounts required, no downloads — just one more round.</span>
           </p>
         </aside>
       </main>

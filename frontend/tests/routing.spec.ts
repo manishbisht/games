@@ -23,7 +23,11 @@ for (const game of [
     await page.goto('/')
     await page.getByRole('link', { name: `Play ${game.name}` }).click()
     await expect(page).toHaveURL(`/#${game.path}`)
-    await expect(page.getByRole('heading', { name: game.heading, exact: true })).toBeVisible()
+    // The game's chunk (Three.js for chess/prism) is fetched on the way in; under a
+    // cold dev server that can take longer than Playwright's default 5s wait.
+    await expect(page.getByRole('heading', { name: game.heading, exact: true })).toBeVisible({
+      timeout: 30000,
+    })
     await expect(page).toHaveTitle(new RegExp(game.name))
 
     await page.reload()
@@ -47,6 +51,25 @@ for (const [oldPath, canonicalPath, heading] of [
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
   })
 }
+
+for (const path of ['/hearth-and-home', '/estate', '/chess', '/prism']) {
+  test(`a bogus room code under ${path} reaches the room page, not the 404 redirect`, async ({ page }) => {
+    // "ABCDEF" is well-formed (six letters from the room-code alphabet) but no such
+    // room exists, so this exercises the room page's own UI rather than the invalid-
+    // code notice or the catch-all redirect to home.
+    await page.goto(`/#${path}/room/ABCDEF`)
+    await expect(page).toHaveURL(`/#${path}/room/ABCDEF`)
+    await expect(page.getByRole('heading', { name: 'Pick a name to join the table.' })).toBeVisible()
+  })
+}
+
+test('Wildrise has no room route, so a room-shaped URL falls through to the home redirect', async ({
+  page,
+}) => {
+  await page.goto('/#/wildrise/room/ABC')
+  await expect(page).toHaveURL('/#/')
+  await expect(page.getByRole('heading', { name: 'Pick your next game.' })).toBeVisible()
+})
 
 test('the collection is usable on mobile and after visiting both games', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })

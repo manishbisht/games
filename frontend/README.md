@@ -9,6 +9,7 @@ A React frontend for original 3D tabletop games, using React, TypeScript, Three.
 - `/#/estate`: play **Estate**, the property game.
 - `/#/chess`: play **Gambit**, the 3D chess game. `/#/Gambit` redirects here.
 - `/#/prism`: play **Prism**, the 3D color-matching card game. `/#/uno` and `/#/Prism` redirect here.
+- `/#/wildrise`: play **Wildrise**, the snakes-and-ladders game. `/#/snakes-and-ladders` and `/#/SnakesAndLadders` redirect here. Local play only — Wildrise has no online room yet.
 - `/#/Ludo` and `/#/Hearth` redirect to `/#/hearth-and-home`; `/#/Monopoly` redirects to `/#/estate`, so existing bookmarks keep working.
 - Unknown hash routes return to the homepage. Every game includes an **All games** link back to the collection.
 
@@ -32,7 +33,7 @@ Drag to orbit, scroll/pinch or use the camera buttons to zoom. Pause and rule/se
 
 `src/games/hearth/game/engine.ts` is the immutable source of truth for rules, legal moves, turns, events and victory. `board.ts` defines routes and coordinates; `ai.ts` scores only legal moves with caller-supplied randomness. React schedules actions; `scene/` renders state and animates recorded movement paths. No game rule depends on WebGL, and the numbered controls remain usable if WebGL is unavailable.
 
-This milestone supports local play and AI. Hearth & Home sessions are held in memory; refreshing starts a new setup. Online rooms and saved Hearth sessions are not implemented.
+This milestone supports local play and AI, plus online rooms (see Multiplayer & deployment below). Hearth & Home sessions are held in memory; refreshing starts a new setup, and saved Hearth sessions are not implemented.
 
 ## Gambit / Chess
 
@@ -44,7 +45,7 @@ All legal movement, check restrictions, castling, en passant, promotion, checkma
 
 The immutable state adapter is `src/games/chess/game/engine.ts`. It replays the full move line to preserve repetition counts; FEN alone is insufficient. State and preferences save locally under `gambit-game-v1` and `gambit-preferences-v1`, with validation on restore. React coordinates interaction, while `scene/` only renders positions, indicators, and animations. All board and piece geometry is original and procedural. The worker AI uses bounded iterative alpha-beta search and positional/material evaluation; Hard is the strongest included level, not a tournament-strength engine. It can be replaced independently of the rules and rendering.
 
-Walnut and marble sets, synthesized move sounds, higher contrast, and reduced motion are available in Settings. Online multiplayer and additional clock formats are outside this milestone. No account or backend is required.
+Walnut and marble sets, synthesized move sounds, higher contrast, and reduced motion are available in Settings. Additional clock formats are outside this milestone. Local play needs no account or backend; Gambit also plays online (see Multiplayer & deployment below), which uses a lightweight backend but never requires an account.
 
 ## Monopoly / Estate
 
@@ -60,7 +61,7 @@ Match the active color, number or action. Select a highlighted card, then tap it
 
 The pure command engine lives in `src/games/prism/game/engine.ts`; centralized defaults and state types are in `game/types.ts`. `handView()` derives playability from authoritative state rather than persisting stale flags. AI uses legal cards, its own hand and public opponent counts. `scene/` renders physical mesh cards, an oval felt table and event-based card animations; the accessible hand controls work even without WebGL. Original card textures and sounds are generated locally.
 
-Settings include sound, reduced motion and AI pace. Classic rules are the initial UI; stacking, immediate drawn-card play, draw-until-playable, Draw Four restrictions, call penalties and scoring are engine options. Jump-in and 7–0 cannot be enabled until implemented. Online transport, custom-rule UI, tournament formats, music and saved sessions are outside this milestone. Rounds remain in memory; refreshing resets the game.
+Settings include sound, reduced motion and AI pace. Classic rules are the initial UI; stacking, immediate drawn-card play, draw-until-playable, Draw Four restrictions, call penalties and scoring are engine options. Jump-in and 7–0 cannot be enabled until implemented. Custom-rule UI, tournament formats, music and saved sessions are outside this milestone. Prism also plays online (see Multiplayer & deployment below). Rounds remain in memory; refreshing resets the game.
 
 Verification: `npx vitest run src/games/prism` and `npx playwright test tests/prism.spec.ts`. Browser tests play a complete local round, including calls after handoff, wild choices, victory/replay, and check mobile AI play. Seeded engine simulations verify card conservation across complete rounds.
 
@@ -75,7 +76,9 @@ Open the printed local address and choose a game from the homepage, or go direct
 
 ## Multiplayer & deployment
 
-For online multiplayer and deployment instructions, see [Deployment & setup](../docs/deployment.md).
+Hearth & Home, Estate, Gambit, and Prism play online. From a game's page, create a room — private, or listed in the public lobby for anyone to find — and share its six-character code or invite link, or join an open table straight from the lobby. Playing online only ever needs a name: sign in as a guest, or optionally sign in with Clerk so your identity carries across sessions. Wildrise stays local-only for now; it has no online room.
+
+For Clerk/Cloudflare setup and deployment instructions, see [Deployment & setup](../docs/deployment.md).
 
 ## Deploy to GitHub Pages
 
@@ -164,4 +167,4 @@ npm run test:e2e
 
 The browser suite starts or reuses the dev server at `http://127.0.0.1:5173` and uses an installed Google Chrome. It checks the homepage, canonical game links, legacy redirects, direct-link refreshes, return navigation, mobile layout, and page titles. Game coverage includes Hearth setup, human rolls and nest entry, AI-versus-AI victory/replay, custom rules, pause/resume, audio controls and camera controls. Estate's purchase, autosave, trade and bankruptcy regressions remain covered. Screenshots are written to the ignored `test-results/` directory. Unit tests exercise rule boundaries, invalid actions, AI strategy, and complete deterministic games without loading a renderer.
 
-The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. All games run locally without an account or backend; online networking is outside this milestone.
+The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. Every game runs entirely locally without an account or backend; Hearth & Home, Estate, Gambit, and Prism can also be played online with a lightweight backend and no required account (see Multiplayer & deployment above). Wildrise is local-only for now.
