@@ -333,7 +333,8 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           ? state.phase === 'rolling'
             ? 'Rolling the dice…'
             : 'On the move…'
-          : player.isBot
+          : // The other seat's decisions are theirs to make, and to be seen making.
+            player.isBot || (online && !humanTurn)
             ? `${player.name} is playing…`
             : state.phase === 'purchase'
               ? `Buy for ${money(BOARD[player.position].price || 0)}`
@@ -352,6 +353,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     !paused &&
     (busy ||
       player.isBot ||
+      Boolean(online && !humanTurn) ||
       ['card', 'debt'].includes(state.phase) ||
       (state.phase === 'purchase' && player.cash < (BOARD[player.position].price || 0)))
   const actionTitle = isSetup
@@ -585,7 +587,10 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                     <Dice5 size={21} />
                   )}
                   {actionText}
-                  {(isSetup || state.phase === 'ready') && !player.isBot && <kbd>SPACE</kbd>}
+                  {/* The shortcut is only worth mentioning to whoever it works for. */}
+                  {(isSetup || state.phase === 'ready') && !player.isBot && (!online || humanTurn) && (
+                    <kbd>SPACE</kbd>
+                  )}
                 </button>
               </div>
             </div>
@@ -909,8 +914,14 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           <div className="card-for">
             A card for <strong style={{ color: player.color }}>{player.name}</strong>
           </div>
-          <button className="primary-button full-width" onClick={() => dispatch({ type: 'ACK_CARD' })}>
-            Let’s see what’s next <ArrowRight size={18} />
+          {/* Everyone sees the card; only the player who drew it turns it over. */}
+          <button
+            className="primary-button full-width"
+            disabled={Boolean(online && !humanTurn)}
+            onClick={() => dispatch({ type: 'ACK_CARD' })}
+          >
+            {online && !humanTurn ? `${player.name} is reading it…` : 'Let’s see what’s next'}{' '}
+            <ArrowRight size={18} />
           </button>
         </Dialog>
       )}
