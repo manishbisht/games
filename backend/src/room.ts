@@ -25,6 +25,8 @@ const MAX_AUTO_ADVANCES = 20
  * enough to read as a player thinking, short enough that the table keeps moving.
  */
 const STAND_IN_DELAY_MS = 1200
+/** How long the room pauses before a bot's decision lands, when its game has no opinion. */
+const BOT_THINK_MS = 900
 /**
  * How early an alarm fire may land and still count as "on time". `armAlarm`
  * always schedules at or after `autoAt`, so normal flow never comes anywhere
@@ -53,6 +55,8 @@ interface StoredSeat {
   disconnectedAt?: number
   /** Set once the room has played on without this seat; cleared when they come back. */
   abandoned?: boolean
+  /** Set when nobody is behind this seat: the room plays it, turn after turn. */
+  bot?: { skill: string }
 }
 
 /** Consecutive stand-in turns that settled nothing before the room stops retrying. */
@@ -176,15 +180,25 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
-   * The seat the room will play for, or `null`. A game counts as stuck only when
-   * every seat it is waiting on has been abandoned — one away player among
-   * several present ones is just a player the others are still waiting for.
+   * The seat the room plays for, and how. A bot is always driven — the table is
+   * never waiting on it in any meaningful sense. An abandoned seat keeps the
+   * stricter rule: one away player among present ones is just a player the
+   * others are still waiting for, so the room only stands in once every seat the
+   * game is blocked on has gone.
    */
-  private standInSeat(record: RoomRecord): SeatId | null {
+  private autoSeat(record: RoomRecord): { seat: SeatId; bot: boolean; skill: string } | null {
     if (record.status !== 'playing' || record.gameState === null) return null
     const waiting = this.adapter(record).waitingOn(record.gameState, record.seatIds)
-    if (!waiting.length || !waiting.every((seat) => record.seats[seat]?.abandoned)) return null
-    return waiting[0]
+    if (!waiting.length) return null
+    // Bots first, and not only for multi-seat waits: when the single waiting seat
+    // is a bot, the abandoned rule below cannot move it — a bot is never
+    // `abandoned`, so `every` is false and the table would sit here forever.
+    // Scanning the whole list rather than `waiting[0]` also covers an adapter that
+    // blocks on several seats at once, should one ever exist.
+    const bot = waiting.find((seat) => record.seats[seat]?.bot)
+    if (bot) return { seat: bot, bot: true, skill: record.seats[bot]!.bot!.skill }
+    if (!waiting.every((seat) => record.seats[seat]?.abandoned)) return null
+    return { seat: waiting[0], bot: false, skill: '' }
   }
 
   /**
@@ -195,14 +209,17 @@ export class RoomDO extends DurableObject<Env> {
    * either would let an unrelated save move a deadline someone is waiting on.
    * Callers that know the deadline is spent clear `autoAt` before calling.
    */
-  private stampStandIn(record: RoomRecord): void {
+  private stampAuto(record: RoomRecord): void {
     if (this.pendingPhase(record)) return
-    if (!this.standInSeat(record)) {
+    const next = this.autoSeat(record)
+    if (!next) {
       record.autoAt = undefined
       record.standInStalls = undefined
       return
     }
-    record.autoAt ??= Date.now() + STAND_IN_DELAY_MS
+    const bots = this.adapter(record).bots
+    const delay = next.bot ? (bots?.thinkMs?.(next.skill) ?? BOT_THINK_MS) : STAND_IN_DELAY_MS
+    record.autoAt ??= Date.now() + delay
   }
 
   /**
@@ -210,15 +227,16 @@ export class RoomDO extends DurableObject<Env> {
    * and stamps the timed phase's deadline, once, as that phase is entered.
    * Status is decided first so a game that just ended cannot leave a deadline
    * behind for an alarm to chase. The state has moved, so any deadline it had is
-   * spent — it is cleared here rather than left for `stampStandIn` to preserve.
+   * spent — it is cleared here rather than left for `stampAuto` to preserve.
    */
   private setGameState(record: RoomRecord, state: unknown): void {
     record.gameState = state
     if (this.adapter(record).isFinished(state)) record.status = 'finished'
     const pending = this.pendingPhase(record)
     record.autoAt = pending ? Date.now() + pending.afterMs : undefined
-    // A game that has come to rest on an abandoned seat still has to move on.
-    if (!pending) this.stampStandIn(record)
+    // A game that has come to rest on an abandoned seat — or a bot's turn — still
+    // has to move on.
+    if (!pending) this.stampAuto(record)
   }
 
   /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
@@ -316,13 +334,14 @@ export class RoomDO extends DurableObject<Env> {
       const stored = record.seats[seat]
       if (!stored) continue
       const { id, ...player } = stored.player
-      const isConnected = connected.has(id)
+      const isConnected = stored.bot ? true : connected.has(id)
       seats[seat] = {
         player,
         connected: isConnected,
         wantsRematch: stored.wantsRematch,
         ...(isConnected || !stored.disconnectedAt ? {} : { awaySince: stored.disconnectedAt }),
         ...(stored.abandoned ? { abandoned: true } : {}),
+        ...(stored.bot ? { bot: stored.bot } : {}),
       }
     }
     return {
@@ -422,7 +441,7 @@ export class RoomDO extends DurableObject<Env> {
         abandoned: undefined,
       }
       // They are back, so the room stops playing their turns for them.
-      this.stampStandIn(record)
+      this.stampAuto(record)
       await this.save(record)
     }
     this.broadcast(record)
@@ -602,7 +621,7 @@ export class RoomDO extends DurableObject<Env> {
     // unchanged state back through `setGameState` would restamp the deadline of
     // the beat everyone is currently watching, pushing it out on every click.
     if (forfeited || state !== record.gameState) this.setGameState(record, state)
-    else this.stampStandIn(record)
+    else this.stampAuto(record)
     await this.save(record)
     this.broadcast(record)
   }
@@ -645,7 +664,7 @@ export class RoomDO extends DurableObject<Env> {
       const due = record.autoAt === undefined || Date.now() >= record.autoAt - AUTO_AT_TOLERANCE_MS
       if (!due) return this.armAlarm(record)
       if (this.pendingPhase(record)) return this.autoAdvance(record)
-      if (this.standInSeat(record)) return this.playStandIn(record)
+      if (this.autoSeat(record)) return this.playAuto(record)
     }
     await this.expire(record)
   }
@@ -669,17 +688,19 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
-   * A seat whose claim has already been granted still has to take its turns, or
-   * the table sits there forever. One decision per fire: `setGameState` stamps
-   * whatever comes next — the beat the decision opened, or the following turn if
-   * that seat is away too — and the alarm comes back around for it.
+   * A seat the room plays still has to take its turns, or the table sits there
+   * forever. One decision per fire: `setGameState` stamps whatever comes next and
+   * the alarm comes back around for it.
    */
-  private async playStandIn(record: RoomRecord): Promise<void> {
+  private async playAuto(record: RoomRecord): Promise<void> {
     const adapter = this.adapter(record)
-    const seat = this.standInSeat(record)!
+    const next = this.autoSeat(record)!
     const before = record.gameState
-    const settled = adapter.resolveAbsent(before, seat, record.seatIds, this.gameCtx())
+    const settled = next.bot
+      ? adapter.bots!.decide(before, next.seat, record.seatIds, next.skill, this.gameCtx())
+      : adapter.resolveAbsent(before, next.seat, record.seatIds, this.gameCtx())
     // `null`: nobody stands in at this game, so it ends where the absence left it.
+    // Only `resolveAbsent` may say so — a bot's game is never ended by its bot.
     if (settled === null) record.status = 'finished'
     this.setGameState(record, settled ?? before)
     // A stand-in that settles nothing leaves the room facing the same state, so
