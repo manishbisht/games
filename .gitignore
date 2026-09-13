@@ -2,3 +2,4 @@
 .idea/*
 !.idea/runConfigurations/
 node_modules/
+.claude/worktrees/
