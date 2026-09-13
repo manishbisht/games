@@ -1,4 +1,5 @@
 import type { Ctx, GameAdapter, OnlineSeat } from '../online/adapter'
+import { botName } from '../online/bots'
 import type { ErrorCode } from '../protocol/types'
 import { BOARD } from './board'
 import { botAcceptsTrade, botAction, createGame, gameReducer } from './engine'
@@ -288,24 +289,33 @@ export const estateAdapter: GameAdapter<GameState, EstateOnlineAction> = {
    * on each of their turns, so a single decision is all it settles. Bankruptcy
    * is the only way out of a game of Estate, and it still has to be earned.
    */
-  resolveAbsent(state, seat, seats) {
-    if (state.status !== 'playing') return state
-    const player = seats.indexOf(seat)
-    if (player < 0 || !state.players[player]) return state
-    if (state.trade)
-      return state.trade.to === player
-        ? gameReducer(state, {
-            type: botAcceptsTrade(state, state.trade) ? 'ACCEPT_TRADE' : 'REJECT_TRADE',
-          })
-        : state
-    // Any other seat has nothing outstanding; being away is not itself a move.
-    if (state.current !== player) return state
-    const action = botAction(asBot(state, player))
-    return action ? gameReducer(state, action) : state
-  },
+  resolveAbsent: (state, seat, seats, ctx) =>
+    estateAdapter.bots!.decide(state, seat, seats, 'standard', ctx),
 
-  /** Filled in by a later task; chess keeps `null` until Step 4. */
-  bots: null,
+  /**
+   * A seat the room plays. `skill` is inert: Estate's bot has one way of
+   * playing, so the id exists only so every game answers the same question
+   * the same way.
+   */
+  bots: {
+    skills: ['standard'],
+    name: (_seat, index) => botName(index),
+    decide(state, seat, seats) {
+      if (state.status !== 'playing') return state
+      const player = seats.indexOf(seat)
+      if (player < 0 || !state.players[player]) return state
+      // A trade waits on its recipient, who may not be whose turn it is.
+      if (state.trade)
+        return state.trade.to === player
+          ? gameReducer(state, {
+              type: botAcceptsTrade(state, state.trade) ? 'ACCEPT_TRADE' : 'REJECT_TRADE',
+            })
+          : state
+      if (state.current !== player) return state
+      const action = botAction(asBot(state, player))
+      return action ? gameReducer(state, action) : state
+    },
+  },
 
   /**
    * Same table, same order, a new city. The seed is fresh — a rematch that

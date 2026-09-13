@@ -456,3 +456,39 @@ describe('standing in for an absent estate seat', () => {
     expect(state.rollId).toBe(1)
   })
 })
+
+describe('bots', () => {
+  const botCtx = { random: () => 0.5, now: 0 }
+  const seats = ['p0', 'p1']
+  const table = () =>
+    estateAdapter.create(
+      [
+        { id: 'p0', name: 'Ann' },
+        { id: 'p1', name: 'Cleo' },
+      ],
+      estateAdapter.validateOptions({}),
+      botCtx,
+    ) as GameState
+
+  it('rolls for the bot whose turn it is', () => {
+    const state = { ...table(), current: 1, phase: 'ready' as const }
+    const after = estateAdapter.bots!.decide(state, 'p1', seats, 'standard', botCtx)
+    expect(after).not.toBe(state)
+  })
+
+  it('answers a trade aimed at a bot even while another seat is thinking', () => {
+    // p0 proposes to p1 while it is still p0's turn: the game is waiting on
+    // the bot to answer, not on whoever's turn it nominally is.
+    const state = { ...table(), current: 0, trade: trade() }
+    const after = estateAdapter.bots!.decide(state, 'p1', seats, 'standard', botCtx)
+    expect(after).not.toBe(state)
+    // The offer is worth taking, so the bot accepts it and the trade clears.
+    expect(after.trade).toBeNull()
+    expect(after.players[0].cash).toBe(1400)
+    expect(after.players[1].cash).toBe(1600)
+  })
+
+  it('has a single strength, since its bot has no difficulty to pick', () => {
+    expect(estateAdapter.bots!.skills).toEqual(['standard'])
+  })
+})
