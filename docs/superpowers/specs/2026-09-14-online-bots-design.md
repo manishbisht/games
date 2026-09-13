@@ -21,8 +21,8 @@ interface BotSupport<S> {
   name(seat: SeatId, index: number): string
   /** Play one decision for a bot seat. Return `state` unchanged if it has none. */
   decide(state: S, seat: SeatId, seats: SeatId[], skill: string, ctx: Ctx): S
-  /** Pause before the decision lands, so a bot reads as thinking. */
-  thinkMs?: number
+  /** Pause before the decision lands, so a bot reads as thinking. Per-skill, because Wildrise's skills are pace. */
+  thinkMs?(skill: string): number
 }
 
 interface GameAdapter<S, A> {
@@ -50,7 +50,7 @@ else: every waiting seat abandoned → today's stand-in rule, unchanged
 
 Bots are always driven; abandoned seats keep the stricter existing rule, where one away player among present ones is just someone the table is still waiting for. Checking bots first is what makes Estate's trade work, since `waitingOn` there can be `[human, bot]` and the bot must answer while the human is still deciding. The two rules converge when both kinds of seat are waiting: the bot moves on one alarm, the abandoned seat on the next. `playStandIn` becomes `playAuto` and keeps the existing `standInStalls` counter and `MAX_STAND_IN_STALLS` backstop, which already protect against an adapter that never settles.
 
-Pacing comes from `bots.thinkMs` (default ~900ms), separate from `STAND_IN_DELAY_MS`. Chess sets it to `0` because its search is itself the pause.
+Pacing comes from `bots.thinkMs(skill)` (default ~900ms when a game does not implement it), separate from `STAND_IN_DELAY_MS`. It takes the skill because Wildrise's `casual | fast | fun` are pace and nothing else. Chess returns `0`, because its search is itself the pause.
 
 A bot must never read as an absent human. Five call sites need guarding, and each is a real defect if missed:
 
@@ -60,7 +60,7 @@ A bot must never read as an absent human. Five call sites need guarding, and eac
 | `snapshot` | Bots are absent from `connectedIds()`, so they render as disconnected | `connected: true` for bots, never emit `awaySince`, expose `bot` |
 | `handleClaim` | A player could claim the win against a bot for being away | Exclude bot seats from `others` |
 | `handleRematch` | `voting` waits on every non-abandoned seat, and a bot never votes, so the table hangs forever | Exclude bots from `voting`; they ride into the next game |
-| `handleSit` | A joiner could take a seat the host filled deliberately | `SEAT_TAKEN`; the host clears it with `removeBot` |
+| `handleSit` | A joiner could take a seat the host filled deliberately | Already covered — a bot's id never equals a player's, so the existing occupant check refuses with `SEAT_TAKEN`. Needs a test, not a guard; the host clears the seat with `removeBot` |
 
 `handleStart` needs no change. Bots are occupied seats, so `requireFull` is satisfied — chess can start with one human and one bot — and the existing `seatIds(occupied.length)` compaction already handles them. `PresenceDO` needs none either: bots send no heartbeats, so they cannot inflate the players-online counts.
 
