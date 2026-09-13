@@ -8,6 +8,10 @@ import type { RoomRecord } from '../src/room'
 import { connect } from './helpers'
 
 const testEnv = env as unknown as Env
+/** Mirrors `BOT_THINK_MS` in src/room.ts. */
+const BOT_THINK_MS = 900
+/** Mirrors `STAND_IN_DELAY_MS` in src/room.ts. */
+const STAND_IN_DELAY_MS = 1200
 
 const patchRecord = (code: string, patch: (record: RoomRecord) => void) =>
   runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
@@ -158,5 +162,39 @@ describe('seats the room plays', () => {
     // only thing holding that property; it is here so the rule cannot rot.
     const record = await readRecord(code)
     expect((record!.gameState as CouncilState).votes).toEqual(['p1'])
+  })
+
+  it("arms the bot's own think pause, not the stand-in delay, when stampAuto lands on a bot naturally", async () => {
+    const { code, host } = await councilGame()
+    // p0 votes: `handleAction` runs `setGameState`, which re-stamps `autoAt` on
+    // its own — p1 is the only seat left waiting, and it is a bot, so `stampAuto`
+    // must land on the bot's own pause rather than the stand-in delay. Nothing
+    // here touches `autoAt` directly, unlike every other test in this file.
+    host.send({ type: 'action', action: 'vote' })
+    await host.waitRoom((m) => (m.snapshot.gameState as unknown as CouncilState).votes.includes('p0'))
+    const record = await readRecord(code)
+    const delay = record!.autoAt! - Date.now()
+    // Comfortably inside the bot's own pause, never past it — collapsing
+    // `BOT_THINK_MS` into `STAND_IN_DELAY_MS` (900 -> 1200) would blow this bound.
+    expect(delay).toBeGreaterThan(0)
+    expect(delay).toBeLessThanOrEqual(BOT_THINK_MS)
+    expect(delay).toBeLessThan(STAND_IN_DELAY_MS)
+  })
+
+  it('surfaces a bot seat in the broadcast snapshot as connected, with its skill, and no awaySince', async () => {
+    const { code, host } = await botGame()
+    // botGame() patches p1 into a bot after the last broadcast, so nothing has
+    // shown it yet. Force a fresh one the same way the first test forces the
+    // bot's turn, and read the snapshot it sends rather than raw storage.
+    await patchRecord(code, (record) => {
+      const state = record.gameState as { currentPlayer: number; phase: string }
+      state.currentPlayer = 1
+      state.phase = 'ready'
+    })
+    await fire(code)
+    const after = await host.waitRoom((m) => Boolean(m.snapshot.seats.p1?.bot))
+    expect(after.snapshot.seats.p1?.connected).toBe(true)
+    expect(after.snapshot.seats.p1?.awaySince).toBeUndefined()
+    expect(after.snapshot.seats.p1?.bot).toEqual({ skill: 'casual' })
   })
 })

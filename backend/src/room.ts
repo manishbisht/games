@@ -202,12 +202,14 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
-   * Arm (or disarm) the stand-in's deadline. Unlike a phase deadline this tracks
-   * presence, which changes outside `setGameState` — a reclaim, a claim — so it
-   * is reconsidered whenever abandonment is. It never takes the slot from a live
-   * phase, and never restamps a stand-in beat that is already counting down:
-   * either would let an unrelated save move a deadline someone is waiting on.
-   * Callers that know the deadline is spent clear `autoAt` before calling.
+   * Arm (or disarm) whichever pause applies next — a bot's think delay or an
+   * abandoned seat's stand-in deadline, picked by `autoSeat`. Unlike a phase
+   * deadline this tracks presence, which changes outside `setGameState` — a
+   * reclaim, a claim, a seat turning into a bot — so it is reconsidered whenever
+   * that does. It never takes the slot from a live phase, and never restamps a
+   * beat that is already counting down: either would let an unrelated save move
+   * a deadline someone — or something — is waiting on. Callers that know the
+   * deadline is spent clear `autoAt` before calling.
    */
   private stampAuto(record: RoomRecord): void {
     if (this.pendingPhase(record)) return
