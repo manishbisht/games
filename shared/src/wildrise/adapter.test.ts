@@ -211,6 +211,7 @@ describe('bots', () => {
   it('sets its pace from the skill, because a race has no skill to have', () => {
     const think = wildriseAdapter.bots!.thinkMs!
     expect(think('fast')).toBeLessThan(think('casual'))
+    expect(think('casual')).toBeLessThan(think('fun'))
     expect(wildriseAdapter.bots!.skills).toEqual(['casual', 'fast', 'fun'])
   })
 })
