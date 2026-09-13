@@ -801,10 +801,10 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                   <small>{p.totalScore} total points</small>
                 </strong>
                 <span>
-                  {p.hand.length}
+                  {p.hand.length}{' '}
                   {/* Online a hand stays face-down to the end, so only this seat's
                       own leftovers can honestly be counted up. */}
-                  {(!online || p.id === viewer) && <small> / {leftovers(p)}</small>}
+                  {(!online || p.id === viewer) && <small>/ {leftovers(p)}</small>}
                 </span>
                 {p.id === game.winner && <Trophy size={14} />}
               </div>

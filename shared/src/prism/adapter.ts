@@ -175,7 +175,10 @@ export const prismAdapter: GameAdapter<GameState, PrismOnlineAction> = {
    * seat, but nothing waits on one: the window closes by itself when the next
    * action lands, so the table is only ever blocked on the player on turn.
    */
-  waitingOn: (state, seats) => (state.status === 'playing' ? [seats[state.currentPlayer]] : []),
+  waitingOn(state, seats) {
+    const seat = state.status === 'playing' ? seats[state.currentPlayer] : undefined
+    return seat ? [seat] : []
+  },
 
   /**
    * There is no forfeiting a hand of cards — a player who leaves gets played
