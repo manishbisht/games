@@ -3,9 +3,11 @@ import { generateRoomCode, normalizeRoomCode } from '@games/shared/protocol/code
 import type { Env } from './env'
 import { resolveIdentity } from './auth'
 import { allowedOrigin, corsHeaders } from './cors'
+import { resolvePresenceGame, validPresenceId } from './presence'
 
 export { RoomDO } from './room'
 export { LobbyDO } from './lobby'
+export { PresenceDO } from './presence'
 
 function json(data: unknown, status: number, origin: string | null): Response {
   const headers = new Headers({ 'content-type': 'application/json' })
@@ -66,6 +68,22 @@ export default {
       const code = normalizeRoomCode(roomMatch[1])
       if (!code) return json({ error: 'invalid room code' }, 404, origin)
       return env.ROOM.getByName(code).fetch(request)
+    }
+
+    if (url.pathname === '/api/presence' && request.method === 'POST') {
+      let body: Record<string, unknown>
+      try {
+        body = await request.json()
+      } catch {
+        return json({ error: 'invalid JSON' }, 400, origin)
+      }
+      const clientId = validPresenceId(body.clientId)
+      const tabId = validPresenceId(body.tabId)
+      const game = resolvePresenceGame(body.game)
+      if (!clientId || !tabId || game === null)
+        return json({ error: 'invalid presence beat' }, 400, origin)
+      const counts = await env.PRESENCE.getByName('global').beat(clientId, tabId, game)
+      return json(counts, 200, origin)
     }
 
     if (url.pathname === '/api/lobby' && request.method === 'GET') {
