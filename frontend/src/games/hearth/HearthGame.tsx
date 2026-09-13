@@ -39,6 +39,7 @@ import RulesDialog from './components/RulesDialog'
 import Modal from './components/Modal'
 import Die from './components/Die'
 import OnlinePanel from '../../online/OnlinePanel'
+import { claimTarget } from './online/session'
 import type { OnlineHearthSession } from './online/session'
 import './HearthGame.css'
 
@@ -303,8 +304,8 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                 : online
                   ? 'Waiting…'
                   : 'Thinking…'
-  // The player the table is stuck on, once they have walked away from their turn.
-  const awayBlocking = online && state.phase !== 'won' && !myTurn ? online.players[player.id] : undefined
+  // The player the table is stuck on, while there is still something to ask for.
+  const awayBlocking = online ? claimTarget(online) : null
   const EventIcon = {
     start: Flag,
     roll: Dices,
@@ -603,6 +604,8 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                               {seat?.connected === false && (
                                 <span className="hh-ai-badge hh-away-badge">AWAY</span>
                               )}
+                              {/* Away and claimed: the room is taking their turns for them. */}
+                              {seat?.abandoned && <span className="hh-ai-badge">AI</span>}
                               {p.id === player.id && <span className="hh-current-dot" />}
                             </strong>
                             <small>
@@ -756,7 +759,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           </button>
         </Modal>
       )}
-      {awayBlocking && !awayBlocking.connected && (
+      {awayBlocking && (
         <AbandonmentNotice
           name={awayBlocking.name}
           awaySince={awayBlocking.awaySince}

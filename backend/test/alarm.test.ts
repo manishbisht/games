@@ -11,6 +11,8 @@ import { connect } from './helpers'
 const testEnv = env as unknown as Env
 /** Mirrors `MAX_AUTO_ADVANCES` in src/room.ts — the phases one alarm may resolve. */
 const MAX_AUTO_ADVANCES = 20
+/** Mirrors `STAND_IN_DELAY_MS` in src/room.ts. */
+const STAND_IN_DELAY_MS = 1200
 
 /**
  * Pass-the-parcel: a two-to-four seat game whose only rule is that handing the
@@ -79,6 +81,33 @@ const parcelAdapter: GameAdapter<ParcelState, 'pass'> = {
 
 registerAdapter(parcelAdapter)
 
+/**
+ * A game that says it is blocked on a seat and then refuses to settle it — the
+ * shape a buggy adapter takes. The room cannot make such a game move; what it
+ * must not do is wake itself on the same state until the room expires a day later.
+ */
+const stubbornAdapter: GameAdapter<{ seats: string[] }, 'noop'> = {
+  id: 'estate',
+  minSeats: 2,
+  maxSeats: 2,
+  requireFull: true,
+  seatIds: (count) => Array.from({ length: count }, (_, i) => `p${i}`),
+  validateOptions: () => ({}),
+  validateAction: (raw) => (raw === 'noop' ? 'noop' : null),
+  create: (seats) => ({ seats: seats.map((seat) => seat.id) }),
+  /** Any action lands, and changes nothing but the record's timestamps. */
+  apply: (state) => ({ state }),
+  pending: () => null,
+  view: (state) => state,
+  isFinished: () => false,
+  waitingOn: (state) => [state.seats[0]],
+  /** Hands back exactly what it was given, forever. */
+  resolveAbsent: (state) => state,
+  rematch: (prev) => ({ state: prev }),
+}
+
+registerAdapter(stubbornAdapter)
+
 const parcel = (message: Extract<ServerMessage, { type: 'room' }>) =>
   message.snapshot.gameState as ParcelState
 
@@ -127,6 +156,11 @@ const alarmIn = (code: string) =>
 /** The alarm's absolute deadline, for checking it has not quietly moved. */
 const alarmAt = (code: string) =>
   runInDurableObject(testEnv.ROOM.getByName(code), async (_instance, state) => state.storage.getAlarm())
+
+const readRecord = (code: string) =>
+  runInDurableObject(testEnv.ROOM.getByName(code), async (_instance, state) =>
+    state.storage.get<RoomRecord>('room'),
+  )
 
 /** Rewrite part of the stored record, keeping the instance's cache coherent. */
 async function patchRecord(code: string, patch: (record: RoomRecord) => void) {
@@ -249,5 +283,94 @@ describe('the room alarm', () => {
     expect(playing.snapshot.seats.p0?.player.name).toBe('Ann')
     expect(playing.snapshot.seats.p1?.player.name).toBe('Ben')
     expect(playing.you.seat).toBe('p0')
+  })
+})
+
+describe('standing in for an abandoned seat', () => {
+  /** Mirrors `MAX_STAND_IN_STALLS` in src/room.ts. */
+  const MAX_STAND_IN_STALLS = 5
+  const EXPIRY_OWNS_THE_SLOT = 23 * 60 * 60 * 1000
+
+  /** A started stubborn game whose first seat has already been claimed against. */
+  async function stubbornGame() {
+    const annId = crypto.randomUUID()
+    const res = await SELF.fetch('https://api.test/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ game: 'estate', visibility: 'private', name: 'Ann', guestId: annId, seats: 2 }),
+    })
+    expect(res.status).toBe(201)
+    const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', annId)
+    host.send({ type: 'sit', seat: 'p0' })
+    const guest = await connect(code)
+    const benId = guest.join('Ben')
+    guest.send({ type: 'sit', seat: 'p1' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    host.send({ type: 'start' })
+    await host.waitRoom((m) => m.snapshot.status === 'playing')
+
+    // This game is blocked on p0 for good, so hand p0's seat to the room directly
+    // rather than staging a two-minute absence to get a claim granted.
+    await patchRecord(code, (record) => {
+      record.seats.p0!.abandoned = true
+    })
+    return { code, host, guest, annId, benId }
+  }
+
+  it('retries a stand-in that settles nothing, then stops rather than spinning', async () => {
+    const { code } = await stubbornGame()
+    await fire(code)
+    // It came back for a second try: a single refusal is not proof of a dead end.
+    expect(await alarmIn(code)).toBeLessThanOrEqual(STAND_IN_DELAY_MS)
+
+    for (let attempt = 1; attempt < MAX_STAND_IN_STALLS; attempt++) await fire(code)
+    // Enough. The slot goes back to the expiry instead of waking the room on this
+    // same state every 1200ms for the next day.
+    expect(await alarmIn(code)).toBeGreaterThan(EXPIRY_OWNS_THE_SLOT)
+    const record = (await readRecord(code))!
+    expect(record.standInStalls).toBeGreaterThanOrEqual(MAX_STAND_IN_STALLS)
+    // Giving up on the alarm is not giving up on the room: the table is still live.
+    expect(record.status).toBe('playing')
+  })
+
+  it('picks the stand-in up again the moment anything else moves', async () => {
+    const { code, host, annId } = await stubbornGame()
+    for (let attempt = 0; attempt < MAX_STAND_IN_STALLS; attempt++) await fire(code)
+    expect(await alarmIn(code)).toBeGreaterThan(EXPIRY_OWNS_THE_SLOT)
+
+    // Every real action goes through `setGameState`, which re-arms the stand-in,
+    // so a table that stalled is never a table that cannot be recovered.
+    host.send({ type: 'action', action: 'noop' })
+    await vi.waitFor(async () => {
+      expect(await alarmIn(code)).toBeLessThanOrEqual(STAND_IN_DELAY_MS)
+    })
+
+    // And a reclaim ends it outright: p0 is someone's seat again.
+    const back = await connect(code)
+    back.join('Ann', annId)
+    await back.waitRoom((m) => m.you.seat === 'p0')
+    const record = (await readRecord(code))!
+    expect(record.seats.p0?.abandoned).toBeUndefined()
+    expect(record.autoAt).toBeUndefined()
+    expect(record.standInStalls).toBeUndefined()
+  })
+
+  it('leaves an armed stand-in beat alone when another seat rejoins', async () => {
+    const { code, benId } = await stubbornGame()
+    // A stand-in already counting down. Held far enough out that only the rejoin
+    // below could possibly move it.
+    const due = Date.now() + 60_000
+    await patchRecord(code, (record) => {
+      record.autoAt = due
+    })
+
+    // Ben opens a second tab: `handleJoin` runs for a seat with nothing to do with
+    // p0's countdown, and the countdown must not move — in either direction.
+    const tab = await connect(code)
+    tab.join('Ben', benId)
+    await tab.waitRoom((m) => m.you.seat === 'p1')
+    expect((await readRecord(code))!.autoAt).toBe(due)
   })
 })

@@ -20,6 +20,21 @@ const seePhase = (client: Client, phase: GameState['phase']) =>
   seeTable(client, (state) => state.phase === phase)
 
 /**
+ * Watch only what arrives from `from` onwards. `waitRoom` searches the whole log,
+ * which is the wrong question after `patchRecord`: that writes storage without
+ * broadcasting, so the newest snapshot a client holds can still describe a room
+ * the server has already moved past.
+ */
+const seeNext = (client: Client, from: number, predicate: (m: RoomMessage) => boolean) =>
+  vi.waitFor(() => {
+    // `Client` types its log as chess, which every other game narrows for itself.
+    const log = client.messages.slice(from) as unknown as ServerMessage[]
+    const room = log.filter((m): m is RoomMessage => m.type === 'room').findLast(predicate)
+    expect(room).toBeDefined()
+    return room!
+  })
+
+/**
  * Run the beat the room is holding. The return value is deliberately not
  * asserted: workerd delivers due alarms itself, so whether this fire or that one
  * moved the table is a race — the broadcast that follows is not.
@@ -247,5 +262,103 @@ describe('a hearth room', () => {
     expect(board(back).phase).toBe('roll')
     expect(board(back).winner).toBeNull()
     expect((await readRecord(code))!.status).toBe('playing')
+  })
+
+  it('tells the table which seat it is playing for', async () => {
+    const { code, clients } = await startedTable(['Ann', 'Ben', 'Cai'])
+    const [ann, ben] = clients
+    await playTurn(code, ann, 3)
+    ben.ws.close()
+    await ann.waitRoom((m) => m.snapshot.seats.p1?.connected === false)
+    // Away is not the same as claimed: nothing says so until the claim lands.
+    const away = await ann.waitRoom((m) => m.snapshot.seats.p1?.awaySince !== undefined)
+    expect(away.snapshot.seats.p1?.abandoned).toBeUndefined()
+
+    await patchRecord(code, (record) => {
+      record.seats.p1!.disconnectedAt = Date.now() - CLAIM_WIN_AFTER_MS - 1000
+    })
+    useDie(2)
+    ann.send({ type: 'claim' })
+    // The snapshot carries the flag, which is how the table stops asking to claim
+    // a seat the room is already playing.
+    const claimed = await ann.waitRoom((m) => m.snapshot.seats.p1?.abandoned === true)
+    expect(claimed.snapshot.seats.p0?.abandoned).toBeUndefined()
+  })
+
+  it('does not let a repeated claim push the beat it is watching out', async () => {
+    const { code, clients } = await startedTable(['Ann', 'Ben', 'Cai'])
+    const [ann, ben] = clients
+    await playTurn(code, ann, 3)
+    ben.ws.close()
+    await ann.waitRoom((m) => m.snapshot.seats.p1?.connected === false)
+    await patchRecord(code, (record) => {
+      record.seats.p1!.disconnectedAt = Date.now() - CLAIM_WIN_AFTER_MS - 1000
+    })
+
+    useDie(2)
+    ann.send({ type: 'claim' })
+    // Ben's seat is now mid-roll, on a beat the whole table is watching.
+    await seePhase(ann, 'rolling')
+    const due = (await readRecord(code))!.autoAt
+    expect(due).toBeTypeOf('number')
+
+    // Claiming again settles nothing — Ben's seat has no decision outstanding —
+    // so it must leave that beat exactly where it was. Before the guard each of
+    // these pushed the die another 1.1s into the future.
+    ann.send({ type: 'claim' })
+    ann.send({ type: 'claim' })
+    await vi.waitFor(async () => {
+      expect((await readRecord(code))!.seats.p1?.abandoned).toBe(true)
+    })
+    expect((await readRecord(code))!.autoAt).toBe(due)
+
+    // And the beat still lands on the number it was always going to land on.
+    await fire(code)
+    const rolled = await seeTable(ann, (state) => state.dice === 2)
+    expect(board(rolled).phase).toBe('pass')
+  })
+
+  it('rematches on the consent of the players who are still here', async () => {
+    const { code, clients, ids } = await startedTable(['Ann', 'Ben', 'Cai'])
+    const [ann, ben, cai] = clients
+    await playTurn(code, ann, 3)
+    ben.ws.close()
+    await ann.waitRoom((m) => m.snapshot.seats.p1?.connected === false)
+    await patchRecord(code, (record) => {
+      record.seats.p1!.disconnectedAt = Date.now() - CLAIM_WIN_AFTER_MS - 1000
+    })
+    useDie(2)
+    ann.send({ type: 'claim' })
+    await ann.waitRoom((m) => m.snapshot.seats.p1?.abandoned === true)
+
+    // Jump to the end rather than playing four pieces home three times over.
+    await patchRecord(code, (record) => {
+      record.gameState = { ...(record.gameState as GameState), phase: 'won', winner: 'red' }
+      record.status = 'finished'
+      record.autoAt = undefined
+    })
+
+    ann.send({ type: 'rematch' })
+    const waiting = await ann.waitRoom((m) => m.snapshot.seats.p0?.wantsRematch === true)
+    // Ann alone is not the table: Cai is still here and has not said yes.
+    expect(waiting.snapshot.status).toBe('finished')
+
+    const before = ann.messages.length
+    cai.send({ type: 'rematch' })
+    // Ben never asks for anything — the room plays his seat — so waiting on him
+    // would have left this table finished forever.
+    const fresh = await seeNext(ann, before, (m) => m.snapshot.status === 'playing')
+    expect(board(fresh).turn).toBe(1)
+    expect(board(fresh).pieces.every((p) => p.progress === -1)).toBe(true)
+    expect(board(fresh).players.map((p) => p.name)).toEqual(['Ann', 'Ben', 'Cai'])
+    // Ben rides into the new game still abandoned, and still played for.
+    expect(fresh.snapshot.seats.p1?.abandoned).toBe(true)
+    expect(fresh.snapshot.seats.p0?.wantsRematch).toBe(false)
+
+    // Coming back is still what ends it.
+    const back = await connect(code)
+    back.join('Ben', ids[1])
+    await back.waitRoom((m) => m.you.seat === 'p1')
+    expect((await readRecord(code))!.seats.p1?.abandoned).toBeUndefined()
   })
 })

@@ -35,6 +35,9 @@ interface StoredSeat {
   abandoned?: boolean
 }
 
+/** Consecutive stand-in turns that settled nothing before the room stops retrying. */
+const MAX_STAND_IN_STALLS = 5
+
 export interface RoomRecord {
   code: string
   game: GameId
@@ -50,6 +53,12 @@ export interface RoomRecord {
    * entered. Absent whenever the game is not sitting in one.
    */
   autoAt?: number
+  /**
+   * Stand-in turns in a row that left the game exactly where it was. Only a
+   * misbehaving adapter produces any; the count is what stops the room retrying
+   * forever. Reset the moment a stand-in actually moves the game.
+   */
+  standInStalls?: number
   /** The seats in play. Minted at creation, compacted onto the real headcount at start. */
   seatIds: SeatId[]
   /** The seat count the room was created for; `seatIds` may be shorter once compacted. */
@@ -144,29 +153,37 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
-   * The stand-in's deadline. Unlike a phase deadline this tracks presence, which
-   * changes outside `setGameState` (a reclaim, a claim), so it is restamped
-   * whenever abandonment does — but never over a live phase, which owns the slot
-   * and must not be pushed out by an unrelated save.
+   * Arm (or disarm) the stand-in's deadline. Unlike a phase deadline this tracks
+   * presence, which changes outside `setGameState` — a reclaim, a claim — so it
+   * is reconsidered whenever abandonment is. It never takes the slot from a live
+   * phase, and never restamps a stand-in beat that is already counting down:
+   * either would let an unrelated save move a deadline someone is waiting on.
+   * Callers that know the deadline is spent clear `autoAt` before calling.
    */
   private stampStandIn(record: RoomRecord): void {
     if (this.pendingPhase(record)) return
-    record.autoAt = this.standInSeat(record) ? Date.now() + STAND_IN_DELAY_MS : undefined
+    if (!this.standInSeat(record)) {
+      record.autoAt = undefined
+      record.standInStalls = undefined
+      return
+    }
+    record.autoAt ??= Date.now() + STAND_IN_DELAY_MS
   }
 
   /**
    * The one door the game state changes through: it settles the room's status
    * and stamps the timed phase's deadline, once, as that phase is entered.
    * Status is decided first so a game that just ended cannot leave a deadline
-   * behind for an alarm to chase.
+   * behind for an alarm to chase. The state has moved, so any deadline it had is
+   * spent — it is cleared here rather than left for `stampStandIn` to preserve.
    */
   private setGameState(record: RoomRecord, state: unknown): void {
     record.gameState = state
     if (this.adapter(record).isFinished(state)) record.status = 'finished'
     const pending = this.pendingPhase(record)
-    if (pending) record.autoAt = Date.now() + pending.afterMs
+    record.autoAt = pending ? Date.now() + pending.afterMs : undefined
     // A game that has come to rest on an abandoned seat still has to move on.
-    else this.stampStandIn(record)
+    if (!pending) this.stampStandIn(record)
   }
 
   /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
@@ -268,6 +285,7 @@ export class RoomDO extends DurableObject<Env> {
         connected: isConnected,
         wantsRematch: stored.wantsRematch,
         ...(isConnected || !stored.disconnectedAt ? {} : { awaySince: stored.disconnectedAt }),
+        ...(stored.abandoned ? { abandoned: true } : {}),
       }
     }
     return {
@@ -465,7 +483,12 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
     record.seats[seat] = { ...record.seats[seat]!, wantsRematch: true }
     const seated = record.seatIds.filter((s) => record.seats[s])
-    if (seated.every((s) => record.seats[s]!.wantsRematch)) {
+    // A seat the room is playing for cannot ask for anything, so waiting on it
+    // would strand the table forever. Consensus is the players still here; the
+    // abandoned seat rides into the next game, still abandoned, still played for
+    // — and still theirs to reclaim, which is what clears the flag.
+    const voting = seated.filter((s) => !record.seats[s]!.abandoned)
+    if (voting.length && voting.every((s) => record.seats[s]!.wantsRematch)) {
       const adapter = this.adapter(record)
       const { state, seatRemap } = adapter.rematch(
         record.gameState,
@@ -537,7 +560,12 @@ export class RoomDO extends DurableObject<Env> {
     // Settle the status before the state, so a game forfeited mid-phase does not
     // leave an auto-advance deadline behind on a record nobody will play again.
     if (forfeited) record.status = 'finished'
-    this.setGameState(record, state)
+    // A claim aimed at a seat with nothing outstanding — mid-beat, or already
+    // being played by the room — grants the abandonment and no more. Putting the
+    // unchanged state back through `setGameState` would restamp the deadline of
+    // the beat everyone is currently watching, pushing it out on every click.
+    if (forfeited || state !== record.gameState) this.setGameState(record, state)
+    else this.stampStandIn(record)
     await this.save(record)
     this.broadcast(record)
   }
@@ -611,9 +639,14 @@ export class RoomDO extends DurableObject<Env> {
     // `null`: nobody stands in at this game, so it ends where the absence left it.
     if (settled === null) record.status = 'finished'
     this.setGameState(record, settled ?? before)
-    // An adapter that stands in by changing nothing would be woken on this same
-    // state every 1200ms until the room expired. Hand the slot back instead.
-    if (settled === before) record.autoAt = undefined
+    // A stand-in that settles nothing leaves the room facing the same state, so
+    // the deadline `setGameState` just stamped would wake it on it again. Keep
+    // retrying — the block may clear — but only a few times, then let the expiry
+    // have the slot back rather than spin on it for a day. Nothing is stranded
+    // either way: the next action or reclaim re-arms it.
+    if (settled !== before) record.standInStalls = undefined
+    else if ((record.standInStalls = (record.standInStalls ?? 0) + 1) >= MAX_STAND_IN_STALLS)
+      record.autoAt = undefined
     await this.save(record)
     this.broadcast(record)
   }

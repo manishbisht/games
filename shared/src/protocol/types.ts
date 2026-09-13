@@ -34,6 +34,12 @@ export interface SeatInfo {
   wantsRematch: boolean
   /** Server timestamp of when this seat-holder's last socket dropped; absent while connected. */
   awaySince?: number
+  /**
+   * A claim against this seat has been granted: the room plays it now, and it
+   * no longer counts towards a rematch. Cleared when its player comes back.
+   * There is nothing private in it — it is why the table is moving without them.
+   */
+  abandoned?: boolean
 }
 
 /** How long a seat must be abandoned mid-game before the opponent may claim the win. */

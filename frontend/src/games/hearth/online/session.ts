@@ -9,6 +9,8 @@ export interface HearthSeatPlayer {
   connected: boolean
   /** Server timestamp of when they dropped; absent while they are here. */
   awaySince?: number
+  /** The room is already playing this seat — there is nothing left to claim. */
+  abandoned?: boolean
 }
 
 /**
@@ -31,6 +33,22 @@ export interface OnlineHearthSession {
   leave: () => void
 }
 
+/**
+ * The player a claim can be made against right now, or `null`. Three things have
+ * to hold at once: the table is genuinely stuck on someone who has gone, this
+ * browser holds a seat of its own to claim with — a spectator has no standing,
+ * and the server would only answer NOT_SEATED — and no claim has been granted
+ * yet, because after one the room plays that seat and there is nothing to ask.
+ */
+export function claimTarget(session: OnlineHearthSession): HearthSeatPlayer | null {
+  const { state, mySeat, players } = session
+  if (mySeat === null || state.phase === 'won') return null
+  const onTurn = state.players[state.currentPlayer].id
+  if (onTurn === mySeat) return null
+  const blocker = players[onTurn]
+  return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
+}
+
 export function hearthSession(
   snapshot: RoomSnapshot,
   you: YouInfo,
@@ -46,7 +64,12 @@ export function hearthSession(
     const info = snapshot.seats[seat]
     const colour = colourOf(seat)
     if (info && colour)
-      players[colour] = { name: info.player.name, connected: info.connected, awaySince: info.awaySince }
+      players[colour] = {
+        name: info.player.name,
+        connected: info.connected,
+        awaySince: info.awaySince,
+        abandoned: info.abandoned,
+      }
   }
 
   const send = (action: HearthOnlineAction) => api.action(action)
