@@ -285,7 +285,9 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     setWinnerDismissed(false)
     board.current?.reset()
   }
-  function openPortfolio(id = state.current) {
+  // Locally the player on turn is the person at the keyboard; online it is
+  // whoever's turn it happens to be, and your own properties are still yours.
+  function openPortfolio(id = online?.mySeat ?? state.current) {
     setPortfolioPlayer(id)
     setModal('portfolio')
   }
@@ -742,7 +744,10 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
             <span className="toolbar-separator" />
             <button
               className="utility-action"
-              disabled={isSetup || isFinished || state.trade !== null}
+              // A table with other people at it does not stop because one of
+              // them would like it to — and a pause would only gate their own
+              // inputs while the room played on without them.
+              disabled={Boolean(online) || isSetup || isFinished || state.trade !== null}
               onClick={() => setPaused((v) => !v)}
             >
               {paused ? <Play size={16} /> : <Pause size={16} />}
