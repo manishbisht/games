@@ -66,8 +66,8 @@ async function handOver(page: Page, theirs: string) {
   throw new Error(`the turn never reached ${theirs}`)
 }
 
-test('two browsers create, join, and play a server-paced estate table', async ({ browser }) => {
-  const errors: string[] = []
+/** Two browsers, one two-seat room, both seated and the city dealt. */
+async function seatedTable(browser: Browser, errors: string[]) {
   const host = await newPlayer(browser, errors)
   const guest = await newPlayer(browser, errors)
 
@@ -96,9 +96,17 @@ test('two browsers create, join, and play a server-paced estate table', async ({
   await expect(host.getByRole('button', { name: 'Start the game' })).toBeEnabled()
   await host.getByRole('button', { name: 'Start the game' }).click()
 
-  // The city is up on both sides, under the players' own names.
+  // The city is up on both sides.
   await expect(host.locator('.board-canvas canvas')).toBeVisible({ timeout: 30000 })
   await expect(guest.locator('.board-canvas canvas')).toBeVisible({ timeout: 30000 })
+  return { host, guest, code }
+}
+
+test('two browsers create, join, and play a server-paced estate table', async ({ browser }) => {
+  const errors: string[] = []
+  const { host, guest } = await seatedTable(browser, errors)
+
+  // Both tables are laid under the players' own names.
   await expect(host.locator('.player-card').first()).toContainText('Ann')
   await expect(host.locator('.player-card').nth(1)).toContainText('Ben')
   await expect(guest.locator('.player-card').nth(1)).toContainText('YOU')
@@ -132,5 +140,37 @@ test('two browsers create, join, and play a server-paced estate table', async ({
   await expect(host.getByRole('button', { name: /^Ben is playing/ })).toBeDisabled()
   await guest.screenshot({ path: 'test-results/estate-online-guest.png', fullPage: true })
 
+  expect(errors).toEqual([])
+})
+
+test('an offer opens its own review at the seat it was made to', async ({ browser }) => {
+  const errors: string[] = []
+  const { host, guest } = await seatedTable(browser, errors)
+
+  await expect(host.getByRole('button', { name: 'Make a trade' })).toBeEnabled()
+  // Off-turn, a seat has nothing to offer — deals are struck on your own turn.
+  await expect(guest.getByRole('button', { name: 'Make a trade' })).toBeDisabled()
+
+  await host.getByRole('button', { name: 'Make a trade' }).click()
+  await host.getByLabel('Cash you offer').fill('100')
+  await host.getByRole('button', { name: /Confirm & send offer/ }).click()
+
+  // Ben has no dialog open and no turn coming, so the offer opens its own.
+  const accept = (page: Page) => page.getByRole('button', { name: /Accept as Ben/ })
+  await expect(accept(guest)).toBeVisible()
+  await expect(guest.getByText('Ann has made you an offer.')).toBeVisible()
+  await accept(guest).click()
+  // Server-authoritative: the offer stands on screen until the room settles it.
+  await expect(accept(guest)).toHaveCount(0)
+
+  // The money moved, and the review closed at both seats.
+  await expect(guest.locator('.player-card').nth(1)).toContainText('$1,600')
+  await expect(guest.locator('.player-card').first()).toContainText('$1,400')
+  await expect(host.locator('.player-card').first()).toContainText('$1,400')
+  await expect(accept(host)).toHaveCount(0)
+  // With the offer settled, Ann's turn is hers again.
+  await expect(rollButton(host)).toBeEnabled()
+
+  await guest.screenshot({ path: 'test-results/estate-online-trade.png', fullPage: true })
   expect(errors).toEqual([])
 })
