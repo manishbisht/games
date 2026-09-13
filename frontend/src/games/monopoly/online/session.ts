@@ -92,6 +92,24 @@ export function onlineDispatch(session: OnlineEstateSession): (action: GameActio
 }
 
 /**
+ * What a dialog that has to open and close itself watches instead of the state
+ * object. A snapshot is parsed fresh out of every broadcast, so `state.trade`
+ * and `state.card` are new objects several times a turn and their identity says
+ * nothing about whether the thing they describe has changed.
+ *
+ * An offer is named by its two seats: one may stand at a time, and it is the
+ * same offer for as long as they do. A card has no id at all, but nothing else
+ * is logged while one is on the table, so the event it was drawn on names it —
+ * which is what lets a viewer who did not draw it put it down and have it stay
+ * down until the next one.
+ */
+export const tradeKeyOf = (state: GameState): string =>
+  state.trade ? `${state.trade.from}-${state.trade.to}` : ''
+
+export const cardKeyOf = (state: GameState): string =>
+  state.phase === 'card' && state.card ? `${state.eventId}-${state.card.title}` : ''
+
+/**
  * The player a claim can be made against right now, or `null`. Three things have
  * to hold at once: the table is genuinely stuck on someone who has gone — the
  * player on turn, or the one an offer is waiting on — this browser holds a seat

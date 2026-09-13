@@ -1891,6 +1891,20 @@ kbd {
   }
 }
 
+/*
+ * An offer you made yourself. TradeDialog draws one Accept/Decline block for
+ * whoever opens the review, and the seat that made an offer may not accept it —
+ * so the accept is taken out of the page here, at the call site that wrapped it,
+ * rather than by giving a dialog the local game shares a notion of who is
+ * looking. Decline stays, and for that seat it means withdraw.
+ */
+.trade-as-proposer .dialog-actions .primary-button {
+  display: none;
+}
+.trade-as-proposer .dialog-actions {
+  justify-content: stretch;
+}
+
 /* An online table: the claim banner, and the shared lobby panel in a dark dialog. */
 .abandon-notice {
   display: flex;

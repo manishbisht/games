@@ -46,7 +46,7 @@ import { loadGame, saveGame } from './game/storage'
 import { playSound, unlockAudio } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
 import OnlinePanel from '../../online/OnlinePanel'
-import { claimTarget, onlineDispatch } from './online/session'
+import { cardKeyOf, claimTarget, onlineDispatch, tradeKeyOf } from './online/session'
 import type { OnlineEstateSession } from './online/session'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
@@ -100,6 +100,21 @@ const rules = [
     text: 'If you cannot pay after selling and mortgaging, you go bankrupt. Remaining assets pass to your creditor. The last financially active player wins.',
   },
 ]
+
+/**
+ * The table as it looks to a seat that is only watching this turn.
+ * `PropertyDetail` offers its Buy, Pass, Build, Sell and Mortgage controls to
+ * whoever holds `state.current` — locally the person at the keyboard, online
+ * somebody else — and gates every one of them on that player not being a
+ * computer. That flag is the only thing a call site can say to a dialog which
+ * takes no viewer, and it says exactly the right thing: these controls are not
+ * this browser's to offer. What is left is the read-only half — the deed, the
+ * rent table, who owns it — which is what an onlooker should get.
+ */
+const watched = (state: GameState): GameState => ({
+  ...state,
+  players: state.players.map((p, index) => (index === state.current ? { ...p, isBot: true } : p)),
+})
 
 /** Where a seat's player is, in the line the local game uses to say what they are. */
 function presence(online: OnlineEstateSession, id: number): string {
@@ -181,6 +196,12 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     humanTurn && ['ready', 'end'].includes(state.phase) && state.players.filter((p) => !p.bankrupt).length > 1
   /** The seat the table is stuck on, if its player has gone and can be claimed. */
   const awayBlocking = online ? claimTarget(online) : null
+  /** Looking at an offer of your own: the one review with a button you may not press. */
+  const reviewingOwnOffer = Boolean(online && state.trade && online.mySeat === state.trade.from)
+  /** An offer you are party to is always reachable again, however you dismissed it. */
+  const myOffer = Boolean(
+    online && state.trade && (online.mySeat === state.trade.from || online.mySeat === state.trade.to),
+  )
   // Online every fresh game shows its own result — a rematch arrives as a new
   // state rather than through the local restart that would have cleared this.
   const [wasFinished, setWasFinished] = useState(isFinished)
@@ -190,13 +211,18 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   }
   /**
    * An offer crosses the table, so online it has to open its own review: the
-   * seat it was made to has no dialog open and no turn coming. Keyed on the two
-   * seats rather than on `state.trade`, which is a fresh object in every
-   * snapshot — watching its identity would fire on every unrelated broadcast
-   * and shut an offer that was still being composed.
+   * seat it was made to has no dialog open and no turn coming. Keyed rather than
+   * watched by identity — see `tradeKeyOf` — so an unrelated broadcast cannot
+   * shut an offer that is still being composed.
    */
-  const tradeKey = online && state.trade ? `${state.trade.from}-${state.trade.to}` : ''
+  const tradeKey = online ? tradeKeyOf(state) : ''
   const [tradeShown, setTradeShown] = useState(tradeKey)
+  /**
+   * The same trick for the card, to the opposite end: a viewer who did not draw
+   * it may put it down, and it stays down until the next one turns up.
+   */
+  const cardKey = cardKeyOf(state)
+  const [cardDismissed, setCardDismissed] = useState('')
   if (online && tradeShown !== tradeKey) {
     setTradeShown(tradeKey)
     const parties = tradeKey ? tradeKey.split('-').map(Number) : []
@@ -312,8 +338,15 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     }
     if (state.phase === 'purchase') dispatch({ type: 'BUY' })
   }
+  /**
+   * Dismissing the trade dialog. Locally, closing a review *is* declining it —
+   * the dialog is the only place that deal lives. Online it is not: the offer
+   * lives in the room, and both of the dialog's own buttons already send their
+   * own message before calling this, so rejecting here too would put a second
+   * message on the wire behind every answer. Online, dismissing is local.
+   */
   function closeTrade() {
-    if (state.trade) dispatch({ type: 'REJECT_TRADE' })
+    if (state.trade && !online) dispatch({ type: 'REJECT_TRADE' })
     setModal(null)
   }
   async function fullscreen() {
@@ -738,9 +771,16 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         </div>
         <div className="table-toolbar">
           <div className="utility-actions">
-            <PropertySummary state={state} onClick={() => openPortfolio()} />
+            {/* "My properties" means mine. PropertySummary counts the deeds of
+                `state.current`, which locally is the person at the keyboard. */}
+            <PropertySummary
+              state={online?.mySeat != null ? { ...state, current: online.mySeat } : state}
+              onClick={() => openPortfolio()}
+            />
             <span className="toolbar-separator" />
-            <TradeButton disabled={!canTrade} onClick={() => setModal('trade')} />
+            {/* Online a dismissed review has to be reachable again: the offer is
+                still on the table and the game is frozen until it is answered. */}
+            <TradeButton disabled={!canTrade && !myOffer} onClick={() => setModal('trade')} />
             <span className="toolbar-separator" />
             <button
               className="utility-action"
@@ -793,9 +833,27 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           }}
         />
       )}
-      {modal === 'trade' && <TradeDialog state={state} dispatch={dispatch} onClose={closeTrade} />}
+      {modal === 'trade' &&
+        (reviewingOwnOffer ? (
+          // TradeDialog shows one Accept/Decline block to whoever opens it, and
+          // the seat that *made* an offer cannot accept it — the room refuses,
+          // and the seam drops the click before it gets there. The dialog is
+          // shared with the local game and takes no viewer, so the only thing a
+          // call site can do about a button it must not offer is not render it.
+          // Decline stays: for the seat that made the offer, it withdraws it.
+          <div className="trade-as-proposer">
+            <TradeDialog state={state} dispatch={dispatch} onClose={closeTrade} />
+          </div>
+        ) : (
+          <TradeDialog state={state} dispatch={dispatch} onClose={closeTrade} />
+        ))}
       {selected !== null && (
-        <PropertyDetail id={selected} state={state} dispatch={dispatch} onClose={() => setSelected(null)} />
+        <PropertyDetail
+          id={selected}
+          state={online && !humanTurn ? watched(state) : state}
+          dispatch={dispatch}
+          onClose={() => setSelected(null)}
+        />
       )}
       {modal === 'rules' && (
         <Dialog
@@ -905,31 +963,41 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           )}
         </Dialog>
       )}
-      {state.phase === 'card' && state.card && !modal && selected === null && !paused && (
-        <Dialog
-          title={state.card.title}
-          eyebrow={state.card.deck === 'chance' ? 'A LITTLE CHANCE' : 'FROM YOUR COMMUNITY'}
-          onClose={() => dispatch({ type: 'ACK_CARD' })}
-          className={`event-card ${state.card.deck}`}
-        >
-          <div className="card-illustration">
-            {state.card.deck === 'chance' ? '?' : <Sparkles size={74} strokeWidth={1} />}
-          </div>
-          <p>{state.card.text}</p>
-          <div className="card-for">
-            A card for <strong style={{ color: player.color }}>{player.name}</strong>
-          </div>
-          {/* Everyone sees the card; only the player who drew it turns it over. */}
-          <button
-            className="primary-button full-width"
-            disabled={Boolean(online && !humanTurn)}
-            onClick={() => dispatch({ type: 'ACK_CARD' })}
+      {state.phase === 'card' &&
+        state.card &&
+        cardDismissed !== cardKey &&
+        !modal &&
+        selected === null &&
+        !paused && (
+          <Dialog
+            title={state.card.title}
+            eyebrow={state.card.deck === 'chance' ? 'A LITTLE CHANCE' : 'FROM YOUR COMMUNITY'}
+            // Turning the card over belongs to the player who drew it. For anyone
+            // else online this is a card they are being shown, and putting it down
+            // has to be something they can do without sending anything.
+            onClose={() =>
+              online && !humanTurn ? setCardDismissed(cardKey) : dispatch({ type: 'ACK_CARD' })
+            }
+            className={`event-card ${state.card.deck}`}
           >
-            {online && !humanTurn ? `${player.name} is reading it…` : 'Let’s see what’s next'}{' '}
-            <ArrowRight size={18} />
-          </button>
-        </Dialog>
-      )}
+            <div className="card-illustration">
+              {state.card.deck === 'chance' ? '?' : <Sparkles size={74} strokeWidth={1} />}
+            </div>
+            <p>{state.card.text}</p>
+            <div className="card-for">
+              A card for <strong style={{ color: player.color }}>{player.name}</strong>
+            </div>
+            {/* Everyone sees the card; only the player who drew it turns it over. */}
+            <button
+              className="primary-button full-width"
+              disabled={Boolean(online && !humanTurn)}
+              onClick={() => dispatch({ type: 'ACK_CARD' })}
+            >
+              {online && !humanTurn ? `${player.name} is reading it…` : 'Let’s see what’s next'}{' '}
+              <ArrowRight size={18} />
+            </button>
+          </Dialog>
+        )}
       {state.phase === 'debt' && state.debt && humanTurn && !modal && selected === null && (
         <Dialog title="Time to make a plan." eyebrow="A PAYMENT IS DUE" onClose={() => openPortfolio()}>
           <div className="debt-amount">

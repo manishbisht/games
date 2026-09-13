@@ -3,7 +3,15 @@ import { createGame, gameReducer } from '@games/shared/estate'
 import type { GameState, Trade } from '@games/shared/estate/types'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
-import { allowed, claimTarget, estateSession, onlineDispatch, wireAction } from './session'
+import {
+  allowed,
+  cardKeyOf,
+  claimTarget,
+  estateSession,
+  onlineDispatch,
+  tradeKeyOf,
+  wireAction,
+} from './session'
 import type { OnlineEstateSession } from './session'
 
 const api = (): RoomApi => ({
@@ -158,6 +166,41 @@ describe('onlineDispatch', () => {
     const { sent, send } = spy()
     wired(room(seated, { id: 'ben', seat: 'p1' }), send)({ type: 'BUY' })
     expect(sent).toEqual([])
+  })
+})
+
+describe('the keys a self-opening dialog watches', () => {
+  const base = table(['Ann', 'Ben', 'Cai'])
+  const chance = {
+    title: 'Take a trip',
+    text: 'Advance to Union Station.',
+    deck: 'chance' as const,
+    effect: 'move' as const,
+    destination: 5,
+  }
+
+  it('names an offer by the two seats it is between', () => {
+    expect(tradeKeyOf(base)).toBe('')
+    expect(tradeKeyOf({ ...base, trade: offer() })).toBe('0-1')
+    expect(tradeKeyOf({ ...base, trade: offer({ from: 2, to: 0 }) })).toBe('2-0')
+    // A snapshot is parsed fresh out of every broadcast, so the same offer
+    // arrives as a different object several times a turn. The key is not.
+    expect(tradeKeyOf({ ...base, trade: offer() })).toBe(tradeKeyOf({ ...base, trade: { ...offer() } }))
+  })
+
+  it('names a card by the event it was drawn on', () => {
+    expect(cardKeyOf(base)).toBe('')
+    // A card only counts while it is on the table — the field outlives the phase.
+    expect(cardKeyOf({ ...base, card: chance, phase: 'end' })).toBe('')
+    const drawn = { ...base, card: chance, phase: 'card' as const, eventId: 12 }
+    expect(cardKeyOf(drawn)).toBe('12-Take a trip')
+    // Put down by a viewer who did not draw it, a card has to stay down: nothing
+    // else is logged while one is on the table, so its key cannot move under it.
+    expect(cardKeyOf({ ...drawn, card: { ...chance } })).toBe(cardKeyOf(drawn))
+    expect(cardKeyOf({ ...drawn, players: drawn.players.map((p) => ({ ...p })) })).toBe(cardKeyOf(drawn))
+    // The next card is a different card, even when it is the same card.
+    expect(cardKeyOf({ ...drawn, eventId: 13 })).not.toBe(cardKeyOf(drawn))
+    expect(cardKeyOf({ ...drawn, card: { ...chance, title: 'A windfall' } })).not.toBe(cardKeyOf(drawn))
   })
 })
 

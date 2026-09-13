@@ -143,6 +143,55 @@ test('two browsers create, join, and play a server-paced estate table', async ({
   expect(errors).toEqual([])
 })
 
+test('a deed is read-only to every seat but the one whose turn it is', async ({ browser }) => {
+  const errors: string[] = []
+  const { host, guest } = await seatedTable(browser, errors)
+  const onTurn = async () =>
+    ((await turnOf(host).textContent()) ?? '').includes('ANN’S TURN') ? host : guest
+
+  // Play until somebody owns something. Which square that is, and whose it is,
+  // is the dice's business — so the test follows the table rather than leading it.
+  let owner: Page | null = null
+  let deed = ''
+  for (let attempt = 0; attempt < 10 && !owner; attempt++) {
+    const page = await onTurn()
+    await settle(page)
+    const buy = page.getByRole('button', { name: /^Buy for/ })
+    if (!(await buy.count())) {
+      await step(page)
+      continue
+    }
+    await buy.click()
+    await expect(buy).toHaveCount(0)
+    deed = ((await page.locator('.activity-feed').textContent()) ?? '').match(/bought (.+?) for \$/)![1]
+    owner = page
+  }
+  expect(owner, 'nobody landed on anything for sale in ten decisions').not.toBeNull()
+  const onlooker = owner === host ? guest : host
+
+  // Its owner, on their own turn, can work it — and "My properties" means theirs.
+  await expect(owner!.getByRole('button', { name: /^My properties 1$/ })).toBeVisible()
+  await owner!.getByRole('button', { name: /My properties/ }).click()
+  await owner!.getByRole('button', { name: new RegExp(deed) }).click()
+  await expect(owner!.getByRole('button', { name: /Mortgage ·/ })).toBeVisible()
+  await owner!.getByRole('button', { name: 'Close dialog' }).click()
+
+  // The other seat gets the deed, the rent table, and nothing to press: those
+  // controls belong to whoever is on turn, and this browser is not them.
+  await expect(onlooker.getByRole('button', { name: /^My properties 0$/ })).toBeVisible()
+  await onlooker.getByRole('button', { name: /My properties/ }).click()
+  await onlooker.getByRole('button', { name: 'All properties' }).click()
+  await onlooker.getByRole('button', { name: new RegExp(deed) }).click()
+  await expect(onlooker.getByRole('heading', { name: deed })).toBeVisible()
+  await expect(onlooker.getByText('Current rent')).toBeVisible()
+  await expect(onlooker.getByRole('button', { name: /Mortgage ·/ })).toHaveCount(0)
+  await expect(onlooker.getByRole('button', { name: /Build a house/ })).toHaveCount(0)
+  await expect(onlooker.getByRole('button', { name: /^Buy for/ })).toHaveCount(0)
+  await expect(onlooker.locator('.ch-room-toasts button')).toHaveCount(0)
+
+  expect(errors).toEqual([])
+})
+
 test('an offer opens its own review at the seat it was made to', async ({ browser }) => {
   const errors: string[] = []
   const { host, guest } = await seatedTable(browser, errors)
@@ -157,8 +206,23 @@ test('an offer opens its own review at the seat it was made to', async ({ browse
 
   // Ben has no dialog open and no turn coming, so the offer opens its own.
   const accept = (page: Page) => page.getByRole('button', { name: /Accept as Ben/ })
+  const review = (page: Page) => page.getByText('Ann has made you an offer.')
   await expect(accept(guest)).toBeVisible()
-  await expect(guest.getByText('Ann has made you an offer.')).toBeVisible()
+  await expect(review(guest)).toBeVisible()
+  // Ann is looking at her own offer, so she is offered no way to take it on
+  // Ben's behalf. Declining — which for her withdraws it — is still there.
+  await expect(review(host)).toBeVisible()
+  await expect(accept(host)).toHaveCount(0)
+  await expect(host.getByRole('button', { name: 'Decline', exact: true })).toBeVisible()
+
+  // Nor does putting the review down answer it: dismissing is a local act, and
+  // the offer is still on the table afterwards — and still hers to reopen.
+  await host.getByRole('button', { name: 'Close dialog' }).click()
+  await expect(review(host)).toHaveCount(0)
+  await expect(review(guest)).toBeVisible()
+  await host.getByRole('button', { name: 'Make a trade' }).click()
+  await expect(review(host)).toBeVisible()
+
   await accept(guest).click()
   // Server-authoritative: the offer stands on screen until the room settles it.
   await expect(accept(guest)).toHaveCount(0)
@@ -167,9 +231,13 @@ test('an offer opens its own review at the seat it was made to', async ({ browse
   await expect(guest.locator('.player-card').nth(1)).toContainText('$1,600')
   await expect(guest.locator('.player-card').first()).toContainText('$1,400')
   await expect(host.locator('.player-card').first()).toContainText('$1,400')
-  await expect(accept(host)).toHaveCount(0)
+  await expect(review(host)).toHaveCount(0)
   // With the offer settled, Ann's turn is hers again.
   await expect(rollButton(host)).toBeEnabled()
+  // And the happy path was quiet: a refusal is the only thing the room renders
+  // as a button in its toast stack, and neither browser was sent one.
+  await expect(host.locator('.ch-room-toasts button')).toHaveCount(0)
+  await expect(guest.locator('.ch-room-toasts button')).toHaveCount(0)
 
   await guest.screenshot({ path: 'test-results/estate-online-trade.png', fullPage: true })
   expect(errors).toEqual([])
