@@ -10,6 +10,11 @@ export interface TableState {
   viewer: number
   menu: boolean
   reducedMotion: boolean
+  /**
+   * Nobody is holding the near seat: its cards belong on the felt like everyone
+   * else's rather than in a hand area this viewer does not have.
+   */
+  watching?: boolean
 }
 export interface TableApi {
   update: (state: TableState) => void
@@ -256,7 +261,9 @@ export function createScene(container: HTMLElement, initial: TableState): TableA
       cards.add(object)
     })
     state.game.players.forEach((p) => {
-      if (p.id === state.viewer && !state.menu) return
+      // The viewer's own hand is dealt into the DOM instead — unless there is no
+      // viewer, in which case the near seat is just another player's.
+      if (p.id === state.viewer && !state.menu && !state.watching) return
       const center = seatPosition(p.id),
         count = Math.min(p.hand.length, 11)
       const rotation = center.x < -1 ? Math.PI / 2 : center.x > 1 ? -Math.PI / 2 : center.z < 0 ? Math.PI : 0

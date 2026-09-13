@@ -576,6 +576,16 @@
   top: 31%;
   right: 7.5%;
 }
+/* Only a watcher sees this one: the near seat, which a player would be holding. */
+.pr-opponent-bottom {
+  bottom: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.pr-opponent-bottom .pr-thinking {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
 .pr-avatar {
   display: inline-flex;
   flex-shrink: 0;

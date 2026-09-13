@@ -311,7 +311,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
       </header>
       <main className="pr-arena">
         <div className="pr-scene-wrap">
-          <TableScene ref={table} state={{ game, viewer, menu, reducedMotion }} />
+          <TableScene ref={table} state={{ game, viewer, menu, reducedMotion, watching }} />
         </div>
         {menu ? (
           <>
@@ -346,15 +346,19 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               <span>{game.direction === 1 ? 'Clockwise' : 'Counterclockwise'}</span>
             </div>
             {game.players
-              .filter((p) => p.id !== viewer)
+              // A watcher holds no seat, so nobody at the table is "not an
+              // opponent" — the near seat belongs on screen like all the rest.
+              .filter((p) => watching || p.id !== viewer)
               .map((p) => {
                 const offset = (p.id - viewer + game.players.length) % game.players.length
                 const position =
-                  game.players.length === 2 || (game.players.length === 4 && offset === 2)
-                    ? 'top'
-                    : offset === 1
-                      ? 'left'
-                      : 'right'
+                  offset === 0
+                    ? 'bottom'
+                    : game.players.length === 2 || (game.players.length === 4 && offset === 2)
+                      ? 'top'
+                      : offset === 1
+                        ? 'left'
+                        : 'right'
                 return (
                   <div
                     className={`pr-opponent pr-opponent-${position} ${active.id === p.id ? 'pr-current' : ''}`}

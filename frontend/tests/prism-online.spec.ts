@@ -18,6 +18,49 @@ const cards = (page: Page) => page.locator('.pr-card')
  */
 const tableIsUp = (page: Page) => expect(page.locator('.pr-is-playing')).toBeVisible({ timeout: 30000 })
 
+/**
+ * Everything this browser is ever told, read off the wire rather than off the
+ * screen. `dealt` is every real deck id that arrived in any frame; `open` is the
+ * ids this browser is entitled to — the cards in its own hand and the ones face
+ * up on the discard, both collected from those same frames. A redaction hole
+ * shows up as an id in `dealt` that never made it into `open`.
+ *
+ * Reading the DOM could never have proved this: a leaked hand would arrive in
+ * the snapshot whether or not the table chose to draw it.
+ */
+interface SocketWatch {
+  dealt: Set<string>
+  open: Set<string>
+}
+function watchSocket(page: Page): SocketWatch {
+  const watch: SocketWatch = { dealt: new Set(), open: new Set() }
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', (frame) => {
+      const text = typeof frame.payload === 'string' ? frame.payload : frame.payload.toString()
+      for (const id of text.match(/prism-\d+/g) ?? []) watch.dealt.add(id)
+      let message
+      try {
+        message = JSON.parse(text)
+      } catch {
+        return // A heartbeat pong, not a snapshot.
+      }
+      const state = message?.snapshot?.gameState
+      if (!state) return
+      for (const card of state.discardPile ?? []) watch.open.add(card.id)
+      const seat = message.snapshot.seatIds?.indexOf(message.you?.seat) ?? -1
+      if (seat >= 0) for (const card of state.players?.[seat]?.hand ?? []) watch.open.add(card.id)
+    })
+  })
+  return watch
+}
+
+/** Nothing this browser was not entitled to ever reached it. */
+function sawOnlyItsOwn(watch: SocketWatch, atLeast: number) {
+  // Without this the assertion below would pass on a socket that said nothing.
+  expect(watch.dealt.size).toBeGreaterThanOrEqual(atLeast)
+  expect([...watch.dealt].filter((id) => !watch.open.has(id))).toEqual([])
+}
+
 async function newPlayer(browser: Browser, errors: string[]) {
   const context = await browser.newContext()
   const page = await context.newPage()
@@ -71,9 +114,8 @@ async function handOver(page: Page) {
   throw new Error('the turn never left this browser')
 }
 
-/** What the table can see of a hand it is not holding: a number, never a face. */
+/** How a hand this browser is not holding is presented to it: as a count. */
 async function seenAcrossTheTable(watcher: Page, held: number) {
-  await expect(watcher.locator('.pr-opponent .pr-card')).toHaveCount(0)
   await expect(watcher.locator('.pr-opponent')).toContainText(held === 1 ? '1 CARD LEFT' : `${held} cards`)
 }
 
@@ -81,6 +123,8 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   const errors: string[] = []
   const host = await newPlayer(browser, errors)
   const guest = await newPlayer(browser, errors)
+  const hostWire = watchSocket(host)
+  const guestWire = watchSocket(guest)
 
   await host.goto('/#/prism')
   await host.getByLabel('Your name').fill('Ann')
@@ -106,8 +150,8 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
 
   await tableIsUp(host)
   await tableIsUp(guest)
-  // Seven cards each, dealt on the server — and each browser holds exactly its
-  // own seven. Fourteen in this DOM would mean the other hand came with them.
+  // Seven cards each, dealt on the server, and each browser lays out only the
+  // seven it was dealt.
   await expect(cards(host)).toHaveCount(7)
   await expect(cards(guest)).toHaveCount(7)
   await expect(host.locator('.pr-opponent')).toContainText('Ben')
@@ -130,7 +174,7 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   await expect(turnLine(host)).toHaveText('Ben’s turn')
   // Both browsers were told by the same snapshot, so both agree whose turn it is.
   await expect(myTurn(guest)).toBeVisible()
-  // And whatever has been played since, each DOM still holds one hand.
+  // And whatever has been played since, Ann is still a number to Ben.
   await seenAcrossTheTable(guest, await cards(host).count())
 
   await handOver(guest)
@@ -151,6 +195,13 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   await expect(guest.getByRole('button', { name: 'Draw card', exact: true })).toBeEnabled()
 
   await guest.screenshot({ path: 'test-results/prism-online-guest.png', fullPage: true })
+
+  // The whole round, read off both sockets: neither browser was ever sent a card
+  // it had no business seeing — not in a hand, not in the pile, not in the log.
+  sawOnlyItsOwn(hostWire, 8)
+  sawOnlyItsOwn(guestWire, 8)
+  // And they really were told different things: Ben's cards are not Ann's.
+  expect([...guestWire.dealt].some((id) => !hostWire.dealt.has(id))).toBe(true)
   expect(errors).toEqual([])
 })
 
