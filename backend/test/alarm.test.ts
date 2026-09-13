@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { registerAdapter } from '@games/shared/online'
 import type { GameAdapter } from '@games/shared/online/adapter'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
-import type { ServerMessage } from '@games/shared/protocol'
+import type { GameId, ServerMessage } from '@games/shared/protocol'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
 import { connect } from './helpers'
@@ -82,12 +82,20 @@ const parcelAdapter: GameAdapter<ParcelState, 'pass'> = {
 registerAdapter(parcelAdapter)
 
 /**
+ * A name no shipping game answers to. The registry keys off whatever id an
+ * adapter carries and `resolveGame` trusts the registry, so a test-only id is
+ * bookable here and nowhere else — which keeps this deliberately broken stub off
+ * the ids that now have real adapters behind them.
+ */
+const STALL_GAME = 'stall-test' as GameId
+
+/**
  * A game that says it is blocked on a seat and then refuses to settle it — the
  * shape a buggy adapter takes. The room cannot make such a game move; what it
  * must not do is wake itself on the same state until the room expires a day later.
  */
 const stubbornAdapter: GameAdapter<{ seats: string[] }, 'noop'> = {
-  id: 'estate',
+  id: STALL_GAME,
   minSeats: 2,
   maxSeats: 2,
   requireFull: true,
@@ -297,7 +305,13 @@ describe('standing in for an abandoned seat', () => {
     const res = await SELF.fetch('https://api.test/api/rooms', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ game: 'estate', visibility: 'private', name: 'Ann', guestId: annId, seats: 2 }),
+      body: JSON.stringify({
+        game: STALL_GAME,
+        visibility: 'private',
+        name: 'Ann',
+        guestId: annId,
+        seats: 2,
+      }),
     })
     expect(res.status).toBe(201)
     const { code } = await res.json<{ code: string }>()
