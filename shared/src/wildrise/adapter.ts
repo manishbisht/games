@@ -1,4 +1,5 @@
 import type { Ctx, GameAdapter, OnlineSeat } from '../online/adapter'
+import { botName } from '../online/bots'
 import type { SeatId } from '../protocol/types'
 import { createGame, gameReducer } from './engine'
 import type { WildriseOnlineAction } from './online'
@@ -88,13 +89,22 @@ export const wildriseAdapter: GameAdapter<GameState, WildriseOnlineAction> = {
    * Every other phase is already on the room's alarm, so a single roll is all
    * this ever has to settle.
    */
-  resolveAbsent(state, seat, seats, ctx) {
-    if (state.phase !== 'ready' || seatedPlayer(state, seats) !== seat) return state
-    return gameReducer(state, { type: 'ROLL', value: rollDie(ctx) })
-  },
+  resolveAbsent: (state, seat, seats, ctx) =>
+    wildriseAdapter.bots!.decide(state, seat, seats, 'casual', ctx),
 
-  /** Filled in by a later task; chess keeps `null` until Step 4. */
-  bots: null,
+  /**
+   * A seat the room plays. There is nothing to be good at on this board, so the
+   * three "skills" are how quickly the companion takes its turn and no more.
+   */
+  bots: {
+    skills: ['casual', 'fast', 'fun'],
+    name: (_seat, index) => botName(index),
+    thinkMs: (skill) => (skill === 'fast' ? 450 : skill === 'fun' ? 1100 : 900),
+    decide(state, seat, seats, _skill, ctx) {
+      if (state.phase !== 'ready' || seatedPlayer(state, seats) !== seat) return state
+      return gameReducer(state, { type: 'ROLL', value: rollDie(ctx) })
+    },
+  },
 
   /** Same table, same colours: a seat in a race carries no advantage to rotate. */
   rematch: (_prev, seats, _options, ctx) => ({ state: table(seats, ctx) }),

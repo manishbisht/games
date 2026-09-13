@@ -192,3 +192,25 @@ describe('wildrise adapter absence and rematch', () => {
     expect(fresh.currentPlayer).toBe(1)
   })
 })
+
+describe('bots', () => {
+  const ctx = { random: () => 0.5, now: 0 }
+  const seats = ['p0', 'p1']
+
+  it('rolls for the bot whose turn it is', () => {
+    const state = wildriseAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const ready = { ...state, phase: 'ready' as const, currentPlayer: 1 }
+    const after = wildriseAdapter.bots!.decide(ready, 'p1', seats, 'casual', ctx)
+    expect(after).not.toBe(ready)
+  })
+
+  it('sets its pace from the skill, because a race has no skill to have', () => {
+    const think = wildriseAdapter.bots!.thinkMs!
+    expect(think('fast')).toBeLessThan(think('casual'))
+    expect(wildriseAdapter.bots!.skills).toEqual(['casual', 'fast', 'fun'])
+  })
+})
