@@ -14,6 +14,7 @@
     "./estate": "./src/estate/engine.ts",
     "./estate/types": "./src/estate/types.ts",
     "./estate/board": "./src/estate/board.ts",
+    "./estate/online": "./src/estate/online.ts",
     "./prism": "./src/prism/engine.ts",
     "./prism/types": "./src/prism/types.ts",
     "./prism/ai": "./src/prism/ai.ts",

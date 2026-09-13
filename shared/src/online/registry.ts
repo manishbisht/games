@@ -1,4 +1,5 @@
 import { chessAdapter } from '../chess/adapter'
+import { estateAdapter } from '../estate/adapter'
 import { hearthAdapter } from '../hearth/adapter'
 import { prismAdapter } from '../prism/adapter'
 import type { GameId } from '../protocol/types'
@@ -14,6 +15,7 @@ import type { GameAdapter } from './adapter'
  */
 const adapters: Partial<Record<GameId, GameAdapter>> = {
   chess: chessAdapter,
+  estate: estateAdapter,
   hearth: hearthAdapter,
   prism: prismAdapter,
 }
