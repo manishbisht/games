@@ -412,6 +412,10 @@ export class RoomDO extends DurableObject<Env> {
         return this.handleRematch(ws, record, attachment.player)
       case 'claim':
         return this.handleClaim(ws, record, attachment.player)
+      case 'addBot':
+        return this.handleAddBot(ws, record, attachment.player, message.seat, message.skill)
+      case 'removeBot':
+        return this.handleRemoveBot(ws, record, attachment.player, message.seat)
       default:
         return this.fail(ws, 'BAD_MESSAGE', 'Unknown message type.')
     }
@@ -473,6 +477,76 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'ALREADY_STARTED', 'Seats are locked once the game starts — resign instead.')
     const seat = this.seatOf(record, player.id)
     if (!seat) return this.fail(ws, 'NOT_SEATED', 'You are not seated.')
+    delete record.seats[seat]
+    await this.save(record)
+    this.pushLobby(record)
+    this.broadcast(record)
+  }
+
+  /**
+   * A name no other bot at this table answers to. The obvious index — how many
+   * bots are already seated — collides as soon as one is removed and another
+   * added: two bots are seated as Jules and Cleo, Jules leaves, and the next
+   * bot is index 1 again. Scanning for a free name costs nothing at these seat
+   * counts and cannot hand out the same name twice.
+   */
+  private botNameFor(record: RoomRecord, seat: SeatId, bots: NonNullable<GameAdapter['bots']>): string {
+    const taken = new Set(
+      record.seatIds.filter((id) => record.seats[id]?.bot).map((id) => record.seats[id]!.player.name),
+    )
+    for (let index = 0; index < record.seatIds.length; index++) {
+      const name = bots.name(seat, index)
+      if (!taken.has(name)) return name
+    }
+    // Every name this game offers is already at the table, which only happens
+    // if it has fewer names than seats. Falling back beats refusing the bot.
+    return bots.name(seat, taken.size)
+  }
+
+  /**
+   * Fill an empty seat with a player the room itself takes the turns for. Host
+   * only and open only, for the same reason `start` is: a table's shape is the
+   * host's to set, and it stops changing once the game does.
+   */
+  private async handleAddBot(
+    ws: WebSocket,
+    record: RoomRecord,
+    player: PlayerInfo,
+    seat: SeatId,
+    skill: string | undefined,
+  ): Promise<void> {
+    if (player.id !== record.hostId)
+      return this.fail(ws, 'NOT_HOST', 'Only the room creator can add a bot.')
+    if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
+    if (!record.seatIds.includes(seat)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown seat.')
+    if (record.seats[seat]) return this.fail(ws, 'SEAT_TAKEN', 'That seat is taken.')
+    const bots = this.adapter(record).bots
+    if (!bots) return this.fail(ws, 'NOT_ALLOWED', 'This game has no bots.')
+    const chosen = skill ?? bots.skills[0]
+    if (!bots.skills.includes(chosen)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown bot skill.')
+    record.seats[seat] = {
+      // `bot:` is a namespace `resolveIdentity` can never mint, so this id can
+      // never arrive from a client claiming to be one.
+      player: { id: `bot:${seat}`, name: this.botNameFor(record, seat, bots), isGuest: true },
+      wantsRematch: false,
+      bot: { skill: chosen },
+    }
+    await this.save(record)
+    this.pushLobby(record)
+    this.broadcast(record)
+  }
+
+  /** Give a bot's seat back, so a person who turned up late can have it. */
+  private async handleRemoveBot(
+    ws: WebSocket,
+    record: RoomRecord,
+    player: PlayerInfo,
+    seat: SeatId,
+  ): Promise<void> {
+    if (player.id !== record.hostId)
+      return this.fail(ws, 'NOT_HOST', 'Only the room creator can remove a bot.')
+    if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
+    if (!record.seats[seat]?.bot) return this.fail(ws, 'NOT_ALLOWED', 'That seat is not a bot.')
     delete record.seats[seat]
     await this.save(record)
     this.pushLobby(record)

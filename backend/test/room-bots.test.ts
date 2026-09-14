@@ -326,3 +326,155 @@ describe('a bot is not an absent human', () => {
     await late.expectError('SEAT_TAKEN')
   })
 })
+
+describe('adding and removing bots', () => {
+  /** An open four-seat Wildrise room with only its host seated. */
+  async function openRoom(game = 'wildrise', seats = 4, hostSeat = 'p0') {
+    const guestId = crypto.randomUUID()
+    const res = await SELF.fetch('https://api.test/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ game, visibility: 'private', name: 'Ann', guestId, seats }),
+    })
+    const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', guestId)
+    host.send({ type: 'sit', seat: hostSeat })
+    await host.waitRoom((m) => m.you.seat === hostSeat)
+    return { code, host }
+  }
+
+  it('seats a bot on an empty seat and names it', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1', skill: 'fast' })
+    const seen = await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    expect(seen.snapshot.seats.p1?.bot).toEqual({ skill: 'fast' })
+    expect(seen.snapshot.seats.p1?.player.name).toBe('Jules')
+    // It reads as a player at the table, not as someone who walked out.
+    expect(seen.snapshot.seats.p1?.connected).toBe(true)
+  })
+
+  it('gives each bot at the table its own name', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    host.send({ type: 'addBot', seat: 'p2' })
+    const seen = await host.waitRoom((m) => Boolean(m.snapshot.seats.p2))
+    expect(seen.snapshot.seats.p2?.player.name).not.toBe(seen.snapshot.seats.p1?.player.name)
+  })
+
+  it('does not reuse a name after a bot is removed and another added', async () => {
+    // Naming by "how many bots are seated" collides here: Jules and Cleo sit
+    // down, Jules leaves, and the next bot is index 1 — Cleo again.
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    host.send({ type: 'addBot', seat: 'p2' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p2))
+    host.send({ type: 'removeBot', seat: 'p1' })
+    await host.waitRoom((m) => !m.snapshot.seats.p1)
+    host.send({ type: 'addBot', seat: 'p3' })
+    const seen = await host.waitRoom((m) => Boolean(m.snapshot.seats.p3))
+    expect(seen.snapshot.seats.p3?.player.name).not.toBe(seen.snapshot.seats.p2?.player.name)
+  })
+
+  it('defaults to the first skill the game offers', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1' })
+    const seen = await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    expect(seen.snapshot.seats.p1?.bot).toEqual({ skill: 'casual' })
+  })
+
+  it('refuses an unknown skill', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1', skill: 'grandmaster' })
+    await host.expectError('BAD_MESSAGE')
+  })
+
+  it('refuses a seat someone is already in, and an unknown seat', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p0' })
+    await host.expectError('SEAT_TAKEN')
+    host.send({ type: 'addBot', seat: 'p9' })
+    await host.expectError('BAD_MESSAGE')
+  })
+
+  it('refuses a game that has no bots', async () => {
+    // Chess keeps `bots: null` until its search moves to the server.
+    const { host } = await openRoom('chess', 2, 'w')
+    host.send({ type: 'addBot', seat: 'b' })
+    await host.expectError('NOT_ALLOWED')
+  })
+
+  it('lets only the host add a bot', async () => {
+    const { code } = await openRoom()
+    const guest = await connect(code)
+    guest.join('Ben')
+    guest.send({ type: 'addBot', seat: 'p1' })
+    await guest.expectError('NOT_HOST')
+  })
+
+  it('refuses once the game has started', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    host.send({ type: 'start' })
+    await host.waitRoom((m) => m.snapshot.status === 'playing')
+    host.send({ type: 'addBot', seat: 'p2' })
+    await host.expectError('ALREADY_STARTED')
+  })
+
+  it('removes a bot and frees its seat', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'addBot', seat: 'p1' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p1))
+    host.send({ type: 'removeBot', seat: 'p1' })
+    await host.waitRoom((m) => !m.snapshot.seats.p1)
+  })
+
+  it('will not remove a person with removeBot', async () => {
+    const { host } = await openRoom()
+    host.send({ type: 'removeBot', seat: 'p0' })
+    await host.expectError('NOT_ALLOWED')
+  })
+
+  it('starts a table the host filled with bots, and plays them', async () => {
+    const { code, host } = await openRoom()
+    for (const seat of ['p1', 'p2', 'p3']) {
+      host.send({ type: 'addBot', seat })
+      await host.waitRoom((m) => Boolean(m.snapshot.seats[seat]))
+    }
+    host.send({ type: 'start' })
+    await host.waitRoom((m) => m.snapshot.status === 'playing')
+    // Hand the turn to a bot and let the room notice it is waiting on one.
+    await patchRecord(code, (record) => {
+      const state = record.gameState as { currentPlayer: number; phase: string }
+      state.currentPlayer = 1
+      state.phase = 'ready'
+      record.autoAt = Date.now()
+    })
+    await fire(code)
+    const after = await readRecord(code)
+    expect((after!.gameState as { phase: string }).phase).not.toBe('ready')
+  })
+
+  it('turns a latecomer away once bots have filled the table, until one is removed', async () => {
+    // The intended behaviour: a bot occupies a seat for every purpose,
+    // fullness included, and `removeBot` is the way back.
+    const { code, host } = await openRoom()
+    for (const seat of ['p1', 'p2', 'p3']) {
+      host.send({ type: 'addBot', seat })
+      await host.waitRoom((m) => Boolean(m.snapshot.seats[seat]))
+    }
+    const late = await connect(code)
+    late.join('Cara')
+    await late.expectError('ROOM_FULL')
+
+    host.send({ type: 'removeBot', seat: 'p3' })
+    await host.waitRoom((m) => !m.snapshot.seats.p3)
+    const second = await connect(code)
+    second.join('Dana')
+    second.send({ type: 'sit', seat: 'p3' })
+    await second.waitRoom((m) => m.you.seat === 'p3')
+  })
+})
