@@ -371,7 +371,8 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                     </span>
                     <div className="pr-opponent-info">
                       <strong>
-                        {p.name} {p.kind === 'ai' && <Bot size={12} />}
+                        {p.name}{' '}
+                        {(p.kind === 'ai' || online?.players[p.id]?.bot) && <Bot size={12} />}
                         {online && online.players[p.id]?.connected === false && (
                           <WifiOff size={12} aria-label="away" />
                         )}

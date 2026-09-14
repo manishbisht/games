@@ -81,15 +81,21 @@
   display: grid;
   align-content: start;
   gap: 0.35rem;
+  /* A grid item's default `min-width: auto` lets it grow past its column, and
+     the skill picker is wide enough to do it — which put one seat's control
+     on top of its neighbour's. */
+  min-width: 0;
 }
+/* Stacked, not side by side: at half the room's width a select and a button in
+   one row leave the button clipped to a couple of letters. */
 .ch-room-bot-add {
-  display: flex;
+  display: grid;
   gap: 0.35rem;
-  align-items: center;
+  min-width: 0;
 }
 .ch-room-bot-add select {
-  flex: 1;
   min-width: 0;
+  width: 100%;
 }
 .ch-room-bot-add button,
 .ch-room-bot-remove {

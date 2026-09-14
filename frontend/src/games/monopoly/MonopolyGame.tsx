@@ -120,6 +120,9 @@ const watched = (state: GameState): GameState => ({
 function presence(online: OnlineEstateSession, id: number): string {
   const seat = online.players[id]
   if (!seat) return 'Empty seat'
+  // A bot reads as connected, because it is — but "at the table" would say a
+  // person is sitting there.
+  if (seat.bot) return 'Bot'
   if (seat.abandoned) return 'Played by the table'
   return seat.connected ? 'At the table' : 'Away'
 }

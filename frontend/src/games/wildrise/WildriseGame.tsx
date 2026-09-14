@@ -395,7 +395,10 @@ function Table({
                       <TokenPortrait id={player.id} />
                       <div className="wr-player-info">
                         <strong>
-                          {player.name} {player.control !== 'human' && <Bot size={12} />}
+                          {player.name}{' '}
+                          {(player.control !== 'human' || online?.players[player.id]?.bot) && (
+                            <Bot size={12} />
+                          )}
                           {online?.mySeat === player.id && <span className="wr-seat-badge">YOU</span>}
                           {online?.players[player.id]?.connected === false && (
                             <span className="wr-seat-badge wr-away-badge">AWAY</span>

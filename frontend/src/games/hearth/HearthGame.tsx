@@ -599,7 +599,9 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                           <div className="hh-player-info">
                             <strong>
                               {p.name}
-                              {p.control !== 'human' && <span className="hh-ai-badge">AI</span>}
+                              {(p.control !== 'human' || seat?.bot) && (
+                                <span className="hh-ai-badge">AI</span>
+                              )}
                               {online?.mySeat === p.id && <span className="hh-ai-badge">YOU</span>}
                               {seat?.connected === false && (
                                 <span className="hh-ai-badge hh-away-badge">AWAY</span>
