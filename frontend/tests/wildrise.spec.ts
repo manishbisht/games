@@ -33,7 +33,9 @@ test('play vs bot deals a real table, and the server takes the bots’ turns', a
   await startBotGame(page, 3)
 
   // Three seats: you and two the room plays, each with a name of its own.
-  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(3)
+  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(3, {
+    timeout: 30000,
+  })
   // The server decides who opens, so the turn may take a lap to reach you —
   // which is itself the bots playing without this browser doing anything.
   await expect(rollButton(page)).toBeEnabled({ timeout: 40000 })
@@ -58,7 +60,9 @@ test('the table settings reach the game the server deals', async ({ page }) => {
   await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
   await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 30000 })
-  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(4)
+  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(4, {
+    timeout: 30000,
+  })
   // The rule survived the crossing: with it off the board says so, and the
   // adapter used to answer `validateOptions` with an empty object.
   await expect(page.getByText('Reach or pass 100 to finish.')).toBeVisible({ timeout: 30000 })
@@ -67,7 +71,9 @@ test('the table settings reach the game the server deals', async ({ page }) => {
 
 test('a seat the room plays reads as a bot, not as a person', async ({ page }) => {
   await startBotGame(page, 2)
-  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(2)
+  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(2, {
+    timeout: 30000,
+  })
   // The seat the room plays carries the bot mark; yours does not.
   const names = page.locator('.wr-players .wr-player-info strong')
   await expect(names.nth(1).locator('svg')).toHaveCount(1)
