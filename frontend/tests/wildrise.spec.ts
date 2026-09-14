@@ -1,146 +1,103 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { LADDERS, SNAKES } from '@games/shared/wildrise/board'
 
-async function chooseDie(page: Page, value: number) {
-  await page.evaluate((n) => {
-    ;(window as Window & { wildriseTestRandom: number }).wildriseTestRandom = (n - 0.5) / 6
-  }, value)
-}
 /**
- * Take the human's turn. Every other seat is a bot playing on its own clock, so
- * waiting for the die to come back to Red is part of rolling it — and the bots
- * draw from the same stubbed source, which keeps a seeded game reproducible.
+ * Wildrise in the browser. The rules moved to the server when bot play became a
+ * room, and with them the die — so what a stubbed `Math.random` used to prove
+ * here (ladders, snakes, the exact roll, a whole game to victory) is covered by
+ * `shared/src/wildrise/engine.test.ts` and `backend/test/room-wildrise.test.ts`
+ * instead. What is left is genuinely the browser's: the setup panel, the table
+ * it asks the server for, and that a turn taken elsewhere arrives here.
  */
-async function roll(page: Page, value: number) {
-  const button = page.getByRole('button', { name: 'Roll dice', exact: true })
-  await expect(page.getByRole('heading', { name: 'Red’s turn.' })).toBeVisible({ timeout: 20000 })
-  await expect(button).toBeEnabled({ timeout: 20000 })
-  await chooseDie(page, value)
-  await button.click()
-  await expect(button).toBeDisabled()
-}
-async function position(page: Page, id: string, n: number) {
-  await expect(page.getByTestId(`wildrise-player-${id}`).locator('.wr-position strong')).toHaveText(
-    n === 0 ? '—' : String(n),
-  )
-}
-function shortestRolls(from: number, goal: number) {
-  const queue = [{ at: from, rolls: [] as number[] }],
-    seen = new Set([from])
-  while (queue.length) {
-    const current = queue.shift()!
-    if (current.at === goal) return current.rolls
-    for (let die = 1; die <= 6; die++) {
-      if (current.at + die > 100) continue
-      const destination = current.at + die
-      const at = [...LADDERS, ...SNAKES].find((r) => r.from === destination)?.to ?? destination
-      if (!seen.has(at)) {
-        seen.add(at)
-        queue.push({ at, rolls: [...current.rolls, die] })
-      }
-    }
-  }
-  throw new Error(`No path from ${from} to ${goal}`)
+
+const rollButton = (page: Page) => page.getByRole('button', { name: 'Roll dice', exact: true })
+
+/** Set a table up and let the server deal it. */
+async function startBotGame(page: Page, players?: number, name = 'Robin') {
+  await page.goto('/#/wildrise')
+  if (players) await page.getByRole('button', { name: `${players} players`, exact: true }).click()
+  await page.getByLabel('Your name', { exact: true }).fill(name)
+  await page.getByRole('button', { name: 'Start game', exact: true }).click()
+  await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 20000 })
+  // A solo table has nobody to wait for, so it deals on arrival.
+  await expect(page.getByRole('heading', { name: /^Room / })).toHaveCount(0)
 }
 
-test.beforeEach(async ({ page }, info) => {
-  if (!info.title.includes('physical die'))
-    await page.addInitScript(() => {
-      const scope = window as Window & { wildriseTestRandom: number }
-      scope.wildriseTestRandom = 0
-      Math.random = () => scope.wildriseTestRandom
-    })
+test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
 })
 
-test('plays a complete bot adventure: ladder, snake, exact-roll rejection and victory', async ({ page }) => {
-  test.setTimeout(120000)
+test('play vs bot deals a real table, and the server takes the bots’ turns', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.goto('/#/wildrise')
-  await expect(page.getByRole('heading', { name: 'A little luck. A wild adventure.' })).toBeVisible()
-  await expect(page.locator('.wr-canvas canvas')).toBeVisible()
-  await expect(page.getByText('The 3D view needs WebGL.')).toHaveCount(0)
-  await page.screenshot({ path: 'test-results/wildrise-desktop-setup.png', fullPage: true })
-  await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Red’s turn.' })).toBeVisible()
-  await roll(page, 4)
-  await position(page, 'red', 25)
-  await expect(page.locator('.wr-events')).toContainText('Red climbed 4 → 25.')
-  await roll(page, 2)
-  await position(page, 'red', 56)
-  await roll(page, 6)
-  await position(page, 'red', 18)
-  await expect(page.locator('.wr-events')).toContainText('Red slid 62 → 18.')
-  await page.screenshot({ path: 'test-results/wildrise-desktop-game.png', fullPage: true })
-  // Blue draws from the same stubbed die a beat later, so it shadows Red square
-  // for square — one turn behind, and never in front of it.
-  await position(page, 'blue', 18)
-  let red = 18
-  for (const value of shortestRolls(18, 97)) {
-    red += value
-    red = [...LADDERS, ...SNAKES].find((r) => r.from === red)?.to ?? red
-    await roll(page, value)
-    await position(page, 'red', red)
-  }
-  await roll(page, 5)
-  await expect(page.getByText('Red needs a 3 to reach 100.', { exact: true }).first()).toBeVisible()
-  await position(page, 'red', 97)
-  await roll(page, 3)
-  await expect(page.getByRole('dialog', { name: 'Red wins!' })).toBeVisible()
-  await expect(page.getByRole('dialog')).toContainText('100FINAL POSITION')
-  await page.screenshot({ path: 'test-results/wildrise-victory.png', fullPage: true })
-  await chooseDie(page, 1)
-  await page.getByRole('button', { name: 'Play again', exact: true }).click()
-  await position(page, 'red', 0)
-  await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeEnabled()
-  await page.getByRole('button', { name: 'Start a new adventure', exact: true }).click()
-  await page.getByRole('button', { name: 'Return to menu', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Start game', exact: true })).toBeVisible()
+  await startBotGame(page, 3)
+
+  // Three seats: you and two the room plays, each with a name of its own.
+  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(3)
+  // The server decides who opens, so the turn may take a lap to reach you —
+  // which is itself the bots playing without this browser doing anything.
+  await expect(rollButton(page)).toBeEnabled({ timeout: 40000 })
+  await expect(page.getByRole('heading', { name: 'Robin’s turn.' })).toBeVisible()
+
+  await rollButton(page).click()
+  await expect(rollButton(page)).toBeDisabled()
+  // The number came from the server, and the table is told what it was.
+  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 20000 })
+  // Then the seats nobody is behind take their turns and hand it back.
+  await expect(rollButton(page)).toBeEnabled({ timeout: 40000 })
+  await expect(page.getByRole('heading', { name: 'Robin’s turn.' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/wildrise-bot-room.png', fullPage: true })
   expect(errors).toEqual([])
 })
 
-for (const count of [2, 3, 4])
-  test(`automates ${count - 1} fair AI opponents and returns control to the human`, async ({ page }) => {
-    await page.goto('/#/wildrise')
-    await page.getByRole('button', { name: `${count} players`, exact: true }).click()
-    await page
-      .getByLabel('Table personality')
-      .selectOption(count === 2 ? 'casual' : count === 3 ? 'fast' : 'fun')
-    await page.getByRole('button', { name: 'Start game', exact: true }).click()
-    await roll(page, 3)
-    await expect(page.getByRole('heading', { name: 'Blue’s turn.' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeDisabled()
-    await expect(page.getByRole('heading', { name: 'Red’s turn.' })).toBeVisible({ timeout: 15000 })
-    for (const id of ['red', 'blue', 'green', 'yellow'].slice(0, count)) await position(page, id, 3)
-    await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeEnabled()
-  })
+test('the table settings reach the game the server deals', async ({ page }) => {
+  await page.goto('/#/wildrise')
+  await page.getByRole('button', { name: '4 players', exact: true }).click()
+  // A rule the room used to throw away: the adapter now narrows and keeps it.
+  await page.getByLabel('Exact roll to finish').uncheck()
+  await page.getByLabel('Your name', { exact: true }).fill('Robin')
+  await page.getByRole('button', { name: 'Start game', exact: true }).click()
+  await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 20000 })
+  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(4)
+  // The rule survived the crossing: with it off the board says so, and the
+  // adapter used to answer `validateOptions` with an empty object.
+  await expect(page.getByText('Reach or pass 100 to finish.')).toBeVisible({ timeout: 20000 })
+  await expect(page.getByText('An exact roll brings you home.')).toHaveCount(0)
+})
 
-test('mobile setup, rules, keyboard roll, sound, camera and navigation work', async ({ page }) => {
+test('a seat the room plays reads as a bot, not as a person', async ({ page }) => {
+  await startBotGame(page, 2)
+  await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(2)
+  // The seat the room plays carries the bot mark; yours does not.
+  const names = page.locator('.wr-players .wr-player-info strong')
+  await expect(names.nth(1).locator('svg')).toHaveCount(1)
+  await expect(names.nth(0).locator('svg')).toHaveCount(0)
+  // And it is never described as someone who walked out. The badge, not the
+  // word: getByText matches substrings case-insensitively, and the page says
+  // "one roll away" twice.
+  await expect(page.locator('.wr-away-badge')).toHaveCount(0)
+})
+
+test('mobile setup, rules, sound, camera and navigation work', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/snakes-and-ladders')
   await expect(page).toHaveURL('/#/wildrise')
   await page.getByRole('button', { name: '4 players', exact: true }).click()
-  await page.getByLabel('Red player name').fill('Robin')
-  await page.getByLabel('Exact roll to finish').uncheck()
   await page.screenshot({ path: 'test-results/wildrise-mobile-setup.png', fullPage: true })
   await page.getByRole('button', { name: 'How to play', exact: true }).click()
+  // Copy that does not move with the table settings.
   await expect(page.getByRole('dialog', { name: 'A few simple rules' })).toContainText(
-    'Reach or pass square 100',
+    'Take a turn. Roll the die.',
   )
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Mute sound', exact: true }).click()
+  await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Robin’s turn.' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Turn sound on', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Turn sound on', exact: true })).toBeVisible({
+    timeout: 20000,
+  })
   for (const label of ['Zoom in', 'Zoom out', 'Rotate left', 'Rotate right', 'Top view', 'Reset camera'])
     await page.getByRole('button', { name: label, exact: true }).click()
-  await page.getByRole('button', { name: 'Roll dice', exact: true }).focus()
-  await chooseDie(page, 3)
-  await page.keyboard.press('Space')
-  await position(page, 'red', 3)
-  await expect(page.getByRole('heading', { name: 'Blue’s turn.' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: 'test-results/wildrise-mobile-game.png', fullPage: true })
   await page.getByRole('link', { name: 'All games', exact: true }).click()
@@ -148,57 +105,31 @@ test('mobile setup, rules, keyboard roll, sound, camera and navigation work', as
   await expect(page.locator('canvas')).toHaveCount(0)
 })
 
-test('pausing a roll preserves its remaining animation time', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'no-preference' })
-  await page.clock.install()
-  await page.goto('/#/wildrise')
-  await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await page.clock.pauseAt(new Date(Date.now() + 1000))
-  await roll(page, 3)
-  await page.clock.runFor(600)
-  await page.getByRole('button', { name: 'Pause game', exact: true }).click()
-  await page.clock.runFor(5000)
-  await position(page, 'red', 0)
-  await page.getByRole('button', { name: 'Back to the adventure', exact: true }).click()
-  await page.clock.runFor(450)
-  await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toHaveText('Rolling…')
-  await page.clock.runFor(100)
-  await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toHaveText('On the move…')
-  await page.clock.runFor(1500)
-  await position(page, 'red', 3)
-  await expect(page.getByRole('heading', { name: 'Blue’s turn.' })).toBeVisible()
-})
-
 test('the physical die rolls on click in the normally rendered scene', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.goto('/#/wildrise')
   await expect(page.locator('.wr-canvas canvas')).toBeVisible()
   await page.screenshot({ path: 'test-results/wildrise-natural-setup.png', fullPage: true })
+  await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeEnabled()
+  await expect(rollButton(page)).toBeEnabled({ timeout: 20000 })
   // The die is visible in its tray at this location in the default 1440×960 camera.
   await page.mouse.click(798, 680)
-  await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeDisabled()
-  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 5000 })
-  // A bot seat takes its own turn at full animation speed before the die comes
-  // back, so this waits out two whole turns rather than one.
-  await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeEnabled({
-    timeout: 25000,
-  })
+  await expect(rollButton(page)).toBeDisabled()
+  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 20000 })
 })
 
 test.describe('compact touch screens', () => {
   test.use({ viewport: { width: 320, height: 740 }, hasTouch: true, isMobile: true })
   test('keeps the board and roll control visible without horizontal overflow', async ({ page }) => {
-    await page.goto('/#/wildrise')
-    await page.getByRole('button', { name: 'Start game', exact: true }).click()
+    await startBotGame(page)
     await page.evaluate(() => window.scrollTo(0, 0))
     await expect(page.locator('.wr-canvas canvas')).toBeInViewport()
-    await expect(page.getByRole('button', { name: 'Roll dice', exact: true })).toBeInViewport()
+    await expect(rollButton(page)).toBeInViewport()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await page.getByRole('button', { name: 'Roll dice', exact: true }).tap()
-    await position(page, 'red', 1)
-    await expect(page.getByRole('heading', { name: 'Blue’s turn.' })).toBeVisible()
+    await expect(rollButton(page)).toBeEnabled({ timeout: 20000 })
+    await rollButton(page).tap()
+    await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 20000 })
     await page.screenshot({ path: 'test-results/wildrise-touch-320.png' })
   })
 })

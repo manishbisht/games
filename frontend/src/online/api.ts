@@ -9,17 +9,42 @@ export interface IdentityCredentials {
   avatar?: string
 }
 
+/** What a table is made of, beyond who is asking for it. */
+export interface RoomSetup {
+  seats?: number
+  /**
+   * One skill id per bot seat, which the server validates against the game's
+   * own adapter. Bots take the seats furthest from the host, so a table of
+   * `seats` with `seats - 1` bots is a game for one person.
+   */
+  bots?: string[]
+  /** Seat the host and deal the moment they arrive. Only meaningful with a full set of bots. */
+  autoStart?: boolean
+  /** The game's own table settings; each adapter narrows these for itself. */
+  options?: unknown
+}
+
 export async function createRoom(
   game: GameId,
   visibility: RoomVisibility,
   name: string,
   credentials: IdentityCredentials,
-  seats?: number,
+  setup: RoomSetup = {},
 ): Promise<string> {
+  const { seats, bots, autoStart, options } = setup
   const res = await fetch(`${API_URL}/api/rooms`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ game, visibility, name, ...credentials, ...(seats ? { seats } : {}) }),
+    body: JSON.stringify({
+      game,
+      visibility,
+      name,
+      ...credentials,
+      ...(seats ? { seats } : {}),
+      ...(bots?.length ? { bots } : {}),
+      ...(autoStart ? { autoStart: true } : {}),
+      ...(options === undefined ? {} : { options }),
+    }),
   })
   if (!res.ok) throw new Error('Could not create a room right now.')
   const { code } = (await res.json()) as { code: string }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import { Link } from 'react-router'
 import {
@@ -25,15 +25,16 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
+import { useBotRoom } from '../../online/useBotRoom'
+import { wildriseGame } from '../catalog'
 import Setup from './components/Setup'
 import type { SetupOptions } from './components/Setup'
 import Dialog from './components/Dialog'
 import TokenPortrait from './components/TokenPortrait'
 import { PALETTES, PLAYER_IDS } from '@games/shared/wildrise/board'
-import { createGame, gameReducer, rollDie } from '@games/shared/wildrise'
+import { createGame } from '@games/shared/wildrise'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { sound, unlockAudio } from './game/audio'
-import { useGameClock } from './game/useGameClock'
 import type { GameConfig } from '@games/shared/wildrise/types'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
@@ -112,42 +113,37 @@ function AbandonmentNotice({
 
 function Table({
   config,
-  menu: menuProp,
   options,
   onOptions,
   onStart,
-  onMenu,
   soundOn,
   setSoundOn,
   online,
 }: {
   config: GameConfig
-  menu: boolean
   options: SetupOptions
   onOptions: (o: SetupOptions) => void
   onStart: () => void
-  onMenu: () => void
   soundOn: boolean
   setSoundOn: (on: boolean) => void
   online?: OnlineWildriseSession
 }) {
-  const [localState, dispatch] = useReducer(gameReducer, config, createGame)
+  // The board shown behind the setup panel. It is never played: choosing a
+  // table creates a room, and the room deals the real one.
   const preview = useMemo(() => createGame(config), [config])
-  // Online the room is the only source of truth: the reducer above never runs,
-  // and the table is already under way by the time this component mounts.
-  const state = online ? online.state : localState
-  // The room's own lobby has set the table already, so there is no menu to show.
-  const menu = online ? false : menuProp
-  const game = menu ? preview : state
-  const [dialog, setDialog] = useState<'rules' | 'pause' | 'restart' | null>(null)
+  // The room is the only source of a live table — there is no local game left
+  // to be the other half of this.
+  const menu = !online
+  const game = online ? online.state : preview
+  const [dialog, setDialog] = useState<'rules' | 'pause' | null>(null)
   const [dismissedVictory, setDismissedVictory] = useState(false)
   const [hidden, setHidden] = useState(document.hidden)
   const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   const board = useRef<BoardControls>(null)
   const paused = menu || !!dialog || hidden
   const current = game.players[game.currentPlayer]
-  /** Whose inputs this browser may make: its own seat online, the shared one locally. */
-  const myTurn = online ? online.mySeat === current.id : current.control === 'human'
+  /** Whose inputs this browser may make: only ever its own seat. */
+  const myTurn = Boolean(online) && online!.mySeat === current.id
   const canRoll = !paused && game.phase === 'ready' && myTurn
   // The player the table is stuck on, while there is still something to ask for.
   const awayBlocking = online ? claimTarget(online) : null
@@ -158,8 +154,6 @@ function Table({
     setWasWon(game.phase === 'won')
     if (game.phase !== 'won') setDismissedVictory(false)
   }
-  // The server keeps every beat of an online table, so the local clock stands down.
-  useGameClock(state, paused || Boolean(online), reduced, dispatch)
   useEffect(() => {
     const visibility = () => setHidden(document.hidden)
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -174,9 +168,8 @@ function Table({
   const doRoll = useCallback(() => {
     if (!canRoll) return
     if (soundOn) unlockAudio()
-    // Online the die is the server's to throw, so this only asks for it.
-    if (online) online.send.roll()
-    else dispatch({ type: 'ROLL', value: rollDie() })
+    // The die is the server's to throw, so this only ever asks for one.
+    online?.send.roll()
   }, [canRoll, soundOn, online])
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -196,12 +189,12 @@ function Table({
   }, [canRoll, doRoll])
   useEffect(() => {
     if (menu || !soundOn) return
-    if (state.phase === 'rolling') sound('roll')
-    else if (state.phase === 'moving') sound('step')
-    else if (state.phase === 'transporting') sound(state.motion?.kind === 'ladder' ? 'ladder' : 'snake')
-    else if (state.phase === 'settling') sound('land')
-    else if (state.phase === 'won') sound('win')
-  }, [state, menu, soundOn])
+    if (game.phase === 'rolling') sound('roll')
+    else if (game.phase === 'moving') sound('step')
+    else if (game.phase === 'transporting') sound(game.motion?.kind === 'ladder' ? 'ladder' : 'snake')
+    else if (game.phase === 'settling') sound('land')
+    else if (game.phase === 'won') sound('win')
+  }, [game, menu, soundOn])
   const phaseText =
     game.phase === 'ready'
       ? myTurn
@@ -240,19 +233,12 @@ function Table({
             <span>All games</span>
           </Link>
           <span className="wr-header-divider" />
-          <button
-            onClick={() => {
-              // A room's table is nobody's to restart, so online this is a badge.
-              if (!menu && !online) setDialog('restart')
-            }}
-            className="wr-brand"
-            aria-label="Wildrise home"
-          >
+          <span className="wr-brand" aria-hidden="true">
             <span className="wr-brand-mark">
               <Leaf size={24} strokeWidth={1.5} />
             </span>
             wildrise<span className="wr-brand-dot">.</span>
-          </button>
+          </span>
         </div>
         <span className="wr-header-note">A LITTLE LUCK. A LONG WAY UP.</span>
         <nav className="wr-header-actions" aria-label="Game controls">
@@ -539,11 +525,7 @@ function Table({
                 <button className="wr-new-game" onClick={online.leave}>
                   <ArrowLeft size={14} /> Leave room
                 </button>
-              ) : (
-                <button className="wr-new-game" onClick={() => setDialog('restart')}>
-                  <RotateCcw size={14} /> Start a new adventure
-                </button>
-              )}
+              ) : null}
             </>
           )}
         </aside>
@@ -636,24 +618,6 @@ function Table({
           <button className="wr-primary" onClick={() => setDialog(null)}>
             <Play size={17} /> Back to the adventure
           </button>
-          <button className="wr-secondary" onClick={() => setDialog('restart')}>
-            Start a new game
-          </button>
-        </Dialog>
-      )}
-      {dialog === 'restart' && (
-        <Dialog title="Start a new adventure?" onClose={() => setDialog(null)}>
-          <div className="wr-dialog-emblem">
-            <RotateCcw size={27} />
-          </div>
-          <h2>A fresh little start?</h2>
-          <p className="wr-description">This game will end and all pieces will return to camp.</p>
-          <button className="wr-primary" onClick={onMenu}>
-            Return to menu <ArrowRight size={17} />
-          </button>
-          <button className="wr-secondary" onClick={() => setDialog(null)}>
-            Keep playing
-          </button>
         </Dialog>
       )}
       {showVictory && winner && (
@@ -687,7 +651,7 @@ function Table({
               <span>LADDERS CLIMBED</span>
             </div>
           </div>
-          {online ? (
+          {online && (
             <>
               <button className="wr-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>
                 <RotateCcw size={17} />
@@ -701,15 +665,6 @@ function Table({
                 Leave room <ArrowRight size={16} />
               </button>
             </>
-          ) : (
-            <>
-              <button className="wr-primary" onClick={start}>
-                <RotateCcw size={17} /> Play again
-              </button>
-              <button className="wr-secondary" onClick={onMenu}>
-                Return to menu <ArrowRight size={16} />
-              </button>
-            </>
           )}
         </Dialog>
       )}
@@ -717,6 +672,11 @@ function Table({
   )
 }
 
+/**
+ * Wildrise, either as the page you set a table on or as the table itself. There
+ * is no third state: choosing a game makes a room and the room deals it, so the
+ * setup panel's board is a preview and nothing else.
+ */
 export default function WildriseGame({ online }: { online?: OnlineWildriseSession }) {
   const [options, setOptions] = useState<SetupOptions>({
     count: 2,
@@ -724,26 +684,23 @@ export default function WildriseGame({ online }: { online?: OnlineWildriseSessio
     style: 'casual',
     exact: true,
   })
-  const [match, setMatch] = useState<{ config: GameConfig; id: number } | null>(null)
   const [soundOn, setSoundOn] = useState(true)
-  const sequence = useRef(0)
   const config = useMemo(() => toConfig(options), [options])
-  const start = () => {
-    sequence.current++
-    setMatch({
-      config: { ...config, firstPlayer: Math.floor(Math.random() * options.count) },
-      id: sequence.current,
+  const room = useBotRoom('wildrise', wildriseGame.path)
+  const start = () =>
+    void room.start({
+      seats: options.count,
+      // Every seat but the host's. The three "skills" are pace, which is the
+      // only thing there is to vary on a board with one decision in it.
+      bots: Array.from({ length: options.count - 1 }, () => options.style),
+      options: { exactFinish: options.exact },
     })
-  }
   return (
     <Table
-      key={online ? 'online' : (match?.id ?? 'menu')}
-      config={match?.config ?? config}
-      menu={!match}
+      config={config}
       options={options}
       onOptions={setOptions}
       onStart={start}
-      onMenu={() => setMatch(null)}
       soundOn={soundOn}
       setSoundOn={setSoundOn}
       online={online}

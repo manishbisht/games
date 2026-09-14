@@ -216,3 +216,12 @@
     font-size: 11px;
   }
 }
+
+/* Asked once, above the tabs: both ways of playing make a real room now. */
+.play-options-name {
+  display: grid;
+  gap: 0.3rem;
+}
+.play-options-name input {
+  width: 100%;
+}

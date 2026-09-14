@@ -14,6 +14,12 @@ export interface OnlinePanelProps {
   /** Table sizes the host may pick between. Games with one fixed size omit it. */
   seatChoices?: number[]
   appearance?: 'chess'
+  /**
+   * Someone above already asked for a name — `PlayOptions` does, because its
+   * other tab needs one too. Two fields labelled "Your name" on one screen is
+   * one too many.
+   */
+  nameAsked?: boolean
 }
 
 /**
@@ -27,7 +33,13 @@ function seated(room: PublicRoomSummary): string {
   return room.bots ? `${count} · ${room.bots} bot${room.bots === 1 ? '' : 's'}` : count
 }
 
-export default function OnlinePanel({ game, basePath, seatChoices, appearance }: OnlinePanelProps) {
+export default function OnlinePanel({
+  game,
+  basePath,
+  seatChoices,
+  appearance,
+  nameAsked,
+}: OnlinePanelProps) {
   const navigate = useNavigate()
   const identity = useIdentity()
   const chess = appearance === 'chess'
@@ -62,11 +74,11 @@ export default function OnlinePanel({ game, basePath, seatChoices, appearance }:
     setRefreshCount((count) => count + 1)
   }, [])
 
-  const playerName = identity.isSignedIn ? identity.name : name.trim()
+  const playerName = identity.isSignedIn || nameAsked ? identity.name.trim() : name.trim()
   // Wait for identity to settle so room ownership uses the final identity.
   const blocked = !playerName || busy || !identity.isReady
   const rememberName = () => {
-    if (!identity.isSignedIn) identity.setName(name)
+    if (!identity.isSignedIn && !nameAsked) identity.setName(name)
   }
 
   const create = async () => {
@@ -75,7 +87,9 @@ export default function OnlinePanel({ game, basePath, seatChoices, appearance }:
     setError('')
     try {
       rememberName()
-      const code = await createRoom(game, visibility, playerName, await identity.credentials(), seats)
+      const code = await createRoom(game, visibility, playerName, await identity.credentials(), {
+        seats,
+      })
       navigate(`${basePath}/room/${code}`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Something went wrong.')
@@ -111,7 +125,7 @@ export default function OnlinePanel({ game, basePath, seatChoices, appearance }:
       ) : (
         <h3>Play online</h3>
       )}
-      {!identity.isSignedIn ? (
+      {!identity.isSignedIn && !nameAsked ? (
         <label className="ch-online-name">
           Your name
           <input
