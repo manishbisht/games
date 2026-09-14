@@ -87,6 +87,12 @@ export interface RoomRecord {
   seatIds: SeatId[]
   /** The seat count the room was created for; `seatIds` may be shorter once compacted. */
   seatsTotal: number
+  /**
+   * Seat the host and deal as soon as they arrive. Only ever meaningful when
+   * bots fill every other seat — a solo table against bots has nobody to wait
+   * in a lobby for.
+   */
+  autoStart?: boolean
   options: unknown
   seats: Partial<Record<SeatId, StoredSeat>>
   gameState: unknown
@@ -271,6 +277,8 @@ export class RoomDO extends DurableObject<Env> {
     host: PlayerInfo
     seats: number
     options: unknown
+    bots: string[]
+    autoStart: boolean
   }): Promise<boolean> {
     // `false` means "that code is taken"; an unregistered game is a caller bug,
     // and the router has already refused those.
@@ -292,6 +300,17 @@ export class RoomDO extends DurableObject<Env> {
       seats: {},
       gameState: null,
     }
+    // Bots take the seats furthest from the host, so the seats people are meant
+    // to take are the ones the room offers first.
+    const botSeats = record.seatIds.slice(record.seatIds.length - input.bots.length)
+    botSeats.forEach((seat, index) => {
+      record.seats[seat] = {
+        player: { id: `bot:${seat}`, name: this.botNameFor(record, seat, adapter.bots!), isGuest: true },
+        wantsRematch: false,
+        bot: { skill: input.bots[index] },
+      }
+    })
+    if (input.autoStart) record.autoStart = true
     await this.save(record)
     this.pushLobby(record)
     return true
@@ -450,6 +469,16 @@ export class RoomDO extends DurableObject<Env> {
       this.stampAuto(record)
       await this.save(record)
     }
+    // A solo table against bots: the host is the only person expected, so there
+    // is nothing to wait in a lobby for. The status test sits after
+    // `resolveIdentity`'s await and `startGame` flips it synchronously, so two
+    // tabs arriving together cannot both start the game. `serializeAttachment`
+    // has already run, so the broadcast reaches this socket too.
+    const free = record.seatIds.filter((id) => !record.seats[id])
+    if (record.autoStart && record.status === 'open' && player.id === record.hostId && free.length === 1) {
+      record.seats[free[0]] = { player, wantsRematch: false }
+      return this.startGame(record)
+    }
     this.broadcast(record)
   }
 
@@ -563,6 +592,17 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'NOT_READY', 'Every seat must be taken first.')
     if (occupied.length < adapter.minSeats)
       return this.fail(ws, 'NOT_READY', `At least ${adapter.minSeats} players must be seated.`)
+    return this.startGame(record)
+  }
+
+  /**
+   * Deal the game and tell the room. Split out of `handleStart` because a solo
+   * table against bots starts itself the moment its host arrives, and two start
+   * paths that settled seats differently would be two different games.
+   */
+  private async startGame(record: RoomRecord): Promise<void> {
+    const adapter = this.adapter(record)
+    const occupied = record.seatIds.filter((seat) => record.seats[seat])
     // A room made for four that starts with three plays as a three-player game,
     // so the empty seats are dropped and the rest slide onto the ids the
     // adapter would have handed out for that headcount.

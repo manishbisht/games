@@ -478,3 +478,135 @@ describe('adding and removing bots', () => {
     await second.waitRoom((m) => m.you.seat === 'p3')
   })
 })
+
+describe('rooms created with bots', () => {
+  const create = (body: unknown) =>
+    SELF.fetch('https://api.test/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  const solo = (extra: Record<string, unknown> = {}) => ({
+    game: 'wildrise',
+    visibility: 'private',
+    name: 'Ann',
+    guestId: crypto.randomUUID(),
+    seats: 4,
+    bots: ['casual', 'casual', 'casual'],
+    ...extra,
+  })
+
+  it('seats the bots from the end, leaving the first seat for the host', async () => {
+    const res = await create(solo())
+    expect(res.status).toBe(201)
+    const { code } = await res.json<{ code: string }>()
+    const record = await readRecord(code)
+    expect(record!.seats.p0).toBeUndefined()
+    expect(record!.seats.p1?.bot).toEqual({ skill: 'casual' })
+    expect(record!.seats.p3?.bot).toEqual({ skill: 'casual' })
+  })
+
+  it('gives every bot it seats a name of its own', async () => {
+    const res = await create(solo())
+    const { code } = await res.json<{ code: string }>()
+    const record = await readRecord(code)
+    const names = ['p1', 'p2', 'p3'].map((seat) => record!.seats[seat]!.player.name)
+    expect(new Set(names).size).toBe(3)
+  })
+
+  it('takes each bot its own skill, in seat order', async () => {
+    const res = await create(solo({ bots: ['casual', 'fast', 'fun'] }))
+    const { code } = await res.json<{ code: string }>()
+    const record = await readRecord(code)
+    expect(record!.seats.p1?.bot).toEqual({ skill: 'casual' })
+    expect(record!.seats.p2?.bot).toEqual({ skill: 'fast' })
+    expect(record!.seats.p3?.bot).toEqual({ skill: 'fun' })
+  })
+
+  it('refuses a room with no room for a person in it', async () => {
+    const res = await create(solo({ seats: 2, bots: ['casual', 'casual'] }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'unsupported bots' })
+  })
+
+  it('refuses an unknown skill, a non-list, and a game with no bots', async () => {
+    expect((await create(solo({ bots: ['grandmaster', 'casual', 'casual'] }))).status).toBe(400)
+    expect((await create(solo({ bots: 'casual' }))).status).toBe(400)
+    expect((await create(solo({ bots: [1, 2] }))).status).toBe(400)
+    expect(
+      (
+        await create({
+          game: 'chess',
+          visibility: 'private',
+          name: 'Ann',
+          guestId: crypto.randomUUID(),
+          seats: 2,
+          bots: ['medium'],
+        })
+      ).status,
+    ).toBe(400)
+  })
+
+  it('still creates a room when no bots are asked for', async () => {
+    const res = await create(solo({ bots: undefined }))
+    expect(res.status).toBe(201)
+    const { code } = await res.json<{ code: string }>()
+    const record = await readRecord(code)
+    expect(record!.seats.p3).toBeUndefined()
+  })
+
+  it('starts on its own when the host joins the last free seat', async () => {
+    const body = solo({ autoStart: true })
+    const res = await create(body)
+    const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', (body as { guestId: string }).guestId)
+    const playing = await host.waitRoom((m) => m.snapshot.status === 'playing')
+    expect(playing.you.seat).toBe('p0')
+    expect(playing.snapshot.seatIds).toEqual(['p0', 'p1', 'p2', 'p3'])
+  })
+
+  it('does not autostart a room that still has seats for people', async () => {
+    const body = solo({ autoStart: true, bots: ['casual'] })
+    const res = await create(body)
+    const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', (body as { guestId: string }).guestId)
+    const open = await host.waitRoom(() => true)
+    expect(open.snapshot.status).toBe('open')
+  })
+
+  it('does not autostart for someone who is not the host', async () => {
+    const body = solo({ autoStart: true })
+    const res = await create(body)
+    const { code } = await res.json<{ code: string }>()
+    const stranger = await connect(code)
+    stranger.join('Ben')
+    const seen = await stranger.waitRoom(() => true)
+    expect(seen.snapshot.status).toBe('open')
+  })
+
+  it('starts exactly once when the host arrives in two tabs at the same time', async () => {
+    const body = solo({ autoStart: true })
+    const res = await create(body)
+    const { code } = await res.json<{ code: string }>()
+    const guestId = (body as { guestId: string }).guestId
+    const first = await connect(code)
+    const second = await connect(code)
+    // Both join frames go out before either is handled, which is the race the
+    // server-side start exists to close.
+    first.join('Ann', guestId)
+    second.join('Ann', guestId)
+    await first.waitRoom((m) => m.snapshot.status === 'playing')
+    await vi.waitFor(async () => {
+      const record = await readRecord(code)
+      expect(record!.status).toBe('playing')
+    })
+    const record = await readRecord(code)
+    // One game, four seats, and the host in exactly one of them.
+    expect(record!.seatIds).toEqual(['p0', 'p1', 'p2', 'p3'])
+    expect(record!.seats.p0?.player.id).toBe(`guest:${guestId}`)
+    expect(record!.seatIds.filter((seat) => !record!.seats[seat]?.bot)).toEqual(['p0'])
+  })
+})
