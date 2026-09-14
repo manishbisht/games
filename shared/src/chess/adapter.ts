@@ -1,7 +1,9 @@
+import { botName } from '../online/bots'
 import type { GameAdapter } from '../online/adapter'
 import type { SeatId } from '../protocol/types'
+import { chooseMove } from './ai'
 import { createGame, playMove, resign } from './engine'
-import type { ChessAction, Color, GameState, PromotionPiece } from './types'
+import type { ChessAction, Color, Difficulty, GameState, PromotionPiece } from './types'
 
 const SEATS: SeatId[] = ['w', 'b']
 const PROMOTIONS: PromotionPiece[] = ['q', 'r', 'b', 'n']
@@ -69,8 +71,28 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
    */
   resolveAbsent: (state, seat, _seats, ctx) => resign(state, ctx.now, color(seat)),
 
-  /** Chess bots land in a later round; see the online-bots design. */
-  bots: null,
+  /**
+   * A seat the room plays. Unlike `resolveAbsent` above this one plays on: a
+   * person who walked out of a chess game is done with it, but a bot has no
+   * reason to resign a position it is winning.
+   *
+   * `thinkMs` is zero because the search is itself the pause — it is the one
+   * game here where a bot's turn costs real time rather than being held back
+   * to look like it did.
+   */
+  bots: {
+    skills: ['easy', 'medium'],
+    name: (_seat, index) => botName(index),
+    thinkMs: () => 0,
+    decide(state, seat, _seats, skill, ctx) {
+      if (state.status !== 'playing' || state.turn !== color(seat)) return state
+      const move = chooseMove(state, skill as Difficulty, ctx.random)
+      if (!move) return state
+      // Through the engine, not `apply`: this is the room moving a piece, not a
+      // seat asking whether it may.
+      return playMove(state, move.from as never, move.to as never, move.promotion as never, ctx.now)
+    },
+  },
 
   rematch: (_prev, _seats, _options, ctx) => ({
     state: createGame(ONLINE_OPTIONS, undefined, ctx.now),

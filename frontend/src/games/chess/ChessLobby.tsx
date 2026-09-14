@@ -1,12 +1,22 @@
 import { useState } from 'react'
-import { Globe2, Link2, Users } from 'lucide-react'
+import { ArrowRight, Globe2, Link2, Users } from 'lucide-react'
 import { createGame } from '@games/shared/chess'
-import OnlinePanel from '../../online/OnlinePanel'
+import PlayOptions from '../../online/PlayOptions'
+import { useBotRoom } from '../../online/useBotRoom'
+import { chessGame } from '../catalog'
 import ChessShell from './ChessShell'
 import ChessBoard from './scene/ChessBoard'
 import type { SceneState } from './scene/createScene'
 
+/** Labels for what the server will accept; the ids are `chessAdapter.bots.skills`. */
+const SKILLS = [
+  { id: 'easy', label: 'Easy · a friendly game' },
+  { id: 'medium', label: 'Medium · a real opponent' },
+]
+
 export default function ChessLobby() {
+  const room = useBotRoom('chess', chessGame.path)
+  const [skill, setSkill] = useState(SKILLS[0].id)
   const [preview] = useState<SceneState>(() => ({
     game: createGame(),
     selected: null,
@@ -59,7 +69,33 @@ export default function ChessLobby() {
           </div>
         </div>
         <div className="ch-lobby-entry">
-          <OnlinePanel game="chess" basePath="/chess" appearance="chess" />
+          <PlayOptions game="chess" basePath={chessGame.path} appearance="chess">
+            <div className="ch-lobby-bot">
+              <p className="ch-eyebrow">A QUIET OPPONENT</p>
+              <h2>Play the machine.</h2>
+              <p className="ch-lobby-bot-copy">
+                It plays White’s reply the moment you move. No clock, no waiting for anyone.
+              </p>
+              <label className="ch-lobby-skill">
+                Strength
+                <select
+                  aria-label="Strength"
+                  value={skill}
+                  onChange={(event) => setSkill(event.target.value)}
+                >
+                  {SKILLS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="ch-primary" onClick={() => void room.start({ seats: 2, bots: [skill] })}>
+                Let’s play <ArrowRight size={17} />
+              </button>
+              <p className="ch-lobby-bot-copy">You play White.</p>
+            </div>
+          </PlayOptions>
           <p className="ch-lobby-guest-note">
             <Users size={14} /> Just a name. No account needed.
           </p>

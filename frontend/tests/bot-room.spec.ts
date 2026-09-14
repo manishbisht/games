@@ -95,13 +95,17 @@ test('a table the host has filled offers no more chairs', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Add bot', exact: true })).toHaveCount(0)
 })
 
-test('chess offers no bot control, because its search is not on the server yet', async ({ page }) => {
+test('a chess room offers the two strengths its search can afford', async ({ page }) => {
   await page.goto('/#/chess')
+  await page.getByRole('button', { name: 'Play online', exact: true }).click()
   await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Create room', exact: true }).click()
   await expect(page).toHaveURL(/\/chess\/room\/[A-Z2-9]{6}$/)
   await page.getByRole('button', { name: /Play as White/ }).click()
   await expect(page.getByRole('button', { name: /Leave seat/ })).toBeVisible()
-  // Offering one here would be a dead end: the room answers NOT_ALLOWED.
-  await expect(page.getByRole('button', { name: 'Add bot', exact: true })).toHaveCount(0)
+  // Easy and Medium only: hard costs about 1.14s of server CPU a move.
+  const picker = page.getByLabel('Bot skill for Play as Black', { exact: true })
+  await expect(picker.locator('option')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Add bot', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^Remove / })).toBeVisible()
 })

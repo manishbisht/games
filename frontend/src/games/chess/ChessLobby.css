@@ -744,3 +744,24 @@
   border-radius: 50%;
   background: #94a67d;
 }
+
+/* The bot tab: the same panel shape as the online one beside it. */
+.ch-lobby-bot {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.35rem;
+}
+.ch-lobby-bot h2 {
+  margin: 0;
+}
+.ch-lobby-bot-copy {
+  margin: 0;
+  opacity: 0.8;
+}
+.ch-lobby-skill {
+  display: grid;
+  gap: 0.3rem;
+}
+.ch-lobby-skill select {
+  width: 100%;
+}

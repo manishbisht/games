@@ -111,6 +111,38 @@ const councilAdapter: GameAdapter<CouncilState, 'vote'> = {
 
 registerAdapter(councilAdapter)
 
+/**
+ * A game that simply has none. Every shipping adapter answers `bots` now — the
+ * last one, chess, gained its own this round — so the refusal needs a game that
+ * genuinely does not, or nothing holds it in place.
+ */
+const SOLITAIRE_GAME = 'solitaire-test' as GameId
+
+interface SolitaireState {
+  done: boolean
+}
+
+const botlessAdapter: GameAdapter<SolitaireState, 'go'> = {
+  id: SOLITAIRE_GAME,
+  minSeats: 2,
+  maxSeats: 2,
+  requireFull: true,
+  seatIds: (count) => Array.from({ length: count }, (_, i) => `p${i}`),
+  validateOptions: () => ({}),
+  validateAction: (raw) => (raw === 'go' ? 'go' : null),
+  create: () => ({ done: false }),
+  apply: (state: SolitaireState) => ({ state }),
+  pending: () => null,
+  view: (state: SolitaireState) => state,
+  isFinished: (state: SolitaireState) => state.done,
+  waitingOn: () => [],
+  resolveAbsent: (state: SolitaireState) => state,
+  bots: null,
+  rematch: () => ({ state: { done: false } }),
+}
+
+registerAdapter(botlessAdapter)
+
 /** A started council game whose p1 has been turned into a bot seat. */
 async function councilGame() {
   const guestId = crypto.randomUUID()
@@ -400,9 +432,8 @@ describe('adding and removing bots', () => {
   })
 
   it('refuses a game that has no bots', async () => {
-    // Chess keeps `bots: null` until its search moves to the server.
-    const { host } = await openRoom('chess', 2, 'w')
-    host.send({ type: 'addBot', seat: 'b' })
+    const { host } = await openRoom(SOLITAIRE_GAME, 2)
+    host.send({ type: 'addBot', seat: 'p1' })
     await host.expectError('NOT_ALLOWED')
   })
 
@@ -534,15 +565,17 @@ describe('rooms created with bots', () => {
     expect((await create(solo({ bots: ['grandmaster', 'casual', 'casual'] }))).status).toBe(400)
     expect((await create(solo({ bots: 'casual' }))).status).toBe(400)
     expect((await create(solo({ bots: [1, 2] }))).status).toBe(400)
+    // A skill another game offers is still not this one's.
+    expect((await create(solo({ bots: ['medium', 'casual', 'casual'] }))).status).toBe(400)
     expect(
       (
         await create({
-          game: 'chess',
+          game: SOLITAIRE_GAME,
           visibility: 'private',
           name: 'Ann',
           guestId: crypto.randomUUID(),
           seats: 2,
-          bots: ['medium'],
+          bots: ['anything'],
         })
       ).status,
     ).toBe(400)

@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js'
 import type { Move, PieceSymbol } from 'chess.js'
-import type { Difficulty } from '@games/shared/chess/types'
+import { position } from './engine'
+import type { Difficulty, GameState } from './types'
 
 export interface AIMove {
   from: string
@@ -40,19 +41,45 @@ const priority = (m: Move) =>
   (m.san.includes('+') ? 30 : 0) +
   (m.san.includes('#') ? 100000 : 0)
 
+/**
+ * How hard the bot thinks, counted in positions rather than milliseconds.
+ *
+ * The search used to stop at a wall-clock deadline, which cannot work on the
+ * server: Workers freeze the clock for the whole of a synchronous run, so
+ * `performance.now()` returns the same number on every check and the deadline
+ * never arrives. Counting nodes is the same bound expressed in the one quantity
+ * the search actually spends, and it makes a given position and seed always
+ * produce the same move. The numbers are the old budgets at the measured
+ * throughput of roughly 930 nodes a second.
+ */
+export const NODE_BUDGET: Record<Difficulty, number> = { easy: 200, medium: 600, hard: 1500 }
+
 /** Search is bounded and independent of UI state; only chess.js legal moves are considered. */
 export function chooseMove(
-  fen: string,
+  state: Pick<GameState, 'initialFen' | 'history'>,
   difficulty: Difficulty,
-  line?: { initialFen: string; moves: AIMove[] },
+  random: () => number = Math.random,
 ): AIMove | null {
-  const chess = new Chess(line?.initialFen || fen)
-  if (line) for (const move of line.moves) chess.move(move)
-  if (chess.isGameOver()) return null
+  return search(state, difficulty, random).move
+}
+
+/**
+ * The same search, with what it cost. Separate from `chooseMove` so the budget
+ * can be asserted as a contract rather than trusted, and so the backend can
+ * price a move before deciding which levels are affordable to run there.
+ */
+export function search(
+  state: Pick<GameState, 'initialFen' | 'history'>,
+  difficulty: Difficulty,
+  random: () => number = Math.random,
+): { move: AIMove | null; nodes: number } {
+  // Replayed rather than built from a FEN, so the search sees the repetition
+  // counts a bare position has lost.
+  const chess = position(state)
+  if (chess.isGameOver()) return { move: null, nodes: 0 }
   const root = chess.moves({ verbose: true }).sort((a, b) => priority(b) - priority(a))
-  if (!root.length) return null
-  const budget = difficulty === 'hard' ? 1600 : difficulty === 'medium' ? 650 : 200
-  const deadline = performance.now() + budget
+  if (!root.length) return { move: null, nodes: 0 }
+  const budget = NODE_BUDGET[difficulty]
   const maxDepth = difficulty === 'hard' ? 4 : difficulty === 'medium' ? 2 : 1
   let nodes = 0,
     stopped = false,
@@ -60,11 +87,15 @@ export function chooseMove(
   const terminalScore = (moves: Move[], ply: number) =>
     !moves.length ? (chess.isCheck() ? -100000 + ply : 0) : null
 
-  function search(depth: number, alpha: number, beta: number, ply: number, quiescence = 2): number {
-    if (++nodes % 64 === 0 && (performance.now() > deadline || nodes > 45000)) {
+  function descend(depth: number, alpha: number, beta: number, ply: number, quiescence = 2): number {
+    // Checked on every node, not every sixty-fourth: an integer compare is
+    // free where reading a clock was not, and at a budget of 200 the old
+    // sampling overshot by up to a third.
+    if (nodes >= budget) {
       stopped = true
       return evaluate(chess)
     }
+    nodes++
     if (chess.isThreefoldRepetition() || chess.isDrawByFiftyMoves() || chess.isInsufficientMaterial())
       return 0
     let moves = chess.moves({ verbose: true })
@@ -82,7 +113,7 @@ export function chooseMove(
     moves.sort((a, b) => priority(b) - priority(a))
     for (const move of moves) {
       chess.move(move)
-      const score = -search(depth - 1, -beta, -alpha, ply + 1, depth <= 0 ? quiescence - 1 : quiescence)
+      const score = -descend(depth - 1, -beta, -alpha, ply + 1, depth <= 0 ? quiescence - 1 : quiescence)
       chess.undo()
       if (stopped) return alpha
       if (score >= beta) return beta
@@ -97,10 +128,10 @@ export function chooseMove(
     const ordered = [best, ...root.filter((m) => m !== best)]
     for (const move of ordered) {
       chess.move(move)
-      let score = -search(depth - 1, -Infinity, Infinity, 1, difficulty === 'easy' ? 0 : 2)
+      let score = -descend(depth - 1, -Infinity, Infinity, 1, difficulty === 'easy' ? 0 : 2)
       chess.undo()
       if (stopped) break
-      if (difficulty === 'easy' && Math.abs(score) < 90000) score += Math.random() * 180
+      if (difficulty === 'easy' && Math.abs(score) < 90000) score += random() * 180
       if (score > bestScore) {
         bestScore = score
         iterationBest = move
@@ -109,5 +140,8 @@ export function chooseMove(
     if (!stopped) best = iterationBest
     if (stopped || bestScore > 90000) break
   }
-  return { from: best.from, to: best.to, ...(best.promotion ? { promotion: best.promotion } : {}) }
+  return {
+    move: { from: best.from, to: best.to, ...(best.promotion ? { promotion: best.promotion } : {}) },
+    nodes,
+  }
 }

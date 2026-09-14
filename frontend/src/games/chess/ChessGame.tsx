@@ -3,10 +3,11 @@ import { Link } from 'react-router'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import {
   ArrowLeft,
-  ArrowRight,
   ArrowUpRight,
+  Plus,
+  RotateCcw,
+  ArrowRight,
   BookOpen,
-  Bot,
   Check,
   ChevronRight,
   Clock3,
@@ -15,16 +16,10 @@ import {
   Leaf,
   Maximize,
   Minus,
-  Plus,
-  RotateCcw,
   RotateCw,
   Settings2,
-  ShieldCheck,
-  Sparkles,
   SwitchCamera,
   Trophy,
-  Undo2,
-  Users,
   Volume2,
   VolumeX,
 } from 'lucide-react'
@@ -33,43 +28,26 @@ import type { BoardControls } from './scene/ChessBoard'
 import Modal from './components/Modal'
 import PromotionGallery from './components/PromotionGallery'
 import {
-  agreeDraw,
-  createGame,
-  DEFAULT_OPTIONS,
   legalMoves,
   opposite,
-  playMove,
   promote,
-  resign,
-  restoreGame,
-  tickClock,
-  undoMove,
 } from '@games/shared/chess'
 import { playChessSound } from './game/audio'
 import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type {
   Color,
-  GameOptions,
   GameState,
   Preferences,
-  PromotionPiece,
   Square,
 } from '@games/shared/chess/types'
 import type { OnlineChessSession } from './online/session'
-import OnlinePanel from '../../online/OnlinePanel'
 import './ChessGame.css'
 
-const STORAGE = 'gambit-game-v1',
-  PREFS = 'gambit-preferences-v1'
-type Dialog = 'settings' | 'help' | 'resign' | 'draw' | 'restart' | 'menu' | null
-function storedGame() {
-  try {
-    return restoreGame(localStorage.getItem(STORAGE))
-  } catch {
-    return null
-  }
-}
+// Preferences only. The game itself lives in its room, which is what makes a
+// chess table resumable from its link rather than from this browser.
+const PREFS = 'gambit-preferences-v1'
+type Dialog = 'settings' | 'help' | 'resign' | null
 function storedPreferences(): Preferences {
   const defaults: Preferences = {
     sound: true,
@@ -116,7 +94,6 @@ function PlayerCard({
   color,
   game,
   active,
-  menu,
   label,
   away,
   you,
@@ -124,7 +101,6 @@ function PlayerCard({
   color: Color
   game: GameState
   active: boolean
-  menu: boolean
   label?: string
   away?: boolean
   you?: boolean
@@ -132,7 +108,7 @@ function PlayerCard({
   const computer = game.options.mode === 'ai' && game.options.human !== color
   const captures = game.captured[color]
   return (
-    <div className={`ch-player ${active && !menu ? 'ch-player-active' : ''}`}>
+    <div className={`ch-player ${active ? 'ch-player-active' : ''}`}>
       <div className={`ch-player-avatar ch-avatar-${color}`} aria-hidden="true">
         {GLYPHS[color].k}
       </div>
@@ -144,11 +120,9 @@ function PlayerCard({
           {away && <span className="ch-small-tag ch-tag-away">AWAY</span>}
         </div>
         <span>
-          {menu
-            ? 'Ready to play'
-            : game.status !== 'playing'
-              ? 'Game finished'
-              : active
+          {game.status !== 'playing'
+            ? 'Game finished'
+            : active
                 ? computer
                   ? 'Considering the position…'
                   : 'Your move'
@@ -171,7 +145,7 @@ function PlayerCard({
         className={`ch-clock ${game.options.clock && game.clocks[color] < 60000 ? 'ch-clock-low' : ''}`}
         aria-label={`${COLOR_NAMES[color]} clock${game.options.clock ? `: ${clockText(game.clocks[color])}` : ': no time limit'}`}
       >
-        {active && !menu && game.status === 'playing' && <i />}
+        {active && game.status === 'playing' && <i />}
         {game.options.clock ? clockText(game.clocks[color]) : <span className="ch-untimed">— : —</span>}
       </div>
     </div>
@@ -236,12 +210,13 @@ function AbandonmentNotice({
   )
 }
 
-export default function ChessGame({ online }: { online?: OnlineChessSession }) {
-  const [boot] = useState(() => (online ? null : storedGame()))
-  const [localGame, setGame] = useState<GameState>(() => boot || createGame())
-  const game = online ? online.state : localGame
-  const [menu, setMenu] = useState(online ? false : !boot),
-    [options, setOptions] = useState<GameOptions>(() => boot?.options || DEFAULT_OPTIONS)
+/**
+ * A chess table. Always a room's: Gambit is reached through its lobby, which
+ * makes one either against a bot or against whoever has the link, so there is
+ * no second source of a game here and nothing to restore from this disk.
+ */
+export default function ChessGame({ online }: { online: OnlineChessSession }) {
+  const game = online.state
   const [preferences, setPreferences] = useState(storedPreferences)
   const [dialog, setDialog] = useState<Dialog>(null),
     [selected, setSelected] = useState<Square | null>(null)
@@ -250,10 +225,8 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
     to: Square
     color: Color
   } | null>(null)
-  const promotion = online ? onlinePromotion : game.promotion
-  const [black, setBlack] = useState(() =>
-    online ? online.myColor === 'b' : boot?.options.mode === 'ai' && boot.options.human === 'b',
-  )
+  const promotion = onlinePromotion
+  const [black, setBlack] = useState(() => online.myColor === 'b')
   const [moving, setMoving] = useState(false),
     [resultDismissed, setResultDismissed] = useState(false),
     [notice, setNotice] = useState('')
@@ -261,33 +234,26 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
     motionTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
     historyEnd = useRef<HTMLDivElement>(null)
   // Online, the seat orients the board; each fresh game starts clean and shows its own result.
-  const [seat, setSeat] = useState(online?.myColor ?? null),
+  const [seat, setSeat] = useState(online.myColor),
     [seatStatus, setSeatStatus] = useState(game.status)
-  if (online && seat !== online.myColor) {
+  if (seat !== online.myColor) {
     setSeat(online.myColor)
     setBlack(online.myColor === 'b')
   }
-  if (online && seatStatus !== game.status) {
+  if (seatStatus !== game.status) {
     setSeatStatus(game.status)
     setOnlinePromotion(null)
     setSelected(null)
     setNotice('')
     if (game.status === 'playing') setResultDismissed(false)
   }
-  const aiTurn =
-    !online &&
-    !menu &&
-    game.status === 'playing' &&
-    game.options.mode === 'ai' &&
-    game.turn !== game.options.human
   const enabled =
-    !menu &&
     game.status === 'playing' &&
     !moving &&
-    !aiTurn &&
     !promotion &&
     !dialog &&
-    (!online || (online.myColor !== null && game.turn === online.myColor))
+    online.myColor !== null &&
+    game.turn === online.myColor
   const moves = useMemo(() => (selected ? legalMoves(game, selected) : []), [game, selected])
   const destinations = useMemo(
     () => Array.from(new Map(moves.map((m) => [m.to, { to: m.to, capture: !!m.captured }])).values()),
@@ -299,25 +265,6 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
   )
   const isOver = game.status !== 'playing'
 
-  useEffect(() => {
-    if (online || menu || isOver || !game.options.clock) return
-    const interval = setInterval(() => setGame((g) => tickClock(g)), 200)
-    const catchUp = () => setGame((g) => tickClock(g))
-    document.addEventListener('visibilitychange', catchUp)
-    return () => {
-      clearInterval(interval)
-      document.removeEventListener('visibilitychange', catchUp)
-    }
-  }, [online, menu, isOver, game.options.clock])
-  useEffect(() => {
-    if (online) return
-    try {
-      if (menu) localStorage.removeItem(STORAGE)
-      else localStorage.setItem(STORAGE, JSON.stringify(game))
-    } catch {
-      /* Storage may be unavailable in private mode. */
-    }
-  }, [online, game, menu])
   useEffect(() => {
     try {
       localStorage.setItem(PREFS, JSON.stringify(preferences))
@@ -338,10 +285,10 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
     })
   }, [game.history.length, preferences.reducedMotion])
 
+  /** React to a snapshot that moved the game on: sound, and the board's own animation. */
   const commit = useCallback(
     (next: GameState, previous: GameState) => {
       if (next === previous) return
-      setGame(next)
       setSelected(null)
       setNotice('')
       setResultDismissed(false)
@@ -364,75 +311,6 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
     [preferences.sound, preferences.reducedMotion],
   )
 
-  useEffect(() => {
-    if (online || !aiTurn || moving || game.promotion) return
-    let stopped = false,
-      worker: Worker | undefined,
-      watchdog: ReturnType<typeof setTimeout> | undefined
-    const current = game
-    const fallback = () => {
-      if (stopped) return
-      stopped = true
-      worker?.terminate()
-      const legal = legalMoves(current),
-        move = legal.find((m) => m.captured) || legal[Math.floor(Math.random() * legal.length)]
-      if (move) {
-        commit(playMove(current, move.from, move.to, move.promotion as PromotionPiece | undefined), current)
-        setNotice('The computer recovered and made a legal move.')
-      }
-    }
-    const timer = setTimeout(() => {
-      try {
-        worker = new Worker(new URL('./game/ai.worker.ts', import.meta.url), { type: 'module' })
-        worker.onmessage = (event) => {
-          if (stopped) return
-          if (event.data.error || !event.data.move) {
-            fallback()
-            return
-          }
-          const move = event.data.move
-          const next = playMove(current, move.from, move.to, move.promotion)
-          if (next === current) {
-            fallback()
-            return
-          }
-          stopped = true
-          if (watchdog) clearTimeout(watchdog)
-          worker?.terminate()
-          commit(next, current)
-        }
-        worker.onerror = fallback
-        worker.postMessage({
-          fen: current.fen,
-          difficulty: current.options.difficulty,
-          initialFen: current.initialFen,
-          moves: current.history.map((m) => ({ from: m.from, to: m.to, promotion: m.promotion })),
-        })
-        watchdog = setTimeout(fallback, 5000)
-      } catch {
-        fallback()
-      }
-    }, 350)
-    return () => {
-      stopped = true
-      clearTimeout(timer)
-      if (watchdog) clearTimeout(watchdog)
-      worker?.terminate()
-    }
-    // A running search is tied to a position. Clock ticks do not invalidate it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    aiTurn,
-    moving,
-    game.fen,
-    game.status,
-    game.options.difficulty,
-    game.promotion,
-    game.history,
-    game.initialFen,
-    commit,
-  ])
-
   function selectSquare(square: Square) {
     if (!enabled) return
     if (square === selected) {
@@ -440,16 +318,12 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
       return
     }
     if (selected && moves.some((m) => m.to === square)) {
-      if (online) {
-        // The board waits for the authoritative snapshot instead of moving optimistically.
-        if (moves.some((m) => m.to === square && m.promotion))
-          setOnlinePromotion({ from: selected, to: square, color: game.turn })
-        else online.send.move(selected, square)
-        setSelected(null)
-        setNotice('')
-        return
-      }
-      commit(playMove(game, selected, square), game)
+      // The board waits for the authoritative snapshot instead of moving optimistically.
+      if (moves.some((m) => m.to === square && m.promotion))
+        setOnlinePromotion({ from: selected, to: square, color: game.turn })
+      else online.send.move(selected, square)
+      setSelected(null)
+      setNotice('')
       return
     }
     const piece = game.pieces.find((p) => p.square === square)
@@ -458,72 +332,24 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
       setNotice('')
     } else if (selected) setNotice('That square isn’t a legal move. Choose a marked destination.')
   }
-  function start() {
-    if (motionTimer.current) clearTimeout(motionTimer.current)
-    const next = createGame(options)
-    setGame(next)
-    setMenu(false)
-    setSelected(null)
-    setMoving(false)
-    setResultDismissed(false)
-    setDialog(null)
-    setNotice('')
-    setBlack(options.mode === 'ai' && options.human === 'b')
-  }
-  function returnToMenu() {
-    setOptions(game.options)
-    setMenu(true)
-    setSelected(null)
-    setDialog(null)
-    setGame(createGame(game.options))
-    setResultDismissed(false)
-    setMoving(false)
-    if (motionTimer.current) clearTimeout(motionTimer.current)
-  }
-  function undo() {
-    if (moving || game.options.mode !== 'local') return
-    setGame(undoMove(game))
-    setSelected(null)
-    setResultDismissed(false)
-    setNotice('Last move taken back.')
-  }
-  function restart() {
-    setGame(createGame(game.options))
-    setSelected(null)
-    setDialog(null)
-    setMoving(false)
-    setResultDismissed(false)
-    setNotice('')
-    if (motionTimer.current) clearTimeout(motionTimer.current)
-  }
-  // Online, the seated player resigns; in an AI game the human does, even while the computer thinks.
-  const resigningColor = online
-    ? (online.myColor ?? game.turn)
-    : game.options.mode === 'ai'
-      ? game.options.human
-      : game.turn
-  // Online there is no difficulty to name, so the result meta credits the person
-  // across the board — falling back to the plain word if we never saw their name.
+  /** The seat resigns, which is the only seat this browser may resign. */
+  const resigningColor = online.myColor ?? game.turn
+  // The result meta credits whoever is across the board, falling back to the
+  // plain word if we never saw their name.
   const onlineOpponent =
-    (online?.myColor ? online.players[opposite(online.myColor)]?.name : undefined) || 'opponent'
+    (online.myColor ? online.players[opposite(online.myColor)]?.name : undefined) || 'opponent'
   const onlineAway =
-    online?.myColor && game.status === 'playing' ? online.players[opposite(online.myColor)] : undefined
-  const turnStatus = menu
-    ? 'The table is yours.'
-    : isOver
+    online.myColor && game.status === 'playing' ? online.players[opposite(online.myColor)] : undefined
+  const turnStatus = isOver
       ? game.winner
         ? `${COLOR_NAMES[game.winner]} wins.`
         : 'Game drawn.'
       : game.check
         ? `${COLOR_NAMES[game.turn]} is in check.`
         : `${COLOR_NAMES[game.turn]}’s turn.`
-  const statusDetail = menu
-    ? 'A little focus. Endless possibilities.'
-    : isOver
-      ? 'A good game is always worth another.'
-      : aiTurn
-        ? 'The computer is considering its next move.'
-        : moving
+  const statusDetail = isOver
+    ? 'A good game is always worth another.'
+    : moving
           ? 'Making a move…'
           : selected
             ? `${PIECE_NAMES[game.pieces.find((p) => p.square === selected)!.type]} on ${selected} · ${destinations.length} legal ${destinations.length === 1 ? 'move' : 'moves'}`
@@ -590,19 +416,14 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
           <section className="ch-board-column" aria-label="Chess table">
             <PlayerCard
               color={far}
-              game={
-                menu
-                  ? { ...game, options, clocks: { w: options.clock * 60000, b: options.clock * 60000 } }
-                  : game
-              }
+              game={game}
               active={game.turn === far}
-              menu={menu}
               {...seatProps(far)}
             />
             <div className="ch-table">
               <div className="ch-table-caption">
                 <span>
-                  <i /> {menu ? 'YOUR BOARD AWAITS' : isOver ? 'A GAME WELL PLAYED' : 'AT THE TABLE'}
+                  <i /> {isOver ? 'A GAME WELL PLAYED' : 'AT THE TABLE'}
                 </span>
                 <span>{preferences.theme === 'walnut' ? 'WALNUT & IVORY' : 'THE MARBLE EDITION'}</span>
               </div>
@@ -639,13 +460,8 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
             </div>
             <PlayerCard
               color={near}
-              game={
-                menu
-                  ? { ...game, options, clocks: { w: options.clock * 60000, b: options.clock * 60000 } }
-                  : game
-              }
+              game={game}
               active={game.turn === near}
-              menu={menu}
               {...seatProps(near)}
             />
             <div className="ch-board-footnote">
@@ -657,235 +473,91 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
           </section>
 
           <aside className="ch-sidebar">
-            {menu ? (
-              <section className="ch-panel ch-setup">
-                <p className="ch-eyebrow">GOOD GAMES START HERE</p>
-                <h2>Pull up a chair.</h2>
-                <p className="ch-panel-copy">
-                  An old favorite. A fresh perspective.
-                  <br />
-                  Settle in and make it your game.
+            <section className="ch-panel ch-session">
+              <div className="ch-session-label">
+                <p className="ch-eyebrow">
+                  {online
+                    ? 'ONLINE MATCH'
+                    : game.options.mode === 'ai'
+                      ? 'YOU & THE COMPUTER'
+                      : 'LOCAL MULTIPLAYER'}
                 </p>
-                <label className="ch-field-label">YOUR OPPONENT</label>
-                <div className="ch-mode-switch">
-                  <button
-                    className={options.mode === 'local' ? 'selected' : ''}
-                    aria-pressed={options.mode === 'local'}
-                    onClick={() => setOptions((o) => ({ ...o, mode: 'local' }))}
-                  >
-                    <Users size={18} />
-                    <span>Play local</span>
-                  </button>
-                  <button
-                    className={options.mode === 'ai' ? 'selected' : ''}
-                    aria-pressed={options.mode === 'ai'}
-                    onClick={() => setOptions((o) => ({ ...o, mode: 'ai' }))}
-                  >
-                    <Bot size={18} />
-                    <span>Play vs AI</span>
-                  </button>
-                </div>
-                <div className="ch-mode-description">
-                  {options.mode === 'local' ? (
+                <span className={`ch-live-dot ${isOver ? 'ended' : ''}`} />
+              </div>
+              <h2 className={game.check && !isOver ? 'ch-check-text' : ''}>{turnStatus}</h2>
+              <p className="ch-panel-copy" aria-live="polite">
+                {statusDetail}
+              </p>
+              <div className="ch-session-tags">
+                <span>
+                  {game.options.clock ? (
                     <>
-                      <Users size={15} />
-                      <p>
-                        Two players. One board.
-                        <br />
-                        <span>A little friendly competition.</span>
-                      </p>
+                      <Clock3 size={12} /> Rapid · 10 min
                     </>
                   ) : (
                     <>
-                      <Sparkles size={15} />
-                      <p>
-                        Your own worthy opponent.
-                        <br />
-                        <span>A fresh challenge, anytime.</span>
-                      </p>
+                      <Leaf size={12} /> No time limit
                     </>
                   )}
-                </div>
-                {options.mode === 'ai' && (
+                </span>
+                <span>{game.options.mode === 'ai' ? `${game.options.difficulty} AI` : 'Two players'}</span>
+              </div>
+              <div className="ch-history-heading">
+                <h3>Move history</h3>
+                <span>
+                  {game.history.length} {game.history.length === 1 ? 'move' : 'moves'}
+                </span>
+              </div>
+              <div className="ch-history" aria-label="Move history">
+                {pairs.length ? (
                   <>
-                    <label className="ch-field-label">YOUR SIDE</label>
-                    <div className="ch-side-choice">
-                      {(['w', 'b'] as const).map((c) => (
-                        <button
-                          key={c}
-                          aria-label={COLOR_NAMES[c]}
-                          aria-pressed={options.human === c}
-                          className={options.human === c ? 'selected' : ''}
-                          onClick={() => setOptions((o) => ({ ...o, human: c }))}
-                        >
-                          <span>{GLYPHS[c].k}</span>
-                          {COLOR_NAMES[c]}
-                          {options.human === c && <Check size={14} />}
-                        </button>
-                      ))}
+                    <div className="ch-history-columns">
+                      <span>#</span>
+                      <span>WHITE</span>
+                      <span>BLACK</span>
                     </div>
-                    <label className="ch-field-label">THE CHALLENGE</label>
-                    <div className="ch-difficulties">
-                      {(['easy', 'medium', 'hard'] as const).map((d) => (
-                        <button
-                          key={d}
-                          aria-label={d[0].toUpperCase() + d.slice(1)}
-                          className={options.difficulty === d ? 'selected' : ''}
-                          aria-pressed={options.difficulty === d}
-                          onClick={() => setOptions((o) => ({ ...o, difficulty: d }))}
-                        >
-                          {d}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <div className="ch-clock-setup">
-                  <Clock3 size={18} />
-                  <Toggle
-                    checked={options.clock === 10}
-                    onChange={() => setOptions((o) => ({ ...o, clock: o.clock ? 0 : 10 }))}
-                    label="Keep an eye on time"
-                    description={options.clock ? '10 minutes per player' : 'No clock. Take your time.'}
-                  />
-                </div>
-                <button className="ch-primary ch-start" onClick={start}>
-                  Let’s play <ArrowRight size={18} />
-                </button>
-                <p className="ch-setup-note">
-                  <ShieldCheck size={13} /> Standard rules. Extraordinary possibilities.
-                </p>
-                {!online && <OnlinePanel game="chess" basePath="/chess" />}
-              </section>
-            ) : (
-              <section className="ch-panel ch-session">
-                <div className="ch-session-label">
-                  <p className="ch-eyebrow">
-                    {online
-                      ? 'ONLINE MATCH'
-                      : game.options.mode === 'ai'
-                        ? 'YOU & THE COMPUTER'
-                        : 'LOCAL MULTIPLAYER'}
-                  </p>
-                  <span className={`ch-live-dot ${isOver ? 'ended' : ''}`} />
-                </div>
-                <h2 className={game.check && !isOver ? 'ch-check-text' : ''}>{turnStatus}</h2>
-                <p className="ch-panel-copy" aria-live="polite">
-                  {statusDetail}
-                </p>
-                <div className="ch-session-tags">
-                  <span>
-                    {game.options.clock ? (
-                      <>
-                        <Clock3 size={12} /> Rapid · 10 min
-                      </>
-                    ) : (
-                      <>
-                        <Leaf size={12} /> No time limit
-                      </>
-                    )}
-                  </span>
-                  <span>{game.options.mode === 'ai' ? `${game.options.difficulty} AI` : 'Two players'}</span>
-                </div>
-                <div className="ch-history-heading">
-                  <h3>Move history</h3>
-                  <span>
-                    {game.history.length} {game.history.length === 1 ? 'move' : 'moves'}
-                  </span>
-                </div>
-                <div className="ch-history" aria-label="Move history">
-                  {pairs.length ? (
-                    <>
-                      <div className="ch-history-columns">
-                        <span>#</span>
-                        <span>WHITE</span>
-                        <span>BLACK</span>
+                    {pairs.map((pair, i) => (
+                      <div className={`ch-history-row ${i === pairs.length - 1 ? 'latest' : ''}`} key={i}>
+                        <span>{i + 1}.</span>
+                        {[0, 1].map((side) => (
+                          <span key={side}>{pair[side]?.san || '—'}</span>
+                        ))}
                       </div>
-                      {pairs.map((pair, i) => (
-                        <div className={`ch-history-row ${i === pairs.length - 1 ? 'latest' : ''}`} key={i}>
-                          <span>{i + 1}.</span>
-                          {[0, 1].map((side) => (
-                            <span key={side}>{pair[side]?.san || '—'}</span>
-                          ))}
-                        </div>
-                      ))}
-                      <div ref={historyEnd} />
-                    </>
-                  ) : (
-                    <div className="ch-empty-history">
-                      <span aria-hidden="true">♙</span>
-                      <p>
-                        Every great game
-                        <br />
-                        begins with a single move.
-                      </p>
-                      <small>Your story starts on the board.</small>
-                    </div>
-                  )}
-                </div>
-                <div className="ch-game-actions">
-                  {!online && (
-                    <button
-                      disabled={!game.history.length || moving || game.options.mode !== 'local'}
-                      onClick={undo}
-                      title={
-                        game.options.mode === 'ai'
-                          ? 'Undo is available in local games'
-                          : 'Take back the last move'
-                      }
-                    >
-                      <Undo2 size={16} />
-                      Undo
-                    </button>
-                  )}
-                  <button disabled={isOver} onClick={() => setDialog('resign')}>
-                    <Flag size={15} />
-                    Resign
-                  </button>
-                  {!online && (
-                    <button
-                      disabled={isOver || game.options.mode !== 'local'}
-                      onClick={() => setDialog('draw')}
-                      title={
-                        game.options.mode === 'ai'
-                          ? 'Draw agreement is available in local games'
-                          : 'Offer a draw'
-                      }
-                    >
-                      <Handshake size={16} />
-                      Draw
-                    </button>
-                  )}
-                </div>
-                {online ? (
-                  <button className="ch-primary" onClick={online.leave}>
-                    <ArrowLeft size={17} /> Leave room
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      className="ch-primary"
-                      onClick={() => (game.history.length && !isOver ? setDialog('menu') : returnToMenu())}
-                    >
-                      <Plus size={17} /> New game <ArrowUpRight size={17} />
-                    </button>
-                    <button className="ch-restart" onClick={() => setDialog('restart')}>
-                      <RotateCcw size={13} /> Restart this game
-                    </button>
+                    ))}
+                    <div ref={historyEnd} />
                   </>
+                ) : (
+                  <div className="ch-empty-history">
+                    <span aria-hidden="true">♙</span>
+                    <p>
+                      Every great game
+                      <br />
+                      begins with a single move.
+                    </p>
+                    <small>Your story starts on the board.</small>
+                  </div>
                 )}
-                {notice && (
-                  <p className="ch-notice" role="status">
-                    {notice}
-                  </p>
-                )}
-                {isOver && resultDismissed && (
-                  <button className="ch-show-result" onClick={() => setResultDismissed(false)}>
-                    View game result <ChevronRight size={14} />
-                  </button>
-                )}
-              </section>
-            )}
+              </div>
+              <div className="ch-game-actions">
+                <button disabled={isOver} onClick={() => setDialog('resign')}>
+                  <Flag size={15} />
+                  Resign
+                </button>
+              </div>
+              <button className="ch-primary" onClick={online.leave}>
+                <ArrowLeft size={17} /> Leave room
+              </button>
+              {notice && (
+                <p className="ch-notice" role="status">
+                  {notice}
+                </p>
+              )}
+              {isOver && resultDismissed && (
+                <button className="ch-show-result" onClick={() => setResultDismissed(false)}>
+                  View game result <ChevronRight size={14} />
+                </button>
+              )}
+            </section>
             <div className="ch-thought">
               <div className="ch-thought-icon">
                 <Leaf size={20} strokeWidth={1.4} />
@@ -1040,77 +712,33 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
         </Modal>
       )}
 
-      {dialog && ['resign', 'draw', 'restart', 'menu'].includes(dialog) && (
-        <Modal
-          title={
-            dialog === 'resign'
-              ? 'Confirm resignation'
-              : dialog === 'draw'
-                ? 'Offer a draw'
-                : dialog === 'restart'
-                  ? 'Restart game'
-                  : 'New game'
-          }
-          onClose={() => setDialog(null)}
-        >
+      {dialog === 'resign' && (
+        <Modal title="Confirm resignation" onClose={() => setDialog(null)}>
           <div className="ch-confirm-icon">
-            {dialog === 'resign' ? (
-              <Flag size={26} />
-            ) : dialog === 'draw' ? (
-              <Handshake size={26} />
-            ) : (
-              <RotateCcw size={26} />
-            )}
+            <Flag size={26} />
           </div>
-          <h2>
-            {dialog === 'resign'
-              ? 'Ready to call it?'
-              : dialog === 'draw'
-                ? 'A draw, by agreement?'
-                : dialog === 'restart'
-                  ? 'A fresh start?'
-                  : 'A new possibility?'}
-          </h2>
+          <h2>Ready to call it?</h2>
           <p className="ch-dialog-copy">
-            {dialog === 'resign'
-              ? `${COLOR_NAMES[resigningColor]} will resign and ${COLOR_NAMES[opposite(resigningColor)]} will win.`
-              : dialog === 'draw'
-                ? `${COLOR_NAMES[opposite(game.turn)]}, do you accept the draw? Both players must agree.`
-                : dialog === 'restart'
-                  ? 'The current position and move history will be cleared. You’ll keep the same game settings.'
-                  : 'Leave this game and choose a new opponent. Your current game will be cleared.'}
+            {COLOR_NAMES[resigningColor]} will resign and {COLOR_NAMES[opposite(resigningColor)]} will win.
           </p>
           <div className="ch-dialog-actions">
             <button className="ch-secondary" onClick={() => setDialog(null)}>
-              {dialog === 'draw' ? 'Decline' : 'Keep playing'}
+              Keep playing
             </button>
             <button
               className="ch-primary"
               onClick={() => {
-                if (dialog === 'resign') {
-                  if (online) online.send.resign()
-                  else commit(resign(game, Date.now(), resigningColor), game)
-                  setDialog(null)
-                } else if (dialog === 'draw') {
-                  commit(agreeDraw(game), game)
-                  setDialog(null)
-                } else if (dialog === 'restart') restart()
-                else returnToMenu()
+                online.send.resign()
+                setDialog(null)
               }}
             >
-              {dialog === 'resign'
-                ? 'Resign game'
-                : dialog === 'draw'
-                  ? 'Accept draw'
-                  : dialog === 'restart'
-                    ? 'Restart game'
-                    : 'New game'}
+              Resign game
             </button>
           </div>
         </Modal>
       )}
 
-      {!menu && promotion && !isOver && (
+      {promotion && !isOver && (
         <Modal title="Promote pawn" locked onClose={() => {}}>
           <p className="ch-eyebrow">A WELL-EARNED PROMOTION</p>
           <h2>A new possibility.</h2>
@@ -1137,14 +765,14 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
           {!!game.options.clock && <p className="ch-setup-note">Your clock is still running.</p>}
         </Modal>
       )}
-      {!menu && onlineAway && !onlineAway.connected && (
+      {onlineAway && !onlineAway.connected && (
         <AbandonmentNotice
           name={onlineAway.name}
           awaySince={onlineAway.awaySince}
           onClaim={() => online?.send.claimWin()}
         />
       )}
-      {!menu && isOver && !resultDismissed && !moving && !dialog && (
+      {isOver && !resultDismissed && !moving && !dialog && (
         <Modal title="Game result" onClose={() => setResultDismissed(true)}>
           <div className="ch-result-icon">
             {game.winner ? <Trophy size={31} strokeWidth={1.4} /> : <Handshake size={31} strokeWidth={1.4} />}
@@ -1190,16 +818,7 @@ export default function ChessGame({ online }: { online?: OnlineChessSession }) {
                 Leave room
               </button>
             </>
-          ) : (
-            <>
-              <button className="ch-primary" onClick={restart}>
-                Play again <ArrowRight size={17} />
-              </button>
-              <button className="ch-result-menu" onClick={returnToMenu}>
-                Return to menu
-              </button>
-            </>
-          )}
+          ) : null}
         </Modal>
       )}
     </div>

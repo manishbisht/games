@@ -58,8 +58,12 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
   chess: {
     minSeats: 2,
     seatLabel: (seat) => (seat === 'w' ? 'Play as White' : 'Play as Black'),
-    // Chess gets its bot when its search moves to the server; until then the
-    // room would refuse an addBot with NOT_ALLOWED.
+    // No `hard`: measured inside workerd it costs about 1.14s of CPU a move,
+    // three quarters of a minute across a game. See backend/test/chess-budget.
+    botSkills: [
+      { id: 'easy', label: 'Easy' },
+      { id: 'medium', label: 'Medium' },
+    ],
     RoomView: lazy(() => import('../games/chess/online/ChessRoomView')),
   },
   estate: {

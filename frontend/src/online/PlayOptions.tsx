@@ -15,7 +15,7 @@ import './PlayOptions.css'
 export default function PlayOptions({
   children,
   ...room
-}: Omit<OnlinePanelProps, 'appearance'> & { children: ReactNode }) {
+}: OnlinePanelProps & { children: ReactNode }) {
   const [mode, setMode] = useState<'bot' | 'online'>('bot')
   const identity = useIdentity()
   const [name, setName] = useState(identity.name)

@@ -6,6 +6,7 @@
   "exports": {
     "./chess": "./src/chess/engine.ts",
     "./chess/types": "./src/chess/types.ts",
+    "./chess/ai": "./src/chess/ai.ts",
     "./hearth": "./src/hearth/engine.ts",
     "./hearth/types": "./src/hearth/types.ts",
     "./hearth/board": "./src/hearth/board.ts",
