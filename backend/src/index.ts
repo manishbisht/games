@@ -2,6 +2,7 @@ import { getAdapter, resolveGame } from '@games/shared/online'
 import { generateRoomCode, normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { Env } from './env'
 import { resolveIdentity } from './auth'
+import { secureRandom } from './room'
 import { allowedOrigin, corsHeaders } from './cors'
 import { resolvePresenceGame, validPresenceId } from './presence'
 
@@ -62,7 +63,9 @@ export default {
       const host = await resolveIdentity(body, env)
       if (!host) return json({ error: 'invalid identity' }, 400, origin)
       for (let attempt = 0; attempt < 5; attempt++) {
-        const code = generateRoomCode()
+        // A private room's code is its invite secret, so it comes from the same
+        // CSPRNG the dice do rather than `generateRoomCode`'s Math.random default.
+        const code = generateRoomCode(secureRandom)
         const created = await env.ROOM.getByName(code).create({
           code,
           game,
