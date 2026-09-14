@@ -4,7 +4,7 @@ import type { SeatId } from '../protocol/types'
 import { chooseAIMove } from './ai'
 import { createGame, gameReducer, motionDuration, phasePause } from './engine'
 import type { HearthOnlineAction } from './online'
-import type { Control, GameState } from './types'
+import type { Control, GameState, Mode, Rules } from './types'
 
 /** A beat of slack after the board's animation so the last step lands, not cuts. */
 const MOTION_GRACE_MS = 300
@@ -24,8 +24,63 @@ const rollDie = (ctx: Ctx) => Math.min(6, Math.max(1, Math.floor(ctx.random() * 
  */
 const seatedPlayer = (state: GameState, seats: SeatId[]) => seats[state.currentPlayer]
 
-const table = (seats: OnlineSeat[]) =>
-  createGame({ playerCount: seats.length, names: seats.map((seat) => seat.name) })
+/**
+ * The table's own settings, narrowed one field at a time. Spreading whatever
+ * arrived would let a browser hand `createGame` keys it never meant to offer —
+ * `controls`, `names` — so every field a room may choose is listed here and
+ * nothing else survives the crossing.
+ */
+export interface HearthOptions {
+  mode: Mode
+  rules?: Partial<Rules>
+}
+
+const MODES: Mode[] = ['classic', 'quick', 'custom']
+
+const modeOf = (raw: unknown): Mode =>
+  MODES.find((mode) => mode === (raw as { mode?: unknown })?.mode) ?? 'classic'
+
+const boolOf = (value: unknown): boolean | undefined => (typeof value === 'boolean' ? value : undefined)
+
+/**
+ * `createGame` clamps the piece count itself, but a non-number would reach it
+ * as `NaN` and take the whole rule set with it, so it is checked here too.
+ */
+const piecesOf = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(4, Math.max(1, Math.trunc(value)))
+    : undefined
+
+function rulesOf(raw: unknown): Partial<Rules> | undefined {
+  const source = (raw as { rules?: unknown })?.rules
+  if (!source || typeof source !== 'object') return undefined
+  const from = source as Record<string, unknown>
+  const rules: Partial<Rules> = {}
+  const pieces = piecesOf(from.piecesPerPlayer)
+  if (pieces !== undefined) rules.piecesPerPlayer = pieces
+  for (const key of ['extraTurnOnSix', 'safeSpaces', 'captures', 'exactHome'] as const) {
+    const value = boolOf(from[key])
+    if (value !== undefined) rules[key] = value
+  }
+  return Object.keys(rules).length ? rules : undefined
+}
+
+function optionsOf(raw: unknown): HearthOptions {
+  const mode = modeOf(raw)
+  // Only a custom table carries rules; classic and quick are the rules.
+  const rules = mode === 'custom' ? rulesOf(raw) : undefined
+  return rules ? { mode, rules } : { mode }
+}
+
+const table = (seats: OnlineSeat[], options: unknown) => {
+  const { mode, rules } = optionsOf(options)
+  return createGame({
+    playerCount: seats.length,
+    names: seats.map((seat) => seat.name),
+    mode,
+    rules,
+  })
+}
 
 export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
   id: 'hearth',
@@ -34,7 +89,8 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
   /** Two to four can play, so a table starts with whoever actually turned up. */
   requireFull: false,
   seatIds: (count) => Array.from({ length: count }, (_, index) => `p${index}`),
-  validateOptions: () => ({}),
+  /** Room options narrowed to the table settings this game actually offers. */
+  validateOptions: (raw) => optionsOf(raw),
 
   validateAction(raw) {
     if (!raw || typeof raw !== 'object') return null
@@ -44,7 +100,7 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
     return { kind: 'move', pieceId: action.pieceId }
   },
 
-  create: (seats) => table(seats),
+  create: (seats, options) => table(seats, options),
 
   apply(state, seat, seats, action) {
     if (state.phase === 'won') return { error: 'NOT_PLAYING', message: 'The game is already won.' }
@@ -122,5 +178,5 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
   },
 
   /** Same table, same colours: a Ludo seat carries no advantage worth rotating. */
-  rematch: (_prev, seats) => ({ state: table(seats) }),
+  rematch: (_prev, seats, options) => ({ state: table(seats, options) }),
 }

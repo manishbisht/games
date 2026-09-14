@@ -22,12 +22,31 @@ const rollDie = (ctx: Ctx) => Math.min(6, Math.max(1, Math.floor(ctx.random() * 
  */
 const seatedPlayer = (state: GameState, seats: SeatId[]) => seats[state.currentPlayer]
 
-const table = (seats: OnlineSeat[], ctx: Ctx) =>
-  createGame({
+/**
+ * The one thing a table may decide. The board's shape — how many snakes, where
+ * they start — is the board's, so it is not on offer; whether the last square
+ * has to be landed on exactly is the one rule players actually argue about.
+ */
+export interface WildriseOptions {
+  exactFinish?: boolean
+}
+
+const optionsOf = (raw: unknown): WildriseOptions => {
+  const exactFinish = (raw as { exactFinish?: unknown })?.exactFinish
+  return typeof exactFinish === 'boolean' ? { exactFinish } : {}
+}
+
+const table = (seats: OnlineSeat[], options: unknown, ctx: Ctx) => {
+  const { exactFinish } = optionsOf(options)
+  return createGame({
     playerCount: seats.length,
     names: seats.map((seat) => seat.name),
     firstPlayer: Math.floor(ctx.random() * seats.length),
+    // Left out entirely when the table said nothing, so the board's own
+    // default stands rather than being overwritten with `undefined`.
+    ...(exactFinish === undefined ? {} : { rules: { exactFinish } }),
   })
+}
 
 export const wildriseAdapter: GameAdapter<GameState, WildriseOnlineAction> = {
   id: 'wildrise',
@@ -36,15 +55,15 @@ export const wildriseAdapter: GameAdapter<GameState, WildriseOnlineAction> = {
   /** Two to four can play, so a table starts with whoever actually turned up. */
   requireFull: false,
   seatIds: (count) => Array.from({ length: count }, (_, index) => `p${index}`),
-  /** The board is the board: an online table plays the printed rules. */
-  validateOptions: () => ({}),
+  /** The board is the board; only the finish rule is the table's to set. */
+  validateOptions: (raw) => optionsOf(raw),
 
   validateAction(raw) {
     if (!raw || typeof raw !== 'object') return null
     return (raw as { kind?: unknown }).kind === 'roll' ? { kind: 'roll' } : null
   },
 
-  create: (seats, _options, ctx) => table(seats, ctx),
+  create: (seats, options, ctx) => table(seats, options, ctx),
 
   /** The die is the server's to throw, so one number lands for the whole table. */
   apply(state, seat, seats, _action, ctx) {
@@ -107,5 +126,5 @@ export const wildriseAdapter: GameAdapter<GameState, WildriseOnlineAction> = {
   },
 
   /** Same table, same colours: a seat in a race carries no advantage to rotate. */
-  rematch: (_prev, seats, _options, ctx) => ({ state: table(seats, ctx) }),
+  rematch: (_prev, seats, options, ctx) => ({ state: table(seats, options, ctx) }),
 }
