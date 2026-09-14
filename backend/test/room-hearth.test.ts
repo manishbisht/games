@@ -6,7 +6,7 @@ import type { ServerMessage } from '@games/shared/protocol'
 import type { GameState } from '@games/shared/hearth/types'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
-import { connect } from './helpers'
+import { connect, WAIT } from './helpers'
 import type { Client } from './helpers'
 
 const testEnv = env as unknown as Env
@@ -32,7 +32,7 @@ const seeNext = (client: Client, from: number, predicate: (m: RoomMessage) => bo
     const room = log.filter((m): m is RoomMessage => m.type === 'room').findLast(predicate)
     expect(room).toBeDefined()
     return room!
-  })
+  }, WAIT)
 
 /**
  * Run the beat the room is holding. The return value is deliberately not

@@ -73,9 +73,11 @@ describe('a wildrise room', () => {
     const rolled = (await readRecord(code))!.gameState as GameState
     expect(rolled.dice).toBeGreaterThanOrEqual(1)
     expect(rolled.dice).toBeLessThanOrEqual(6)
-    // Both seats are looking at the same number.
-    const seen = await host.waitRoom((m) => (m.snapshot.gameState as GameState)?.dice === rolled.dice)
-    expect((seen.snapshot.gameState as GameState).dice).toBe(rolled.dice)
+    // Both seats are looking at the same number. `Client` types its log as
+    // chess, so every other game narrows the state for itself.
+    const board = (state: unknown) => state as GameState | null
+    const seen = await host.waitRoom((m) => board(m.snapshot.gameState)?.dice === rolled.dice)
+    expect(board(seen.snapshot.gameState)!.dice).toBe(rolled.dice)
   })
 
   it('refuses a roll from the seat whose turn it is not', async () => {
