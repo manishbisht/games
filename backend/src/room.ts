@@ -27,6 +27,13 @@ const MAX_AUTO_ADVANCES = 20
 const STAND_IN_DELAY_MS = 1200
 /** How long the room pauses before a bot's decision lands, when its game has no opinion. */
 const BOT_THINK_MS = 900
+
+/**
+ * How often a room that is still playing the same bots repeats itself to the
+ * site counter. Matches a browser tab's heartbeat, so a live table keeps its
+ * row fresh the same way a live visitor does.
+ */
+const BOT_PRESENCE_REFRESH_MS = 30_000
 /**
  * How early an alarm fire may land and still count as "on time". `armAlarm`
  * always schedules at or after `autoAt`, so normal flow never comes anywhere
@@ -125,6 +132,11 @@ export class RoomDO extends DurableObject<Env> {
   // lost-update bug. Keep `load()` returning the same object identity unless
   // that concurrency story is reworked deliberately.
   private cached: RoomRecord | null | undefined
+  /**
+   * The last bot count this room told PresenceDO, and when. Purely an instance
+   * hint: losing it to eviction costs one redundant push, never correctness.
+   */
+  private lastBotPush = { at: 0, bots: -1 }
 
   private async load(): Promise<RoomRecord | null> {
     if (this.cached === undefined) {
@@ -151,6 +163,37 @@ export class RoomDO extends DurableObject<Env> {
     record.expiresAt = Date.now() + ROOM_TTL_MS
     await this.ctx.storage.put('room', record)
     await this.armAlarm(record)
+    this.pushBotPresence(record)
+  }
+
+  /**
+   * How many players this table is currently the one playing. Only while the
+   * game is actually on: bots the host parked in an open room are seats set
+   * aside, not players, and a finished game is nobody playing anything.
+   */
+  private liveBots(record: RoomRecord): number {
+    if (record.status !== 'playing') return 0
+    return record.seatIds.filter((seat) => record.seats[seat]?.bot).length
+  }
+
+  /**
+   * Tell the site's counter how many players this room is playing itself, so a
+   * bot at a table counts as somebody online — which it is.
+   *
+   * Hung off `save()` because that is the one door every mutation goes
+   * through, including each bot's own turn. Fire-and-forget for the same
+   * reason as `pushLobby`: a count being a beat stale is tolerable, a move
+   * waiting on another Durable Object is not. The throttle keeps a busy room
+   * to roughly a visitor's heartbeat rate while still reacting at once to a
+   * count that actually changed; a room with no bots never pushes at all.
+   */
+  private pushBotPresence(record: RoomRecord): void {
+    const bots = this.liveBots(record)
+    const now = Date.now()
+    const changed = bots !== this.lastBotPush.bots
+    if (!changed && (bots === 0 || now - this.lastBotPush.at < BOT_PRESENCE_REFRESH_MS)) return
+    this.lastBotPush = { at: now, bots }
+    this.ctx.waitUntil(this.env.PRESENCE.getByName('global').reportBots(record.code, record.game, bots))
   }
 
   /**
@@ -839,6 +882,10 @@ export class RoomDO extends DurableObject<Env> {
   private async expire(record: RoomRecord | null): Promise<void> {
     for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_CODES.expired, 'ROOM_EXPIRED')
     if (record?.visibility === 'public') await this.env.LOBBY.getByName('global').remove(record.code)
+    // Unlike the lobby above, this is not public-only: a private solo table
+    // against bots is exactly the kind of room that was counting. The TTL
+    // would forget it anyway, so this is promptness, not correctness.
+    if (record) await this.env.PRESENCE.getByName('global').reportBots(record.code, record.game, 0)
     this.cached = null
     await this.ctx.storage.deleteAll()
     await this.ctx.storage.deleteAlarm()
