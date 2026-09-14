@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import {
   ArrowLeft,
@@ -28,13 +28,13 @@ import {
 import { Link } from 'react-router'
 import { estateGame, hearthGame } from '../catalog'
 import { HOME, PALETTES } from '@games/shared/hearth/board'
-import { createGame, gameReducer, motionDuration, phasePause, progressFor } from '@games/shared/hearth'
-import { chooseAIMove } from '@games/shared/hearth/ai'
+import { createGame, progressFor } from '@games/shared/hearth'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { createAudio } from './game/audio'
 import type { GameConfig, GameState } from '@games/shared/hearth/types'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
+import { useBotRoom } from '../../online/useBotRoom'
 import SetupPanel from './components/SetupPanel'
 import RulesDialog from './components/RulesDialog'
 import Modal from './components/Modal'
@@ -101,14 +101,14 @@ function AbandonmentNotice({
 
 export default function HearthGame({ online }: { online?: OnlineHearthSession }) {
   const [config, setConfig] = useState(DEFAULT_CONFIG)
-  const [localState, dispatch] = useReducer(gameReducer, DEFAULT_CONFIG, createGame)
-  // Online the room is the only source of truth: the reducer above never runs,
-  // and the table is already under way by the time this component mounts.
-  const state = online ? online.state : localState
-  const [localStarted, setStarted] = useState(false),
-    [session, setSession] = useState(0)
-  const started = online ? true : localStarted
-  const [dialog, setDialog] = useState<'rules' | 'new' | 'settings' | null>(null)
+  // The board behind the setup panel. It is never played: choosing a table
+  // creates a room, and the room deals the real one.
+  const preview = useMemo(() => createGame(config), [config])
+  // The room is the only source of a live table — there is no local game left
+  // to be the other half of this.
+  const state = online ? online.state : preview
+  const started = Boolean(online)
+  const [dialog, setDialog] = useState<'rules' | 'settings' | null>(null)
   const [muted, setMuted] = useState(true),
     [paused, setPaused] = useState(false),
     [winDismissed, setWinDismissed] = useState(false)
@@ -117,12 +117,10 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   const [audio] = useState(createAudio)
   const board = useRef<BoardControls>(null)
-  const turnSchedule = useRef<{ state: GameState; reduced: boolean; remaining: number } | null>(null)
   const soundedState = useRef<GameState | null>(null)
   const player = state.players[state.currentPlayer]
-  const human = player.control === 'human'
-  /** Whose inputs this browser is allowed to make: its own seat online, the shared one locally. */
-  const myTurn = online ? online.mySeat === player.id : human
+  /** Whose inputs this browser is allowed to make: only ever its own seat. */
+  const myTurn = Boolean(online) && online!.mySeat === player.id
   // Online every fresh game shows its own result — a rematch arrives as a new
   // state rather than through the local restart that would have cleared this.
   const [wasWon, setWasWon] = useState(state.phase === 'won')
@@ -134,15 +132,13 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   const roll = useCallback(() => {
     if (active && state.phase === 'roll' && myTurn) {
       if (!muted) audio.unlock()
-      if (online) online.send.roll()
-      else dispatch({ type: 'ROLL_START' })
+      online?.send.roll()
     }
   }, [active, state.phase, myTurn, muted, audio, online])
   const select = useCallback(
     (pieceId: string) => {
       if (!active || !myTurn) return
-      if (online) online.send.move(pieceId)
-      else dispatch({ type: 'MOVE', pieceId })
+      online?.send.move(pieceId)
     },
     [active, myTurn, online],
   )
@@ -153,46 +149,6 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     media.addEventListener('change', listener)
     return () => media.removeEventListener('change', listener)
   }, [])
-  useEffect(() => {
-    // Online every one of these beats is the server's to keep, so that the whole
-    // table sees the same die at the same moment.
-    if (online) return
-    let callback: (() => void) | undefined,
-      delay = 0
-    if (state.phase === 'rolling') {
-      callback = () => dispatch({ type: 'ROLL_RESULT', value: Math.floor(Math.random() * 6) + 1 })
-      delay = phasePause('rolling', reduced)
-    } else if (state.phase === 'moving') {
-      callback = () => dispatch({ type: 'ANIMATION_DONE' })
-      delay = motionDuration(state, reduced)
-    } else if (state.phase === 'pass') {
-      callback = () => dispatch({ type: 'NEXT_TURN' })
-      delay = phasePause('pass', reduced)
-    } else if (state.phase === 'roll' && !human) {
-      callback = () => dispatch({ type: 'ROLL_START' })
-      delay = phasePause('aiRoll', reduced)
-    } else if (state.phase === 'choose' && (!human || state.legalMoves.length === 1)) {
-      callback = () => {
-        const move = human ? state.legalMoves[0] : chooseAIMove(state, player.control, Math.random())
-        if (move) dispatch({ type: 'MOVE', pieceId: move.pieceId })
-      }
-      delay = phasePause('aiChoose', reduced)
-    }
-    if (!callback) {
-      turnSchedule.current = null
-      return
-    }
-    if (turnSchedule.current?.state !== state || turnSchedule.current.reduced !== reduced)
-      turnSchedule.current = { state, reduced, remaining: delay }
-    if (!active) return
-    const schedule = turnSchedule.current,
-      startedAt = performance.now()
-    const timer = window.setTimeout(callback, schedule.remaining)
-    return () => {
-      window.clearTimeout(timer)
-      schedule.remaining = Math.max(0, schedule.remaining - (performance.now() - startedAt))
-    }
-  }, [online, active, state, reduced, human, player.control])
   useEffect(() => () => audio.dispose(), [audio])
   useEffect(() => {
     if (muted || !active) return
@@ -203,8 +159,9 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     if (fresh && (state.phase === 'choose' || state.phase === 'pass')) audio.play('land')
     if (state.phase === 'moving' && state.motion) {
       const travel = reduced ? 60 : state.motion.steps.length * 165
-      const offset =
-        motionDuration(state, reduced) - (turnSchedule.current?.remaining ?? motionDuration(state, reduced))
+      // The server paces the walk and a fresh state always starts it from the
+      // top, so there is never a part-played animation to catch up with.
+      const offset = 0
       state.motion.steps.forEach((_, i) => {
         const at = reduced ? 0 : i * 165
         if ((!reduced || i === 0) && at >= offset)
@@ -245,20 +202,20 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [roll])
+  const room = useBotRoom('hearth', hearthGame.path)
   function start(next: GameConfig) {
     if (!muted) audio.unlock()
     setConfig(next)
-    dispatch({ type: 'NEW_GAME', config: next })
-    setSession((s) => s + 1)
-    setStarted(true)
-    setDialog(null)
-    setPaused(false)
-    setElapsed(0)
-    setWinDismissed(false)
+    const count = Math.max(2, Math.min(4, next.playerCount ?? 4))
+    void room.start({
+      seats: count,
+      // Seat 0 is yours; the controls the panel collected describe the rest.
+      bots: Array.from({ length: count - 1 }, (_, i) => next.controls?.[i + 1] ?? 'medium'),
+      options: { mode: next.mode ?? 'classic', rules: next.rules },
+    })
   }
-  function preview(next: GameConfig) {
+  function onPreview(next: GameConfig) {
     setConfig(next)
-    dispatch({ type: 'NEW_GAME', config: next })
   }
   function toggleSound() {
     if (muted) {
@@ -391,7 +348,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
             <BoardScene
               ref={board}
               running={!started || active}
-              key={`${session}-${state.players.length}-${state.rules.piecesPerPlayer}`}
+              key={`${state.players.length}-${state.rules.piecesPerPlayer}`}
               state={state}
               onSelect={select}
             />
@@ -438,7 +395,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           <aside className="hh-sidebar" aria-label="Game controls">
             {!started ? (
               <>
-                <SetupPanel initialConfig={config} onStart={start} onPreview={preview} />
+                <SetupPanel initialConfig={config} onStart={start} onPreview={onPreview} />
               </>
             ) : (
               <>
@@ -677,17 +634,6 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                 Leave room
               </button>
             </div>
-          ) : started ? (
-            <div className="hh-game-actions">
-              <button onClick={() => setPaused(!paused)}>
-                {paused ? <Play size={14} /> : <Pause size={14} />} {paused ? 'Resume' : 'Pause'}
-              </button>
-              <span />
-              <button onClick={() => setDialog('new')}>
-                <RotateCcw size={14} />
-                New game
-              </button>
-            </div>
           ) : (
             <p>No downloads. Just good company.</p>
           )}
@@ -716,11 +662,6 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
       </footer>
 
       {dialog === 'rules' && <RulesDialog rules={state.rules} onClose={() => setDialog(null)} />}
-      {dialog === 'new' && (
-        <Modal title="Start a new game" onClose={() => setDialog(null)}>
-          <SetupPanel initialConfig={config} onStart={start} />
-        </Modal>
-      )}
       {dialog === 'settings' && (
         <Modal title="Make yourself comfortable" onClose={() => setDialog(null)}>
           <div className="hh-eyebrow">YOUR TABLE</div>
@@ -826,22 +767,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                 Leave room
               </button>
             </>
-          ) : (
-            <>
-              <button className="hh-primary" onClick={() => start(config)}>
-                Play again <ArrowRight size={17} />
-              </button>
-              <button
-                className="hh-text-button"
-                onClick={() => {
-                  setWinDismissed(true)
-                  setDialog('new')
-                }}
-              >
-                Change the company
-              </button>
-            </>
-          )}
+          ) : null}
         </Modal>
       )}
     </div>
