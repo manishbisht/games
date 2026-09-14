@@ -30,58 +30,41 @@ test('Prism opens from the collection, renders its table, and has working settin
   expect(errors).toEqual([])
 })
 
-test('a full bot round plays, resolves wild cards, finishes, and restarts', async ({ page }) => {
-  test.setTimeout(180000)
+test('a bot round is dealt by the server, and the bot plays without this tab', async ({ page }) => {
+  test.setTimeout(120000)
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.addInitScript(() => {
-    let seed = 42
-    Math.random = () => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-      return seed / 4294967296
-    }
-  })
+  // The deck is shuffled and every bot's card chosen on the server, so there is
+  // no seeding this from here — which is the point. A whole round played to a
+  // winner is covered where the rules now live: shared/src/prism/engine.test.ts
+  // and backend/test/room-prism.test.ts.
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/#/prism')
   await page.getByRole('button', { name: 'Mute sound', exact: true }).click()
   await page.getByRole('button', { name: '2 players', exact: true }).click()
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page.getByRole('switch', { name: 'Faster AI turns' }).click()
-  await page.getByRole('button', { name: 'All set' }).click()
+  await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Let’s play', exact: true }).click()
-  await expect(page.locator('.pr-card')).toHaveCount(7)
-  const result = page.getByRole('dialog', { name: 'Round result', exact: true })
+  await expect(page).toHaveURL(/\/prism\/room\/[A-Z2-9]{6}$/, { timeout: 20000 })
+  // Dealt on arrival: a solo table has nobody to wait for.
+  await expect(page.getByRole('heading', { name: /^Room / })).toHaveCount(0)
+  await expect(page.locator('.pr-card')).toHaveCount(7, { timeout: 20000 })
+
+  // Your hand is the only one this browser holds. The bot's is a count.
+  await expect(page.getByText('Jules')).toBeVisible()
+  await expect(page.locator('.pr-opponent-info')).toContainText('cards')
+
+  // Take a turn however the table allows, and let the bot answer it.
   const turnAction = page.getByRole('button', { name: /^(Draw card|Draw \d+|Keep & pass)$/ })
-  let plays = 0
-  for (let action = 0; action < 300; action++) {
-    await expect
-      .poll(async () => (await result.isVisible()) || (await turnAction.isEnabled()), { timeout: 15000 })
-      .toBe(true)
-    if (await result.isVisible()) break
-    const call = page.locator('.pr-hand-toolbar .pr-call')
-    if (await call.isEnabled()) await call.click()
-    const legal = page.locator('.pr-card:enabled')
-    if (await legal.count()) {
-      await legal.first().focus()
-      await page.keyboard.press('Enter')
-      await page.getByRole('button', { name: 'Play card', exact: true }).click()
-      if (await page.getByRole('dialog', { name: 'Choose a color', exact: true }).count())
-        await page.getByRole('button', { name: 'Choose red', exact: true }).click()
-      plays++
-    } else {
-      await turnAction.click()
-    }
-  }
-  await expect(result).toContainText('wins!')
-  expect(plays).toBeGreaterThan(0)
+  await expect
+    .poll(async () => await turnAction.isEnabled(), { timeout: 30000 })
+    .toBe(true)
+  await turnAction.click()
+  // The server takes the seat nobody is behind, and the table says what it did.
+  await expect(page.locator('.pr-feed, .pr-table-log')).toContainText(/Jules/, { timeout: 30000 })
+  await page.screenshot({ path: 'test-results/prism-bot-room.png', fullPage: true })
+
+  // The device is never passed: every hand but yours lives on the server.
   await expect(page.getByRole('dialog', { name: 'Pass the device', exact: true })).toHaveCount(0)
-  await page.screenshot({ path: 'test-results/prism-round-result.png', fullPage: true })
-  await page.getByRole('button', { name: 'Play again', exact: true }).click()
-  await expect(result).toHaveCount(0)
-  await expect(page.locator('.pr-card')).toHaveCount(7)
-  await page.getByRole('button', { name: 'Leave game', exact: true }).click()
-  await page.getByRole('button', { name: 'Return to menu', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Play vs bot', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 
