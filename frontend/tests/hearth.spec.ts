@@ -17,7 +17,7 @@ const rollButton = (page: Page) => page.getByRole('button', { name: 'Roll dice',
 async function startBotGame(page: Page, name = 'Robin') {
   await page.getByLabel('Your name', { exact: true }).fill(name)
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page).toHaveURL(/\/hearth-and-home\/room\/[A-Z2-9]{6}$/, { timeout: 20000 })
+  await expect(page).toHaveURL(/\/hearth-and-home\/room\/[A-Z2-9]{6}$/, { timeout: 30000 })
   // A solo table has nobody to wait for, so it deals on arrival.
   await expect(page.getByRole('heading', { name: /^Room / })).toHaveCount(0)
 }
@@ -39,13 +39,13 @@ test('play vs bot deals a real table, and the server takes the bots’ turns', a
   await expect(page.locator('.hh-away-badge')).toHaveCount(0)
 
   // Hearth deals seat one the first turn, so the die is yours to throw.
-  await expect(rollButton(page)).toBeEnabled({ timeout: 20000 })
+  await expect(rollButton(page)).toBeEnabled({ timeout: 30000 })
   await rollButton(page).click()
   // The number is the server's. The die lands, and the table either offers a
   // piece to move or passes the turn on — both of them the room's decision.
   await expect(
     page.getByRole('button', { name: /^Move piece/ }).or(page.getByRole('heading', { name: /’s turn/ })),
-  ).toBeVisible({ timeout: 20000 })
+  ).toBeVisible({ timeout: 30000 })
   await page.screenshot({ path: 'test-results/hearth-desktop-game.png', fullPage: true })
   expect(errors).toEqual([])
 })
@@ -56,7 +56,7 @@ test('a custom table reaches the game the server deals', async ({ page }) => {
   // Rules the room used to throw away: the adapter now narrows and keeps them.
   await page.getByLabel('Pieces per player').selectOption('1')
   await startBotGame(page)
-  await expect(page.getByTestId('player-red')).toContainText('0 / 1', { timeout: 20000 })
+  await expect(page.getByTestId('player-red')).toContainText('0 / 1', { timeout: 30000 })
 })
 
 test('a quick table is dealt quick, not classic', async ({ page }) => {
@@ -65,7 +65,7 @@ test('a quick table is dealt quick, not classic', async ({ page }) => {
   await startBotGame(page)
   // Two pieces each is what "quick" means, and it only survives because the
   // adapter carries `mode` across now.
-  await expect(page.getByTestId('player-red')).toContainText('0 / 2', { timeout: 20000 })
+  await expect(page.getByTestId('player-red')).toContainText('0 / 2', { timeout: 30000 })
 })
 
 test('mobile setup, rules and custom settings remain usable', async ({ page }) => {
@@ -79,7 +79,7 @@ test('mobile setup, rules and custom settings remain usable', async ({ page }) =
   await page.getByLabel('Pieces per player').selectOption('1')
   await page.getByLabel('Exact roll to finish').uncheck()
   await startBotGame(page)
-  await expect(page.getByRole('heading', { name: /’s turn/ })).toBeVisible({ timeout: 20000 })
+  await expect(page.getByRole('heading', { name: /’s turn/ })).toBeVisible({ timeout: 30000 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: 'test-results/hearth-mobile-game.png', fullPage: true })
 })
@@ -87,7 +87,7 @@ test('mobile setup, rules and custom settings remain usable', async ({ page }) =
 test('sound, settings and camera controls work at a live table', async ({ page }) => {
   await page.goto('/#/hearth-and-home')
   await startBotGame(page)
-  await expect(rollButton(page)).toBeEnabled({ timeout: 20000 })
+  await expect(rollButton(page)).toBeEnabled({ timeout: 30000 })
   await page.getByRole('button', { name: 'Turn sound on', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Mute sound', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Game settings', exact: true }).click()

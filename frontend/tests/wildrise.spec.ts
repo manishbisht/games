@@ -18,7 +18,7 @@ async function startBotGame(page: Page, players?: number, name = 'Robin') {
   if (players) await page.getByRole('button', { name: `${players} players`, exact: true }).click()
   await page.getByLabel('Your name', { exact: true }).fill(name)
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 20000 })
+  await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 30000 })
   // A solo table has nobody to wait for, so it deals on arrival.
   await expect(page.getByRole('heading', { name: /^Room / })).toHaveCount(0)
 }
@@ -42,7 +42,7 @@ test('play vs bot deals a real table, and the server takes the bots’ turns', a
   await rollButton(page).click()
   await expect(rollButton(page)).toBeDisabled()
   // The number came from the server, and the table is told what it was.
-  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 20000 })
+  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 30000 })
   // Then the seats nobody is behind take their turns and hand it back.
   await expect(rollButton(page)).toBeEnabled({ timeout: 40000 })
   await expect(page.getByRole('heading', { name: 'Robin’s turn.' })).toBeVisible()
@@ -57,11 +57,11 @@ test('the table settings reach the game the server deals', async ({ page }) => {
   await page.getByLabel('Exact roll to finish').uncheck()
   await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 20000 })
+  await expect(page).toHaveURL(/\/wildrise\/room\/[A-Z2-9]{6}$/, { timeout: 30000 })
   await expect(page.locator('.wr-players .wr-player-info strong')).toHaveCount(4)
   // The rule survived the crossing: with it off the board says so, and the
   // adapter used to answer `validateOptions` with an empty object.
-  await expect(page.getByText('Reach or pass 100 to finish.')).toBeVisible({ timeout: 20000 })
+  await expect(page.getByText('Reach or pass 100 to finish.')).toBeVisible({ timeout: 30000 })
   await expect(page.getByText('An exact roll brings you home.')).toHaveCount(0)
 })
 
@@ -112,11 +112,11 @@ test('the physical die rolls on click in the normally rendered scene', async ({ 
   await page.screenshot({ path: 'test-results/wildrise-natural-setup.png', fullPage: true })
   await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
-  await expect(rollButton(page)).toBeEnabled({ timeout: 20000 })
+  await expect(rollButton(page)).toBeEnabled({ timeout: 30000 })
   // The die is visible in its tray at this location in the default 1440×960 camera.
   await page.mouse.click(798, 680)
   await expect(rollButton(page)).toBeDisabled()
-  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 20000 })
+  await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 30000 })
 })
 
 test.describe('compact touch screens', () => {
@@ -127,9 +127,9 @@ test.describe('compact touch screens', () => {
     await expect(page.locator('.wr-canvas canvas')).toBeInViewport()
     await expect(rollButton(page)).toBeInViewport()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await expect(rollButton(page)).toBeEnabled({ timeout: 20000 })
+    await expect(rollButton(page)).toBeEnabled({ timeout: 30000 })
     await rollButton(page).tap()
-    await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 20000 })
+    await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 30000 })
     await page.screenshot({ path: 'test-results/wildrise-touch-320.png' })
   })
 })

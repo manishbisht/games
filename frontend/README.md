@@ -9,7 +9,7 @@ A React frontend for original 3D tabletop games, using React, TypeScript, Three.
 - `/#/estate`: play **Estate**, the property game.
 - `/#/chess`: play **Gambit**, the 3D chess game. `/#/Gambit` redirects here.
 - `/#/prism`: play **Prism**, the 3D color-matching card game. `/#/uno` and `/#/Prism` redirect here.
-- `/#/wildrise`: play **Wildrise**, the snakes-and-ladders game. `/#/snakes-and-ladders` and `/#/SnakesAndLadders` redirect here. Local play only — Wildrise has no online room yet.
+- `/#/wildrise`: play **Wildrise**, the snakes-and-ladders game. `/#/snakes-and-ladders` and `/#/SnakesAndLadders` redirect here.
 - `/#/Ludo` and `/#/Hearth` redirect to `/#/hearth-and-home`; `/#/Monopoly` redirects to `/#/estate`, so existing bookmarks keep working.
 - Unknown hash routes return to the homepage. Every game includes an **All games** link back to the collection.
 
@@ -19,7 +19,7 @@ The route path is `/hearth-and-home` or `/estate`; `HashRouter` adds the `#` in 
 
 An original physical-looking tabletop game with a walnut slab, ivory tiles, four garden courts, lacquer miniatures, brass details, soft shadows and an orbiting 3D camera. Board artwork, piece designs, branding and synthesized sounds are generated locally; there are no downloaded Ludo assets.
 
-Open `http://localhost:5173/#/hearth-and-home`, choose 2–4 players and press **Start game**. Each seat can be a local player or Easy, Medium or Hard AI. The default table is one human with three AI opponents. Set every seat to **Local player** for pass-and-play, or every seat to AI to watch a game.
+Open `http://localhost:5173/#/hearth-and-home`, choose 2–4 players and press **Start game**. That creates a room, fills the other seats with Easy, Medium or Hard bots, and deals — the server plays the bots and the browser plays none of them. To play with people instead, switch to **Play online** and share the room's link.
 
 - **Classic:** four pieces per player.
 - **Quick:** two pieces per player.
@@ -37,15 +37,15 @@ This milestone supports local play and AI, plus online rooms (see Multiplayer & 
 
 ## Gambit / Chess
 
-Open `http://localhost:5173/#/chess`. Choose **Play local** for two people on the same device or **Play vs AI** for a computer opponent. AI offers either color and Easy, Medium, and Hard levels. The clock is optional; enabling it gives each side ten minutes.
+Open `http://localhost:5173/#/chess`. Gambit is played in a room: create one and share its link, or join an open table from the lobby. It is the one game with no bot yet — its search has still to move to the server — so it takes two people for now.
 
 Click or tap a piece and then a marked destination. Filled dots indicate ordinary moves and rings indicate captures. Drag to orbit, scroll or pinch to zoom, and use the board toolbar to flip, reset, or view from above. Focus the board with Tab, use arrow keys to explore from e2, and press Enter or Space to select and move; Escape deselects. A functional 2D board is available if WebGL fails.
 
-All legal movement, check restrictions, castling, en passant, promotion, checkmate, stalemate, repetition, the fifty-move rule, and insufficient material use [chess.js](https://jhlywa.github.io/chess.js/). This casual version automatically ends games on threefold repetition or fifty moves rather than requiring a claim. Local players can undo a move or agree to a draw; resignation and restart require confirmation. Promotion offers four original 3D piece previews. Clocks continue through dialogs, promotion, background tabs, and reloads. Undo restores the complete prior position, capture list, special-move rights, and clocks.
+All legal movement, check restrictions, castling, en passant, promotion, checkmate, stalemate, repetition, the fifty-move rule, and insufficient material use [chess.js](https://jhlywa.github.io/chess.js/). This casual version automatically ends games on threefold repetition or fifty moves rather than requiring a claim. Resignation requires confirmation. Promotion offers four original 3D piece previews. Clocks continue through dialogs, promotion, background tabs, and reloads. Undo restores the complete prior position, capture list, special-move rights, and clocks.
 
-The immutable state adapter is `src/games/chess/game/engine.ts`. It replays the full move line to preserve repetition counts; FEN alone is insufficient. State and preferences save locally under `gambit-game-v1` and `gambit-preferences-v1`, with validation on restore. React coordinates interaction, while `scene/` only renders positions, indicators, and animations. All board and piece geometry is original and procedural. The worker AI uses bounded iterative alpha-beta search and positional/material evaluation; Hard is the strongest included level, not a tournament-strength engine. It can be replaced independently of the rules and rendering.
+The immutable engine is `shared/src/chess/engine.ts`, shared with the server. It replays the full move line to preserve repetition counts; FEN alone is insufficient. Preferences save locally under `gambit-preferences-v1`, with validation on restore. React coordinates interaction, while `scene/` only renders positions, indicators, and animations. All board and piece geometry is original and procedural.
 
-Walnut and marble sets, synthesized move sounds, higher contrast, and reduced motion are available in Settings. Additional clock formats are outside this milestone. Local play needs no account or backend; Gambit also plays online (see Multiplayer & deployment below), which uses a lightweight backend but never requires an account.
+Walnut and marble sets, synthesized move sounds, higher contrast, and reduced motion are available in Settings. Clocks are outside this milestone online. Playing needs the backend but never an account (see Multiplayer & deployment below).
 
 ## Monopoly / Estate
 
@@ -53,7 +53,7 @@ A playable 3D property game for 2–4 players. Built with React, TypeScript, Thr
 
 ## Prism
 
-Open `http://localhost:5173/#/prism`, choose 2–4 players and select **Let’s play**. Play against one to three AI opponents on Easy, Medium or Hard, or choose **Local friends** to pass the device. Local hands remain hidden until the next player acknowledges the handoff.
+Open `http://localhost:5173/#/prism`, choose 2–4 players and select **Let’s play**. That creates a room and deals a table against one to three bots on Easy, Medium or Hard. Every hand but yours lives on the server and is redacted before the snapshot leaves it, so there is nothing to hide from you and nothing for you to peek at.
 
 Match the active color, number or action. Select a highlighted card, then tap it again or use **Play card**. **Draw card** takes one card; if it matches, play that card or **Keep & pass**. Wild cards open a color chooser. **Pause** skips, **Turn** reverses (and skips in two-player games), **Take Two** and **Take Four** draw penalties and skip the recipient. Take Four is legal only without another card of the active color. The 108-card deck uses Fisher–Yates shuffling and a numbered opening discard. Used cards recycle when the draw pile runs out, preserving the top discard.
 
@@ -76,7 +76,11 @@ Open the printed local address and choose a game from the homepage, or go direct
 
 ## Multiplayer & deployment
 
-Hearth & Home, Estate, Gambit, and Prism play online. From a game's page, create a room — private, or listed in the public lobby for anyone to find — and share its six-character code or invite link, or join an open table straight from the lobby. Playing online only ever needs a name: sign in as a guest, or optionally sign in with Clerk so your identity carries across sessions. Wildrise stays local-only for now; it has no online room.
+**Every game is played on the server**, including a game against bots. Choosing "Play vs bot" creates a private room, seats you, fills the rest with bots and deals — so a bot game and a game with friends are one program with the same room at the end of both. A bot is a seat the room takes the turns for, not something the browser simulates.
+
+From a game's page you can also create a room to share — private, or listed in the public lobby for anyone to find — and pass on its six-character code or invite link, or join an open table straight from the lobby. A host waiting on someone who never turned up can fill the empty seats with bots and start anyway. Playing only ever needs a name: as a guest, or optionally with Clerk so your identity carries across sessions.
+
+A room is resumable from its link for 24 hours. There is no offline play: every move, including a bot's, needs the network.
 
 For Clerk/Cloudflare setup and deployment instructions, see [Deployment & setup](../docs/deployment.md).
 
@@ -165,6 +169,6 @@ npm run build
 npm run test:e2e
 ```
 
-The browser suite starts or reuses the dev server at `http://127.0.0.1:5173` and uses an installed Google Chrome. It checks the homepage, canonical game links, legacy redirects, direct-link refreshes, return navigation, mobile layout, and page titles. Game coverage includes Hearth setup, human rolls and nest entry, AI-versus-AI victory/replay, custom rules, pause/resume, audio controls and camera controls. Estate's purchase, autosave, trade and bankruptcy regressions remain covered. Screenshots are written to the ignored `test-results/` directory. Unit tests exercise rule boundaries, invalid actions, AI strategy, and complete deterministic games without loading a renderer.
+The browser suite starts or reuses the dev server at `http://127.0.0.1:5173` and uses an installed Google Chrome. It checks the homepage, canonical game links, legacy redirects, direct-link refreshes, return navigation, mobile layout, and page titles. Game coverage is what a browser is responsible for: each setup panel, the table it asks the server for, a bot's turn arriving, and the table settings surviving the crossing. The rules themselves — a game played to victory, trades, bankruptcies, redacted hands — are covered where they run, in `shared/` and `backend/`. Screenshots are written to the ignored `test-results/` directory. Unit tests exercise rule boundaries, invalid actions, AI strategy, and complete deterministic games without loading a renderer.
 
-The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. Every game runs entirely locally without an account or backend; Hearth & Home, Estate, Gambit, and Prism can also be played online with a lightweight backend and no required account (see Multiplayer & deployment above). Wildrise is local-only for now.
+The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. Every game needs the backend, bots included, and none of them need an account (see Multiplayer & deployment above).

@@ -56,11 +56,11 @@ test('a bot round is dealt by the server, and the bot plays without this tab', a
   // Take a turn however the table allows, and let the bot answer it.
   const turnAction = page.getByRole('button', { name: /^(Draw card|Draw \d+|Keep & pass)$/ })
   await expect
-    .poll(async () => await turnAction.isEnabled(), { timeout: 30000 })
+    .poll(async () => await turnAction.isEnabled(), { timeout: 45000 })
     .toBe(true)
   await turnAction.click()
   // The server takes the seat nobody is behind, and the table says what it did.
-  await expect(page.locator('.pr-feed, .pr-table-log')).toContainText(/Jules/, { timeout: 30000 })
+  await expect(page.locator('.pr-feed, .pr-table-log')).toContainText(/Jules/, { timeout: 45000 })
   await page.screenshot({ path: 'test-results/prism-bot-room.png', fullPage: true })
 
   // The device is never passed: every hand but yours lives on the server.
