@@ -2,6 +2,7 @@ import { env, runInDurableObject, SELF } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { registerAdapter } from '@games/shared/online'
 import type { GameAdapter } from '@games/shared/online/adapter'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type { GameId } from '@games/shared/protocol'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
@@ -212,10 +213,71 @@ describe('a bot is not an absent human', () => {
     expect(record!.seats.p1?.disconnectedAt).toBeUndefined()
   })
 
-  it('refuses a claim aimed at a bot', async () => {
+  it('leaves a table of one person and one bot with nobody to claim against', async () => {
     const { host } = await botGame()
     host.send({ type: 'claim' })
     await host.expectError('CLAIM_REJECTED')
+    // The message is the discriminating part. With the guard the bot is not an
+    // opponent at all, so the claim has no target; without it the bot IS a
+    // target and the refusal would be "still here" instead. Both refuse, so a
+    // bare CLAIM_REJECTED assertion would pass either way.
+    const error = host.messages.findLast((m) => m.type === 'error')
+    expect(error).toMatchObject({ message: 'There is no opponent to claim against.' })
+  })
+
+  it('grants a claim against an absent person while a bot sits at the same table', async () => {
+    // The defect this pins: `targets` falls back to `others` when the game is
+    // waiting on the claimant, so an unguarded bot lands in the target list,
+    // trips `!stored.disconnectedAt` — a bot never has one — and rejects the
+    // whole claim. The absent player would then hold the table forever.
+    const guestId = crypto.randomUUID()
+    const res = await SELF.fetch('https://api.test/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ game: 'wildrise', visibility: 'private', name: 'Ann', guestId, seats: 3 }),
+    })
+    const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', guestId)
+    host.send({ type: 'sit', seat: 'p0' })
+    const away = await connect(code)
+    away.join('Ben')
+    away.send({ type: 'sit', seat: 'p1' })
+    const third = await connect(code)
+    third.join('Cara')
+    third.send({ type: 'sit', seat: 'p2' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.p2))
+    host.send({ type: 'start' })
+    await host.waitRoom((m) => m.snapshot.status === 'playing')
+
+    away.ws.close()
+    await vi.waitFor(async () => {
+      const record = await readRecord(code)
+      expect(record!.seats.p1?.disconnectedAt).toBeDefined()
+    })
+    await patchRecord(code, (record) => {
+      // Long enough ago to be claimable, and the turn is the claimant's own —
+      // which is what makes `waitingOn` name nobody else and forces the
+      // fallback to `others`.
+      record.seats.p1!.disconnectedAt = Date.now() - CLAIM_WIN_AFTER_MS - 60_000
+      record.seats.p2 = {
+        player: { id: 'bot:p2', name: 'Cleo', isGuest: true },
+        wantsRematch: false,
+        bot: { skill: 'casual' },
+      }
+      const state = record.gameState as { currentPlayer: number; phase: string }
+      state.currentPlayer = 0
+      state.phase = 'ready'
+    })
+
+    host.send({ type: 'claim' })
+    await vi.waitFor(async () => {
+      const record = await readRecord(code)
+      expect(record!.seats.p1?.abandoned).toBe(true)
+    })
+    const record = await readRecord(code)
+    // The bot was never a target, so it is untouched by the claim.
+    expect(record!.seats.p2?.abandoned).toBeUndefined()
   })
 
   it('does not wait on a bot to agree to a rematch', async () => {
