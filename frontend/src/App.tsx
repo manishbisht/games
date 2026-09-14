@@ -3,6 +3,7 @@ import { matchPath, Navigate, Route, Routes, useLocation } from 'react-router'
 import { games } from './games/catalog'
 import { PlayersOnlineProvider } from './online/playersOnline'
 import HomePage from './pages/HomePage'
+import ChunkErrorBoundary from './ChunkErrorBoundary'
 
 const RoomPage = lazy(() => import('./online/RoomPage'))
 
@@ -30,25 +31,27 @@ export default function App() {
 
   return (
     <PlayersOnlineProvider game={game?.id}>
-      <Suspense fallback={<p role="status">Loading game…</p>}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          {games.map(({ path, Component }) => (
-            <Route key={path} path={path} element={<Component />} />
-          ))}
-          {games.flatMap(({ path, aliases }) =>
-            aliases.map((alias) => (
-              <Route key={alias} path={alias} element={<Navigate to={path} replace />} />
-            )),
-          )}
-          {games
-            .filter((entry) => entry.online)
-            .map(({ id, path }) => (
-              <Route key={`${path}/room`} path={`${path}/room/:code`} element={<RoomPage game={id} />} />
+      <ChunkErrorBoundary>
+        <Suspense fallback={<p role="status">Loading game…</p>}>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            {games.map(({ path, Component }) => (
+              <Route key={path} path={path} element={<Component />} />
             ))}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+            {games.flatMap(({ path, aliases }) =>
+              aliases.map((alias) => (
+                <Route key={alias} path={alias} element={<Navigate to={path} replace />} />
+              )),
+            )}
+            {games
+              .filter((entry) => entry.online)
+              .map(({ id, path }) => (
+                <Route key={`${path}/room`} path={`${path}/room/:code`} element={<RoomPage game={id} />} />
+              ))}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </ChunkErrorBoundary>
     </PlayersOnlineProvider>
   )
 }

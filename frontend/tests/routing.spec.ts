@@ -88,3 +88,14 @@ test('the collection is usable on mobile and after visiting both games', async (
   await page.setViewportSize({ width: 1440, height: 960 })
   await page.screenshot({ path: 'test-results/collection-desktop.png', fullPage: true })
 })
+
+test('a game whose code never arrives offers a way out, not a spinner', async ({ page }) => {
+  // The real cause is an old tab: an index.html from the last deploy asking for
+  // chunks this one no longer has. A rejected lazy import rejects for good, so
+  // without a boundary the player waits on "Loading game…" forever.
+  await page.route('**/HearthGame*', (route) => route.abort())
+  await page.goto('/#/hearth-and-home')
+  await expect(page.getByRole('heading', { name: 'This game didn’t load.' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reload', exact: true })).toBeVisible()
+  await expect(page.getByText('Loading game…')).toHaveCount(0)
+})
