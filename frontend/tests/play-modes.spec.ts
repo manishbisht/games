@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { createGame, gameReducer } from '@games/shared/estate'
 
 for (const [id, path] of [
   ['hearth', '/hearth-and-home'],
@@ -45,23 +44,6 @@ for (const [id, path] of [
     await expect(page).toHaveURL(`/#${path}`)
   })
 }
-
-test('an old Estate multiplayer save returns to setup instead of resuming local play', async ({ page }) => {
-  const saved = gameReducer(createGame(), {
-    type: 'START',
-    players: [
-      { name: 'Alex', isBot: false },
-      { name: 'Sam', isBot: false },
-    ],
-    mode: 'classic',
-    seed: 42,
-  })
-  await page.addInitScript((state) => localStorage.setItem('estate-game-v1', JSON.stringify(state)), saved)
-  await page.goto('/#/estate')
-  await expect(page.getByRole('button', { name: /^Start game/ })).toBeVisible()
-  await page.getByRole('button', { name: /^Start game/ }).click()
-  await expect(page.getByRole('button', { name: 'Play vs bot', exact: true })).toBeVisible()
-})
 
 for (const [id, path] of [
   ['hearth', '/hearth-and-home'],

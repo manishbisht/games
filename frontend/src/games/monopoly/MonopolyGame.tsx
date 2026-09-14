@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import {
   ArrowLeft,
@@ -32,18 +32,10 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router'
 import { estateGame } from '../catalog'
+import { useBotRoom } from '../../online/useBotRoom'
 import { BOARD, money } from '@games/shared/estate/board'
-import {
-  botAcceptsTrade,
-  botAction,
-  createGame,
-  debtCapacity,
-  gameReducer,
-  netWorth,
-  ownedSpaces,
-} from '@games/shared/estate'
+import { createGame, debtCapacity, netWorth, ownedSpaces } from '@games/shared/estate'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
-import { loadGame, saveGame } from './game/storage'
 import { playSound, unlockAudio } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
 import { cardKeyOf, claimTarget, onlineDispatch, tradeKeyOf } from './online/session'
@@ -169,14 +161,14 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   // Online the room is the only source of truth: the reducer below never runs,
   // this device's saved game is neither read nor written, and the table is
   // already under way by the time this component mounts.
-  const [localState, localDispatch] = useReducer(gameReducer, online, (session) =>
-    session ? createGame() : loadGame(),
-  )
-  const state = online ? online.state : localState
-  // The dialogs take a `dispatch` and know nothing about rooms. Online it is the
-  // wire: everything a person may decide goes down it, and the beats the room
-  // paces for itself are dropped rather than sent (see `./online/session`).
-  const dispatch = useMemo(() => (online ? onlineDispatch(online) : localDispatch), [online, localDispatch])
+  // The board behind the setup dialog. It is never played: choosing a table
+  // creates a room, and the room deals the real one.
+  const preview = useMemo(() => createGame(), [])
+  const state = online ? online.state : preview
+  // The dialogs take a `dispatch` and know nothing about rooms. It is the wire:
+  // everything a person may decide goes down it, and the beats the room paces
+  // for itself are dropped rather than sent (see `./online/session`).
+  const dispatch = useMemo(() => (online ? onlineDispatch(online) : () => {}), [online])
   const [modal, setModal] = useState<Modal>(() => (state.trade ? 'trade' : null)),
     [selected, setSelected] = useState<number | null>(null)
   const [portfolioPlayer, setPortfolioPlayer] = useState<number | undefined>(),
@@ -192,9 +184,9 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     isFinished = state.status === 'finished'
   const busy = state.phase === 'rolling' || state.phase === 'moving'
   /** Whose inputs this browser may make: its own seat online, the shared one locally. */
-  const humanTurn = !player.isBot && !isSetup && !isFinished && (!online || online.mySeat === state.current)
-  const lastEvent = state.events[0],
-    pauseGame = paused || modal !== null || selected !== null
+  const humanTurn =
+    !player.isBot && !isSetup && !isFinished && Boolean(online) && online!.mySeat === state.current
+  const lastEvent = state.events[0]
   const canTrade =
     humanTurn && ['ready', 'end'].includes(state.phase) && state.players.filter((p) => !p.bankrupt).length > 1
   /** The seat the table is stuck on, if its player has gone and can be claimed. */
@@ -234,41 +226,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     else setModal((open) => (open === 'trade' ? null : open))
   }
   useEffect(() => {
-    // The room holds this device's game; nothing about it belongs on this disk.
-    if (online) return
-    saveGame(state)
-  }, [state, online])
-  useEffect(() => {
-    // Online every one of these beats is the server's to keep, so that the whole
-    // table sees the same dice at the same moment — and the computer opponents
-    // this schedules for are a local game's, never a room's.
-    if (online) return
-    if (pauseGame || state.status !== 'playing' || state.trade) return
-    let action = botAction(state),
-      delay = fast ? 420 : 1100
-    if (state.phase === 'rolling') {
-      action = { type: 'DICE_SETTLED' }
-      delay = 1200
-    } else if (state.phase === 'moving') {
-      action = { type: state.stepsRemaining > 0 ? 'MOVE_STEP' : 'RESOLVE' }
-      delay = state.stepsRemaining > 0 ? 215 : 330
-    } else if (state.phase === 'card') delay = fast ? 1300 : 3300
-    if (!action) return
-    const timer = window.setTimeout(() => dispatch(action), delay)
-    return () => window.clearTimeout(timer)
-  }, [state, fast, pauseGame, online, dispatch])
-  useEffect(() => {
-    // An online offer is answered by the person it was made to, or by the room
-    // on their behalf once their seat has been claimed. Never by this browser.
-    if (online) return
-    if (!state.trade || !state.players[state.trade.to].isBot) return
-    const timer = window.setTimeout(() => {
-      dispatch({ type: botAcceptsTrade(state, state.trade!) ? 'ACCEPT_TRADE' : 'REJECT_TRADE' })
-      setModal(null)
-    }, 1800)
-    return () => clearTimeout(timer)
-  }, [state, online, dispatch])
-  useEffect(() => {
     if (!muted && lastEvent && ['purchase', 'money'].includes(lastEvent.type))
       playSound(lastEvent.type as 'purchase' | 'money')
   }, [lastEvent, muted])
@@ -305,14 +262,15 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [modal, selected, isSetup, humanTurn, paused, state, dispatch])
+  const room = useBotRoom('estate', estateGame.path)
   function startGame(players: PlayerConfig[], mode: GameState['mode']) {
     unlockAudio()
-    dispatch({ type: 'START', players, mode })
-    setModal(null)
-    setSelected(null)
-    setPaused(false)
-    setWinnerDismissed(false)
-    board.current?.reset()
+    void room.start({
+      seats: players.length,
+      // Estate's bot has one way of playing, so the id is the same for each.
+      bots: Array.from({ length: players.length - 1 }, () => 'standard'),
+      options: { mode },
+    })
   }
   // Locally the player on turn is the person at the keyboard; online it is
   // whoever's turn it happens to be, and your own properties are still yours.
@@ -323,8 +281,8 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   function primaryAction() {
     unlockAudio()
     if (isSetup || isFinished) {
-      // Online there is nothing to set up: the next game is the room's to deal,
-      // once everyone still at the table has asked for one.
+      // In a room the next game is the room's to deal, once everyone still at
+      // the table has asked for one. On the way in it is still yours to set up.
       if (online) online.send.rematch()
       else setModal('setup')
       return
@@ -822,7 +780,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         </div>
       )}
       {modal === 'setup' && (
-        <SetupDialog onClose={() => setModal(null)} onStart={startGame} inProgress={!isSetup} />
+        <SetupDialog onClose={() => setModal(null)} onStart={startGame} />
       )}
       {modal === 'portfolio' && (
         <PortfolioDialog
