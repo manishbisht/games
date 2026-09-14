@@ -253,6 +253,9 @@ export class RoomDO extends DurableObject<Env> {
     const lobby = this.env.LOBBY.getByName('global')
     if (record.status === 'open') {
       const seatsTaken = record.seatIds.filter((seat) => record.seats[seat]).length
+      // A seat a bot is in is taken, but a table of bots is not a table of
+      // people — the lobby says both numbers rather than implying the wrong one.
+      const bots = record.seatIds.filter((seat) => record.seats[seat]?.bot).length
       this.ctx.waitUntil(
         lobby.upsert({
           code: record.code,
@@ -261,8 +264,7 @@ export class RoomDO extends DurableObject<Env> {
           seatsTaken,
           seatsTotal: record.seatsTotal,
           createdAt: record.createdAt,
-          // Placeholder: no bot seats exist yet. Task 11 counts them for real.
-          bots: 0,
+          bots,
         }),
       )
     } else {
