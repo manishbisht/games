@@ -25,6 +25,15 @@ const MAX_AUTO_ADVANCES = 20
  * enough to read as a player thinking, short enough that the table keeps moving.
  */
 const STAND_IN_DELAY_MS = 1200
+/** How long the room pauses before a bot's decision lands, when its game has no opinion. */
+const BOT_THINK_MS = 900
+
+/**
+ * How often a room that is still playing the same bots repeats itself to the
+ * site counter. Matches a browser tab's heartbeat, so a live table keeps its
+ * row fresh the same way a live visitor does.
+ */
+const BOT_PRESENCE_REFRESH_MS = 30_000
 /**
  * How early an alarm fire may land and still count as "on time". `armAlarm`
  * always schedules at or after `autoAt`, so normal flow never comes anywhere
@@ -53,6 +62,8 @@ interface StoredSeat {
   disconnectedAt?: number
   /** Set once the room has played on without this seat; cleared when they come back. */
   abandoned?: boolean
+  /** Set when nobody is behind this seat: the room plays it, turn after turn. */
+  bot?: { skill: string }
 }
 
 /** Consecutive stand-in turns that settled nothing before the room stops retrying. */
@@ -83,6 +94,12 @@ export interface RoomRecord {
   seatIds: SeatId[]
   /** The seat count the room was created for; `seatIds` may be shorter once compacted. */
   seatsTotal: number
+  /**
+   * Seat the host and deal as soon as they arrive. Only ever meaningful when
+   * bots fill every other seat — a solo table against bots has nobody to wait
+   * in a lobby for.
+   */
+  autoStart?: boolean
   options: unknown
   seats: Partial<Record<SeatId, StoredSeat>>
   gameState: unknown
@@ -115,6 +132,11 @@ export class RoomDO extends DurableObject<Env> {
   // lost-update bug. Keep `load()` returning the same object identity unless
   // that concurrency story is reworked deliberately.
   private cached: RoomRecord | null | undefined
+  /**
+   * The last bot count this room told PresenceDO, and when. Purely an instance
+   * hint: losing it to eviction costs one redundant push, never correctness.
+   */
+  private lastBotPush = { at: 0, bots: -1 }
 
   private async load(): Promise<RoomRecord | null> {
     if (this.cached === undefined) {
@@ -141,6 +163,37 @@ export class RoomDO extends DurableObject<Env> {
     record.expiresAt = Date.now() + ROOM_TTL_MS
     await this.ctx.storage.put('room', record)
     await this.armAlarm(record)
+    this.pushBotPresence(record)
+  }
+
+  /**
+   * How many players this table is currently the one playing. Only while the
+   * game is actually on: bots the host parked in an open room are seats set
+   * aside, not players, and a finished game is nobody playing anything.
+   */
+  private liveBots(record: RoomRecord): number {
+    if (record.status !== 'playing') return 0
+    return record.seatIds.filter((seat) => record.seats[seat]?.bot).length
+  }
+
+  /**
+   * Tell the site's counter how many players this room is playing itself, so a
+   * bot at a table counts as somebody online — which it is.
+   *
+   * Hung off `save()` because that is the one door every mutation goes
+   * through, including each bot's own turn. Fire-and-forget for the same
+   * reason as `pushLobby`: a count being a beat stale is tolerable, a move
+   * waiting on another Durable Object is not. The throttle keeps a busy room
+   * to roughly a visitor's heartbeat rate while still reacting at once to a
+   * count that actually changed; a room with no bots never pushes at all.
+   */
+  private pushBotPresence(record: RoomRecord): void {
+    const bots = this.liveBots(record)
+    const now = Date.now()
+    const changed = bots !== this.lastBotPush.bots
+    if (!changed && (bots === 0 || now - this.lastBotPush.at < BOT_PRESENCE_REFRESH_MS)) return
+    this.lastBotPush = { at: now, bots }
+    this.ctx.waitUntil(this.env.PRESENCE.getByName('global').reportBots(record.code, record.game, bots))
   }
 
   /**
@@ -176,33 +229,48 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
-   * The seat the room will play for, or `null`. A game counts as stuck only when
-   * every seat it is waiting on has been abandoned — one away player among
-   * several present ones is just a player the others are still waiting for.
+   * The seat the room plays for, and how. A bot is always driven — the table is
+   * never waiting on it in any meaningful sense. An abandoned seat keeps the
+   * stricter rule: one away player among present ones is just a player the
+   * others are still waiting for, so the room only stands in once every seat the
+   * game is blocked on has gone.
    */
-  private standInSeat(record: RoomRecord): SeatId | null {
+  private autoSeat(record: RoomRecord): { seat: SeatId; bot: boolean; skill: string } | null {
     if (record.status !== 'playing' || record.gameState === null) return null
     const waiting = this.adapter(record).waitingOn(record.gameState, record.seatIds)
-    if (!waiting.length || !waiting.every((seat) => record.seats[seat]?.abandoned)) return null
-    return waiting[0]
+    if (!waiting.length) return null
+    // Bots first, and not only for multi-seat waits: when the single waiting seat
+    // is a bot, the abandoned rule below cannot move it — a bot is never
+    // `abandoned`, so `every` is false and the table would sit here forever.
+    // Scanning the whole list rather than `waiting[0]` also covers an adapter that
+    // blocks on several seats at once, should one ever exist.
+    const bot = waiting.find((seat) => record.seats[seat]?.bot)
+    if (bot) return { seat: bot, bot: true, skill: record.seats[bot]!.bot!.skill }
+    if (!waiting.every((seat) => record.seats[seat]?.abandoned)) return null
+    return { seat: waiting[0], bot: false, skill: '' }
   }
 
   /**
-   * Arm (or disarm) the stand-in's deadline. Unlike a phase deadline this tracks
-   * presence, which changes outside `setGameState` — a reclaim, a claim — so it
-   * is reconsidered whenever abandonment is. It never takes the slot from a live
-   * phase, and never restamps a stand-in beat that is already counting down:
-   * either would let an unrelated save move a deadline someone is waiting on.
-   * Callers that know the deadline is spent clear `autoAt` before calling.
+   * Arm (or disarm) whichever pause applies next — a bot's think delay or an
+   * abandoned seat's stand-in deadline, picked by `autoSeat`. Unlike a phase
+   * deadline this tracks presence, which changes outside `setGameState` — a
+   * reclaim, a claim, a seat turning into a bot — so it is reconsidered whenever
+   * that does. It never takes the slot from a live phase, and never restamps a
+   * beat that is already counting down: either would let an unrelated save move
+   * a deadline someone — or something — is waiting on. Callers that know the
+   * deadline is spent clear `autoAt` before calling.
    */
-  private stampStandIn(record: RoomRecord): void {
+  private stampAuto(record: RoomRecord): void {
     if (this.pendingPhase(record)) return
-    if (!this.standInSeat(record)) {
+    const next = this.autoSeat(record)
+    if (!next) {
       record.autoAt = undefined
       record.standInStalls = undefined
       return
     }
-    record.autoAt ??= Date.now() + STAND_IN_DELAY_MS
+    const bots = this.adapter(record).bots
+    const delay = next.bot ? (bots?.thinkMs?.(next.skill) ?? BOT_THINK_MS) : STAND_IN_DELAY_MS
+    record.autoAt ??= Date.now() + delay
   }
 
   /**
@@ -210,15 +278,16 @@ export class RoomDO extends DurableObject<Env> {
    * and stamps the timed phase's deadline, once, as that phase is entered.
    * Status is decided first so a game that just ended cannot leave a deadline
    * behind for an alarm to chase. The state has moved, so any deadline it had is
-   * spent — it is cleared here rather than left for `stampStandIn` to preserve.
+   * spent — it is cleared here rather than left for `stampAuto` to preserve.
    */
   private setGameState(record: RoomRecord, state: unknown): void {
     record.gameState = state
     if (this.adapter(record).isFinished(state)) record.status = 'finished'
     const pending = this.pendingPhase(record)
     record.autoAt = pending ? Date.now() + pending.afterMs : undefined
-    // A game that has come to rest on an abandoned seat still has to move on.
-    if (!pending) this.stampStandIn(record)
+    // A game that has come to rest on an abandoned seat — or a bot's turn — still
+    // has to move on.
+    if (!pending) this.stampAuto(record)
   }
 
   /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
@@ -227,6 +296,9 @@ export class RoomDO extends DurableObject<Env> {
     const lobby = this.env.LOBBY.getByName('global')
     if (record.status === 'open') {
       const seatsTaken = record.seatIds.filter((seat) => record.seats[seat]).length
+      // A seat a bot is in is taken, but a table of bots is not a table of
+      // people — the lobby says both numbers rather than implying the wrong one.
+      const bots = record.seatIds.filter((seat) => record.seats[seat]?.bot).length
       this.ctx.waitUntil(
         lobby.upsert({
           code: record.code,
@@ -235,6 +307,7 @@ export class RoomDO extends DurableObject<Env> {
           seatsTaken,
           seatsTotal: record.seatsTotal,
           createdAt: record.createdAt,
+          bots,
         }),
       )
     } else {
@@ -249,6 +322,8 @@ export class RoomDO extends DurableObject<Env> {
     host: PlayerInfo
     seats: number
     options: unknown
+    bots: string[]
+    autoStart: boolean
   }): Promise<boolean> {
     // `false` means "that code is taken"; an unregistered game is a caller bug,
     // and the router has already refused those.
@@ -270,6 +345,17 @@ export class RoomDO extends DurableObject<Env> {
       seats: {},
       gameState: null,
     }
+    // Bots take the seats furthest from the host, so the seats people are meant
+    // to take are the ones the room offers first.
+    const botSeats = record.seatIds.slice(record.seatIds.length - input.bots.length)
+    botSeats.forEach((seat, index) => {
+      record.seats[seat] = {
+        player: { id: `bot:${seat}`, name: this.botNameFor(record, seat, adapter.bots!), isGuest: true },
+        wantsRematch: false,
+        bot: { skill: input.bots[index] },
+      }
+    })
+    if (input.autoStart) record.autoStart = true
     await this.save(record)
     this.pushLobby(record)
     return true
@@ -314,13 +400,14 @@ export class RoomDO extends DurableObject<Env> {
       const stored = record.seats[seat]
       if (!stored) continue
       const { id, ...player } = stored.player
-      const isConnected = connected.has(id)
+      const isConnected = stored.bot ? true : connected.has(id)
       seats[seat] = {
         player,
         connected: isConnected,
         wantsRematch: stored.wantsRematch,
         ...(isConnected || !stored.disconnectedAt ? {} : { awaySince: stored.disconnectedAt }),
         ...(stored.abandoned ? { abandoned: true } : {}),
+        ...(stored.bot ? { bot: stored.bot } : {}),
       }
     }
     return {
@@ -389,6 +476,10 @@ export class RoomDO extends DurableObject<Env> {
         return this.handleRematch(ws, record, attachment.player)
       case 'claim':
         return this.handleClaim(ws, record, attachment.player)
+      case 'addBot':
+        return this.handleAddBot(ws, record, attachment.player, message.seat, message.skill)
+      case 'removeBot':
+        return this.handleRemoveBot(ws, record, attachment.player, message.seat)
       default:
         return this.fail(ws, 'BAD_MESSAGE', 'Unknown message type.')
     }
@@ -420,8 +511,18 @@ export class RoomDO extends DurableObject<Env> {
         abandoned: undefined,
       }
       // They are back, so the room stops playing their turns for them.
-      this.stampStandIn(record)
+      this.stampAuto(record)
       await this.save(record)
+    }
+    // A solo table against bots: the host is the only person expected, so there
+    // is nothing to wait in a lobby for. The status test sits after
+    // `resolveIdentity`'s await and `startGame` flips it synchronously, so two
+    // tabs arriving together cannot both start the game. `serializeAttachment`
+    // has already run, so the broadcast reaches this socket too.
+    const free = record.seatIds.filter((id) => !record.seats[id])
+    if (record.autoStart && record.status === 'open' && player.id === record.hostId && free.length === 1) {
+      record.seats[free[0]] = { player, wantsRematch: false }
+      return this.startGame(record)
     }
     this.broadcast(record)
   }
@@ -456,6 +557,76 @@ export class RoomDO extends DurableObject<Env> {
     this.broadcast(record)
   }
 
+  /**
+   * A name no other bot at this table answers to. The obvious index — how many
+   * bots are already seated — collides as soon as one is removed and another
+   * added: two bots are seated as Jules and Cleo, Jules leaves, and the next
+   * bot is index 1 again. Scanning for a free name costs nothing at these seat
+   * counts and cannot hand out the same name twice.
+   */
+  private botNameFor(record: RoomRecord, seat: SeatId, bots: NonNullable<GameAdapter['bots']>): string {
+    const taken = new Set(
+      record.seatIds.filter((id) => record.seats[id]?.bot).map((id) => record.seats[id]!.player.name),
+    )
+    for (let index = 0; index < record.seatIds.length; index++) {
+      const name = bots.name(seat, index)
+      if (!taken.has(name)) return name
+    }
+    // Every name this game offers is already at the table, which only happens
+    // if it has fewer names than seats. Falling back beats refusing the bot.
+    return bots.name(seat, taken.size)
+  }
+
+  /**
+   * Fill an empty seat with a player the room itself takes the turns for. Host
+   * only and open only, for the same reason `start` is: a table's shape is the
+   * host's to set, and it stops changing once the game does.
+   */
+  private async handleAddBot(
+    ws: WebSocket,
+    record: RoomRecord,
+    player: PlayerInfo,
+    seat: SeatId,
+    skill: string | undefined,
+  ): Promise<void> {
+    if (player.id !== record.hostId)
+      return this.fail(ws, 'NOT_HOST', 'Only the room creator can add a bot.')
+    if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
+    if (!record.seatIds.includes(seat)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown seat.')
+    if (record.seats[seat]) return this.fail(ws, 'SEAT_TAKEN', 'That seat is taken.')
+    const bots = this.adapter(record).bots
+    if (!bots) return this.fail(ws, 'NOT_ALLOWED', 'This game has no bots.')
+    const chosen = skill ?? bots.skills[0]
+    if (!bots.skills.includes(chosen)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown bot skill.')
+    record.seats[seat] = {
+      // `bot:` is a namespace `resolveIdentity` can never mint, so this id can
+      // never arrive from a client claiming to be one.
+      player: { id: `bot:${seat}`, name: this.botNameFor(record, seat, bots), isGuest: true },
+      wantsRematch: false,
+      bot: { skill: chosen },
+    }
+    await this.save(record)
+    this.pushLobby(record)
+    this.broadcast(record)
+  }
+
+  /** Give a bot's seat back, so a person who turned up late can have it. */
+  private async handleRemoveBot(
+    ws: WebSocket,
+    record: RoomRecord,
+    player: PlayerInfo,
+    seat: SeatId,
+  ): Promise<void> {
+    if (player.id !== record.hostId)
+      return this.fail(ws, 'NOT_HOST', 'Only the room creator can remove a bot.')
+    if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
+    if (!record.seats[seat]?.bot) return this.fail(ws, 'NOT_ALLOWED', 'That seat is not a bot.')
+    delete record.seats[seat]
+    await this.save(record)
+    this.pushLobby(record)
+    this.broadcast(record)
+  }
+
   private async handleStart(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
     if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
     if (player.id !== record.hostId)
@@ -466,6 +637,17 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'NOT_READY', 'Every seat must be taken first.')
     if (occupied.length < adapter.minSeats)
       return this.fail(ws, 'NOT_READY', `At least ${adapter.minSeats} players must be seated.`)
+    return this.startGame(record)
+  }
+
+  /**
+   * Deal the game and tell the room. Split out of `handleStart` because a solo
+   * table against bots starts itself the moment its host arrives, and two start
+   * paths that settled seats differently would be two different games.
+   */
+  private async startGame(record: RoomRecord): Promise<void> {
+    const adapter = this.adapter(record)
+    const occupied = record.seatIds.filter((seat) => record.seats[seat])
     // A room made for four that starts with three plays as a three-player game,
     // so the empty seats are dropped and the rest slide onto the ids the
     // adapter would have handed out for that headcount.
@@ -518,11 +700,12 @@ export class RoomDO extends DurableObject<Env> {
       return this.fail(ws, 'NOT_FINISHED', 'The game is still going.')
     record.seats[seat] = { ...record.seats[seat]!, wantsRematch: true }
     const seated = record.seatIds.filter((s) => record.seats[s])
-    // A seat the room is playing for cannot ask for anything, so waiting on it
-    // would strand the table forever. Consensus is the players still here; the
-    // abandoned seat rides into the next game, still abandoned, still played for
-    // — and still theirs to reclaim, which is what clears the flag.
-    const voting = seated.filter((s) => !record.seats[s]!.abandoned)
+    // A seat the room plays cannot ask for anything, so waiting on it would
+    // strand the table forever — true of an abandoned seat and of a bot alike.
+    // Consensus is the players still here; the abandoned seat rides into the
+    // next game, still abandoned, still played for — and still theirs to
+    // reclaim, which is what clears the flag.
+    const voting = seated.filter((s) => !record.seats[s]!.abandoned && !record.seats[s]!.bot)
     if (voting.length && voting.every((s) => record.seats[s]!.wantsRematch)) {
       const adapter = this.adapter(record)
       const { state, seatRemap } = adapter.rematch(
@@ -556,7 +739,8 @@ export class RoomDO extends DurableObject<Env> {
     // Who the claim is aimed at: the seats the game is blocked on, or — when
     // the game is waiting on the claimant themselves, as chess is between their
     // own moves — everyone else still at the table.
-    const others = record.seatIds.filter((id) => id !== seat && record.seats[id])
+    // A bot is never away, so there is nothing to claim against it.
+    const others = record.seatIds.filter((id) => id !== seat && record.seats[id] && !record.seats[id]!.bot)
     const waiting = adapter.waitingOn(record.gameState, record.seatIds).filter((id) => others.includes(id))
     const targets = waiting.length ? waiting : others
     if (!targets.length) return this.fail(ws, 'CLAIM_REJECTED', 'There is no opponent to claim against.')
@@ -600,7 +784,7 @@ export class RoomDO extends DurableObject<Env> {
     // unchanged state back through `setGameState` would restamp the deadline of
     // the beat everyone is currently watching, pushing it out on every click.
     if (forfeited || state !== record.gameState) this.setGameState(record, state)
-    else this.stampStandIn(record)
+    else this.stampAuto(record)
     await this.save(record)
     this.broadcast(record)
   }
@@ -613,7 +797,8 @@ export class RoomDO extends DurableObject<Env> {
     let changed = false
     for (const seat of record.seatIds) {
       const stored = record.seats[seat]
-      if (stored && !connected.has(stored.player.id) && !stored.disconnectedAt) {
+      // A bot has no socket to lose, so absence means nothing for it.
+      if (stored && !stored.bot && !connected.has(stored.player.id) && !stored.disconnectedAt) {
         stored.disconnectedAt = Date.now()
         changed = true
       }
@@ -643,7 +828,7 @@ export class RoomDO extends DurableObject<Env> {
       const due = record.autoAt === undefined || Date.now() >= record.autoAt - AUTO_AT_TOLERANCE_MS
       if (!due) return this.armAlarm(record)
       if (this.pendingPhase(record)) return this.autoAdvance(record)
-      if (this.standInSeat(record)) return this.playStandIn(record)
+      if (this.autoSeat(record)) return this.playAuto(record)
     }
     await this.expire(record)
   }
@@ -667,17 +852,19 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /**
-   * A seat whose claim has already been granted still has to take its turns, or
-   * the table sits there forever. One decision per fire: `setGameState` stamps
-   * whatever comes next — the beat the decision opened, or the following turn if
-   * that seat is away too — and the alarm comes back around for it.
+   * A seat the room plays still has to take its turns, or the table sits there
+   * forever. One decision per fire: `setGameState` stamps whatever comes next and
+   * the alarm comes back around for it.
    */
-  private async playStandIn(record: RoomRecord): Promise<void> {
+  private async playAuto(record: RoomRecord): Promise<void> {
     const adapter = this.adapter(record)
-    const seat = this.standInSeat(record)!
+    const next = this.autoSeat(record)!
     const before = record.gameState
-    const settled = adapter.resolveAbsent(before, seat, record.seatIds, this.gameCtx())
+    const settled = next.bot
+      ? adapter.bots!.decide(before, next.seat, record.seatIds, next.skill, this.gameCtx())
+      : adapter.resolveAbsent(before, next.seat, record.seatIds, this.gameCtx())
     // `null`: nobody stands in at this game, so it ends where the absence left it.
+    // Only `resolveAbsent` may say so — a bot's game is never ended by its bot.
     if (settled === null) record.status = 'finished'
     this.setGameState(record, settled ?? before)
     // A stand-in that settles nothing leaves the room facing the same state, so
@@ -695,6 +882,10 @@ export class RoomDO extends DurableObject<Env> {
   private async expire(record: RoomRecord | null): Promise<void> {
     for (const ws of this.ctx.getWebSockets()) ws.close(CLOSE_CODES.expired, 'ROOM_EXPIRED')
     if (record?.visibility === 'public') await this.env.LOBBY.getByName('global').remove(record.code)
+    // Unlike the lobby above, this is not public-only: a private solo table
+    // against bots is exactly the kind of room that was counting. The TTL
+    // would forget it anyway, so this is promptness, not correctness.
+    if (record) await this.env.PRESENCE.getByName('global').reportBots(record.code, record.game, 0)
     this.cached = null
     await this.ctx.storage.deleteAll()
     await this.ctx.storage.deleteAlarm()

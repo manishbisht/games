@@ -38,7 +38,7 @@ describe('hearth adapter shape', () => {
     expect([hearthAdapter.minSeats, hearthAdapter.maxSeats]).toEqual([2, 4])
     expect(hearthAdapter.requireFull).toBe(false)
     expect(hearthAdapter.seatIds(3)).toEqual(['p0', 'p1', 'p2'])
-    expect(hearthAdapter.validateOptions({ anything: true })).toEqual({})
+    expect(hearthAdapter.validateOptions({ anything: true })).toEqual({ mode: 'classic' })
   })
 
   it('creates a table of the right size, carrying the seat names in turn order', () => {
@@ -196,5 +196,101 @@ describe('hearth adapter absences and rematches', () => {
     expect(won.winner).toBe('red')
     expect(hearthAdapter.isFinished(won)).toBe(true)
     expect(hearthAdapter.waitingOn(won, SEATS)).toEqual([])
+  })
+})
+
+describe('bots', () => {
+  const ctx = { random: () => 0.5, now: 0 }
+  const seats = ['p0', 'p1']
+
+  it('rolls for a bot seat whose turn it is to roll', () => {
+    const state = hearthAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const onRoll = { ...state, phase: 'roll' as const, currentPlayer: 1 }
+    const after = hearthAdapter.bots!.decide(onRoll, 'p1', seats, 'medium', ctx)
+    expect(after.phase).toBe('rolling')
+  })
+
+  it('leaves a seat alone when the game is not waiting on it', () => {
+    const state = hearthAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const onRoll = { ...state, phase: 'roll' as const, currentPlayer: 0 }
+    expect(hearthAdapter.bots!.decide(onRoll, 'p1', seats, 'medium', ctx)).toBe(onRoll)
+  })
+
+  it('offers three skills, easiest first, and names its bots', () => {
+    expect(hearthAdapter.bots!.skills).toEqual(['easy', 'medium', 'hard'])
+    expect(hearthAdapter.bots!.name('p1', 0)).toBe('Jules')
+  })
+})
+
+describe('table options', () => {
+  const make = (raw: unknown) =>
+    hearthAdapter.create(players, hearthAdapter.validateOptions(raw), ctx()) as GameState
+
+  it('deals a quick game with two pieces each', () => {
+    const state = make({ mode: 'quick' })
+    expect(state.rules.piecesPerPlayer).toBe(2)
+  })
+
+  it('deals the classic four pieces by default', () => {
+    expect(make({}).rules.piecesPerPlayer).toBe(4)
+    expect(make(undefined).rules.piecesPerPlayer).toBe(4)
+  })
+
+  it("carries a custom table's rules to the board", () => {
+    const state = make({
+      mode: 'custom',
+      rules: {
+        piecesPerPlayer: 3,
+        extraTurnOnSix: false,
+        safeSpaces: false,
+        captures: false,
+        exactHome: false,
+      },
+    })
+    expect(state.rules).toMatchObject({
+      piecesPerPlayer: 3,
+      extraTurnOnSix: false,
+      safeSpaces: false,
+      captures: false,
+      exactHome: false,
+    })
+  })
+
+  it('narrows what it is given rather than spreading it', () => {
+    // The options come off the wire, so an unknown key must not reach the
+    // engine and a nonsense value must not become a rule.
+    const options = hearthAdapter.validateOptions({
+      mode: 'custom',
+      rules: { piecesPerPlayer: 99, captures: 'yes', somethingElse: true },
+      names: ['hacker'],
+      controls: ['hard', 'hard', 'hard'],
+    }) as { mode: string; rules?: Record<string, unknown> }
+    expect(options).not.toHaveProperty('names')
+    expect(options).not.toHaveProperty('controls')
+    expect(options.rules).not.toHaveProperty('somethingElse')
+    expect(options.rules).not.toHaveProperty('captures')
+    const state = make({ mode: 'custom', rules: { piecesPerPlayer: 99, captures: 'yes' } })
+    expect(state.rules.piecesPerPlayer).toBe(4)
+    expect(state.rules.captures).toBe(true)
+  })
+
+  it('falls back to a classic table when the mode is not one it offers', () => {
+    const options = hearthAdapter.validateOptions({ mode: 'sideways' })
+    expect(options).toEqual({ mode: 'classic' })
+  })
+
+  it('gives a rematch the same table it was set up with', () => {
+    const options = hearthAdapter.validateOptions({ mode: 'quick' })
+    const first = hearthAdapter.create(players, options, ctx()) as GameState
+    const next = hearthAdapter.rematch(first, players, options, ctx()).state
+    expect(next.rules.piecesPerPlayer).toBe(2)
   })
 })

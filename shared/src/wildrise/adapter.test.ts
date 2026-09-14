@@ -192,3 +192,56 @@ describe('wildrise adapter absence and rematch', () => {
     expect(fresh.currentPlayer).toBe(1)
   })
 })
+
+describe('bots', () => {
+  const ctx = { random: () => 0.5, now: 0 }
+  const seats = ['p0', 'p1']
+
+  it('rolls for the bot whose turn it is', () => {
+    const state = wildriseAdapter.create(
+      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      {},
+      ctx,
+    ) as GameState
+    const ready = { ...state, phase: 'ready' as const, currentPlayer: 1 }
+    const after = wildriseAdapter.bots!.decide(ready, 'p1', seats, 'casual', ctx)
+    expect(after).not.toBe(ready)
+  })
+
+  it('sets its pace from the skill, because a race has no skill to have', () => {
+    const think = wildriseAdapter.bots!.thinkMs!
+    expect(think('fast')).toBeLessThan(think('casual'))
+    expect(think('casual')).toBeLessThan(think('fun'))
+    expect(wildriseAdapter.bots!.skills).toEqual(['casual', 'fast', 'fun'])
+  })
+})
+
+describe('table options', () => {
+  const seats = [
+    { id: 'p0', name: 'Ann' },
+    { id: 'p1', name: 'Ben' },
+  ]
+  const make = (raw: unknown) =>
+    wildriseAdapter.create(seats, wildriseAdapter.validateOptions(raw), {
+      random: () => 0.5,
+      now: 0,
+    }) as GameState
+
+  it('takes the exact-finish rule the table was set up with', () => {
+    expect(make({ exactFinish: false }).rules.exactFinish).toBe(false)
+    expect(make({ exactFinish: true }).rules.exactFinish).toBe(true)
+  })
+
+  it('keeps the board default when the table says nothing', () => {
+    expect(make({}).rules.exactFinish).toBe(make(undefined).rules.exactFinish)
+  })
+
+  it('ignores anything else it is handed', () => {
+    const options = wildriseAdapter.validateOptions({
+      exactFinish: false,
+      snakeCount: 99,
+      names: ['hacker'],
+    }) as Record<string, unknown>
+    expect(options).toEqual({ exactFinish: false })
+  })
+})

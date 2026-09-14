@@ -319,7 +319,7 @@ git commit -m "feat(prism): let the room play a seat as a bot"
 
 ### Task 4: Estate bots
 
-Estate is the one game with a single bot strength — `botAction` takes no difficulty — and the one whose `waitingOn` can name two seats at once, because a trade waits on its recipient.
+Estate is the one game with a single bot strength — `botAction` takes no difficulty — and the one whose `waitingOn` answers with the trade's recipient rather than the current player when a trade is pending, so a bot can owe the table a decision on someone else's turn.
 
 **Files:**
 - Modify: `shared/src/estate/adapter.ts`
@@ -666,7 +666,8 @@ describe('seats the room plays', () => {
     await fire(code)
     // p0 is a present human who has not voted and p1 is a bot; `waitingOn` names
     // both. The bot must move anyway — waiting for the person would deadlock the
-    // table, which is exactly what Estate's trade does when it is offered to a bot.
+    // table. No shipping adapter blocks on two seats today, so this stub is the
+    // only thing holding that property; it is here so the rule cannot rot.
     const record = await readRecord(code)
     expect((record!.gameState as CouncilState).votes).toEqual(['p1'])
   })
@@ -681,10 +682,11 @@ import type { GameAdapter } from '@games/shared/online/adapter'
 import type { GameId } from '@games/shared/protocol'
 
 /**
- * A game blocked on every seat at once — the shape Estate's trade takes, where
- * an offer waits on its recipient while the player who made it is still sitting
- * there deciding. No shipping game answers to this id, so registering it here
- * cannot reach a real room.
+ * A game blocked on every seat at once. No shipping adapter does this today —
+ * each answers `waitingOn` with exactly one seat — which is precisely why the
+ * stub exists: `autoSeat` scans the whole waiting list for a bot, and without
+ * this nothing would hold that behaviour in place. No shipping game answers to
+ * this id, so registering it here cannot reach a real room.
  */
 const COUNCIL_GAME = 'council-test' as GameId
 
@@ -785,8 +787,11 @@ const BOT_THINK_MS = 900
     if (record.status !== 'playing' || record.gameState === null) return null
     const waiting = this.adapter(record).waitingOn(record.gameState, record.seatIds)
     if (!waiting.length) return null
-    // Bots first: a trade offered to a bot leaves the game waiting on both it and
-    // the person who offered, and the bot must answer while they are still thinking.
+    // Bots first, and not only for multi-seat waits: when the single waiting seat
+    // is a bot, the abandoned rule below cannot move it — a bot is never
+    // `abandoned`, so `every` is false and the table would sit here forever.
+    // Scanning the whole list rather than `waiting[0]` also covers an adapter that
+    // blocks on several seats at once, should one ever exist.
     const bot = waiting.find((seat) => record.seats[seat]?.bot)
     if (bot) return { seat: bot, bot: true, skill: record.seats[bot]!.bot!.skill }
     if (!waiting.every((seat) => record.seats[seat]?.abandoned)) return null

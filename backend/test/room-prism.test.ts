@@ -6,7 +6,7 @@ import type { ServerMessage } from '@games/shared/protocol'
 import type { Card, GameState } from '@games/shared/prism/types'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
-import { connect } from './helpers'
+import { connect, WAIT } from './helpers'
 import type { Client } from './helpers'
 
 const testEnv = env as unknown as Env
@@ -33,7 +33,7 @@ const seeNext = (client: Client, from: number, predicate: (m: RoomMessage) => bo
     const room = log.filter((m): m is RoomMessage => m.type === 'room').findLast(predicate)
     expect(room).toBeDefined()
     return room!
-  })
+  }, WAIT)
 
 const readRecord = (code: string) =>
   runInDurableObject(testEnv.ROOM.getByName(code), async (_instance, state) =>

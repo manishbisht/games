@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 export type GameId = 'chess' | 'hearth' | 'estate' | 'prism' | 'wildrise'
 /**
@@ -40,6 +40,11 @@ export interface SeatInfo {
    * There is nothing private in it — it is why the table is moving without them.
    */
   abandoned?: boolean
+  /**
+   * Nobody is behind this seat: the room plays it. Carries its skill because
+   * the table should be able to say how hard a bot is trying.
+   */
+  bot?: { skill: string }
 }
 
 /** How long a seat must be abandoned mid-game before the opponent may claim the win. */
@@ -80,6 +85,8 @@ export type ClientMessage =
   | { type: 'action'; action: unknown }
   | { type: 'rematch' }
   | { type: 'claim' }
+  | { type: 'addBot'; seat: SeatId; skill?: string }
+  | { type: 'removeBot'; seat: SeatId }
 
 export type ErrorCode =
   | 'BAD_MESSAGE'
@@ -115,4 +122,6 @@ export interface PublicRoomSummary {
   seatsTaken: number
   seatsTotal: number
   createdAt: number
+  /** How many of `seatsTaken` are bots, so the lobby can say "2 players · 1 bot". */
+  bots: number
 }

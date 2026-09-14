@@ -2,6 +2,7 @@ import { getAdapter, resolveGame } from '@games/shared/online'
 import { generateRoomCode, normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { Env } from './env'
 import { resolveIdentity } from './auth'
+import { secureRandom } from './room'
 import { allowedOrigin, corsHeaders } from './cors'
 import { resolvePresenceGame, validPresenceId } from './presence'
 
@@ -44,12 +45,27 @@ export default {
         seats > adapter.maxSeats
       )
         return json({ error: 'unsupported seat count' }, 400, origin)
+      // One skill id per bot seat. A room must keep a seat for a person, which
+      // is also what stops a table of bots playing itself in a Durable Object.
+      const rawBots = body.bots === undefined ? [] : body.bots
+      if (!Array.isArray(rawBots) || rawBots.length > seats - 1)
+        return json({ error: 'unsupported bots' }, 400, origin)
+      const skills = adapter.bots?.skills
+      if (rawBots.length > 0 && !skills) return json({ error: 'unsupported bots' }, 400, origin)
+      if (rawBots.some((skill) => typeof skill !== 'string' || !skills!.includes(skill)))
+        return json({ error: 'unsupported bots' }, 400, origin)
+      const bots = rawBots as string[]
+      // Only meaningful alongside a bot per remaining seat; `handleJoin` simply
+      // ignores it when the room still has room for other people.
+      const autoStart = body.autoStart === true
       const options = adapter.validateOptions(body.options)
       const visibility = body.visibility === 'public' ? 'public' : 'private'
       const host = await resolveIdentity(body, env)
       if (!host) return json({ error: 'invalid identity' }, 400, origin)
       for (let attempt = 0; attempt < 5; attempt++) {
-        const code = generateRoomCode()
+        // A private room's code is its invite secret, so it comes from the same
+        // CSPRNG the dice do rather than `generateRoomCode`'s Math.random default.
+        const code = generateRoomCode(secureRandom)
         const created = await env.ROOM.getByName(code).create({
           code,
           game,
@@ -57,6 +73,8 @@ export default {
           host,
           seats,
           options,
+          bots,
+          autoStart,
         })
         if (created) return json({ code }, 201, origin)
       }

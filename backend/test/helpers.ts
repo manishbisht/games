@@ -4,6 +4,14 @@ import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { GameId, ServerMessage } from '@games/shared/protocol'
 import type { GameState } from '@games/shared/chess/types'
 
+/**
+ * Long enough for a beat the room paces itself. Vitest's default is 1s, and
+ * Hearth's `pass` pause alone is 1.7s — so under a full suite, where fifteen
+ * runner Workers share one event loop, the default turned real waits into
+ * failures that passed the moment the file ran on its own.
+ */
+export const WAIT = { timeout: 10_000, interval: 25 }
+
 /** Tests read chess snapshots directly; other games narrow `gameState` themselves. */
 type RoomMessage = Extract<ServerMessage<GameState>, { type: 'room' }>
 
@@ -63,11 +71,11 @@ export async function connect(code: string): Promise<Client> {
         const room = messages.filter((m): m is RoomMessage => m.type === 'room').findLast(predicate)
         expect(room).toBeDefined()
         return room!
-      }),
+      }, WAIT),
     expectError: (code) =>
       vi.waitFor(() => {
         expect(messages.some((m) => m.type === 'error' && m.code === code)).toBe(true)
-      }),
+      }, WAIT),
   }
   return client
 }

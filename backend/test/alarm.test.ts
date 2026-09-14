@@ -76,6 +76,7 @@ const parcelAdapter: GameAdapter<ParcelState, 'pass'> = {
   isFinished: () => false,
   waitingOn: (state) => (flying(state) ? [] : [state.seats[state.holder]]),
   resolveAbsent: () => null,
+  bots: null,
   rematch: (prev) => ({ state: { ...prev, holder: 0, passes: 0, left: 0 } }),
 }
 
@@ -111,6 +112,7 @@ const stubbornAdapter: GameAdapter<{ seats: string[] }, 'noop'> = {
   waitingOn: (state) => [state.seats[0]],
   /** Hands back exactly what it was given, forever. */
   resolveAbsent: (state) => state,
+  bots: null,
   rematch: (prev) => ({ state: prev }),
 }
 

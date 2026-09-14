@@ -16,6 +16,25 @@ export interface Ctx {
 }
 
 /**
+ * Everything a game needs to play a seat nobody is behind. `skills` is an
+ * opaque id list the adapter validates, exactly as `validateOptions` is —
+ * skill is not one concept across games. Chess, Hearth and Prism grade
+ * strength; Estate has one bot; Wildrise's are pace, because a race has no
+ * decisions to be good at. Human-readable labels are presentation and live
+ * in the frontend beside `seatLabel`.
+ */
+export interface BotSupport<S = unknown> {
+  /** Skill ids this game accepts. The first is the default. */
+  skills: readonly string[]
+  /** Display name for the bot taking `seat`; `index` is its position among the room's bots. */
+  name(seat: SeatId, index: number): string
+  /** Play one decision for a bot seat. Returns `state` unchanged when it has none to make. */
+  decide(state: S, seat: SeatId, seats: SeatId[], skill: string, ctx: Ctx): S
+  /** How long the room pauses before the decision lands, so a bot reads as thinking. */
+  thinkMs?(skill: string): number
+}
+
+/**
  * The seam between the generic room and one game's rules. The room owns seats,
  * presence and broadcasting; the adapter owns everything about the game itself,
  * including who is allowed to do what.
@@ -53,6 +72,8 @@ export interface GameAdapter<S = unknown, A = unknown> {
    * back `null`, which ends the game where it stands.
    */
   resolveAbsent(state: S, seat: SeatId, seats: SeatId[], ctx: Ctx): S | null
+  /** How this game plays a seat nobody is behind; `null` when it has no bots. */
+  bots: BotSupport<S> | null
   /** A fresh game for the same table; `seatRemap` rotates who sits where. */
   rematch(
     prev: S,
