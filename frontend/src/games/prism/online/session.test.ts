@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createGame } from '@games/shared/prism'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 import { claimTarget, prismSession, wireAction } from './session'
@@ -11,6 +12,8 @@ const api = (): RoomApi => ({
   action: vi.fn(),
   rematch: vi.fn(),
   claim: vi.fn(),
+  addBot: vi.fn(),
+  removeBot: vi.fn(),
   dismissError: vi.fn(),
 })
 
@@ -26,7 +29,7 @@ const dealt = (names: string[]) => createGame(names.map((name) => ({ name, kind:
 /** A three-seat table mid-round, with whatever the test wants true of its seats. */
 function room(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = {}) {
   const snapshot: RoomSnapshot = {
-    protocol: 2,
+    protocol: PROTOCOL_VERSION,
     code: 'ABC234',
     game: 'prism',
     visibility: 'private',
@@ -104,7 +107,7 @@ describe('prismSession', () => {
 
   it('sends a command to the room rather than playing it here', () => {
     const snapshot: RoomSnapshot = {
-      protocol: 2,
+      protocol: PROTOCOL_VERSION,
       code: 'ABC234',
       game: 'prism',
       visibility: 'private',

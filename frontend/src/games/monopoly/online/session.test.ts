@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createGame, gameReducer } from '@games/shared/estate'
 import type { GameState, Trade } from '@games/shared/estate/types'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 import {
@@ -21,6 +22,8 @@ const api = (): RoomApi => ({
   action: vi.fn(),
   rematch: vi.fn(),
   claim: vi.fn(),
+  addBot: vi.fn(),
+  removeBot: vi.fn(),
   dismissError: vi.fn(),
 })
 
@@ -46,7 +49,7 @@ function room(
   state: Partial<GameState> = {},
 ) {
   const snapshot: RoomSnapshot = {
-    protocol: 2,
+    protocol: PROTOCOL_VERSION,
     code: 'ABC234',
     game: 'estate',
     visibility: 'private',
@@ -230,7 +233,7 @@ describe('the estate session', () => {
   it('forwards the room’s own messages untouched', () => {
     const wire = api()
     const snapshot: RoomSnapshot = {
-      protocol: 2,
+      protocol: PROTOCOL_VERSION,
       code: 'ABC234',
       game: 'estate',
       visibility: 'private',

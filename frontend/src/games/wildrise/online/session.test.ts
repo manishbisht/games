@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createGame } from '@games/shared/wildrise'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 import { claimTarget, wildriseSession } from './session'
@@ -11,6 +12,8 @@ const api = (): RoomApi => ({
   action: vi.fn(),
   rematch: vi.fn(),
   claim: vi.fn(),
+  addBot: vi.fn(),
+  removeBot: vi.fn(),
   dismissError: vi.fn(),
 })
 
@@ -24,7 +27,7 @@ const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
 /** A three-seat table mid-game, with whatever the test wants true of its seats. */
 function table(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = {}) {
   const snapshot: RoomSnapshot = {
-    protocol: 2,
+    protocol: PROTOCOL_VERSION,
     code: 'ABC234',
     game: 'wildrise',
     visibility: 'private',
@@ -86,7 +89,7 @@ describe('wildriseSession', () => {
 
   it('sends the one wire action the adapter accepts', () => {
     const snapshot: RoomSnapshot = {
-      protocol: 2,
+      protocol: PROTOCOL_VERSION,
       code: 'ABC234',
       game: 'wildrise',
       visibility: 'private',
@@ -135,5 +138,31 @@ describe('claimTarget', () => {
     const session = table(onTurnAway, { id: 'ben', seat: 'p1' })
     const won = { ...session, state: { ...session.state, phase: 'won' as const, winner: 'red' as const } }
     expect(claimTarget(won)).toBeNull()
+  })
+})
+
+describe('a bot at the table', () => {
+  const withBot = {
+    p0: seat('Ann'),
+    p1: seat('Ben'),
+    p2: seat('Jules', { bot: { skill: 'casual' } }),
+  }
+
+  it('tells the board which seats the room is playing', () => {
+    const session = table(withBot)
+    expect(session.players.green?.bot).toEqual({ skill: 'casual' })
+    expect(session.players.red?.bot).toBeUndefined()
+  })
+
+  it('does not wait on a bot to agree to a rematch', () => {
+    // A bot never asks for anything, and the server does not wait for one
+    // either — so a table that shows "waiting for the table" would be waiting
+    // for a game that has already restarted.
+    const session = table({ ...withBot, p1: seat('Ben', { wantsRematch: true }) })
+    expect(session.rematch.theirs).toBe(true)
+  })
+
+  it('still waits on the people who have not asked', () => {
+    expect(table(withBot).rematch.theirs).toBe(false)
   })
 })

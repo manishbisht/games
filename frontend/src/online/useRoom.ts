@@ -14,6 +14,10 @@ export interface RoomApi {
   action: (payload: unknown) => void
   rematch: () => void
   claim: () => void
+  /** Host only: seat a player the room itself takes the turns for. */
+  addBot: (seat: SeatId, skill?: string) => void
+  /** Host only: give a bot's seat back, so a latecomer can have it. */
+  removeBot: (seat: SeatId) => void
   dismissError: () => void
 }
 
@@ -105,6 +109,10 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
       action: (payload) => send({ type: 'action', action: payload }),
       rematch: () => send({ type: 'rematch' }),
       claim: () => send({ type: 'claim' }),
+      // The skill is left off entirely when unset, so the server picks the
+      // first one its adapter offers rather than being handed `undefined`.
+      addBot: (seat, skill) => send({ type: 'addBot', seat, ...(skill ? { skill } : {}) }),
+      removeBot: (seat) => send({ type: 'removeBot', seat }),
       dismissError: () => dispatch({ type: 'dismiss-error' }),
     }),
     [send],

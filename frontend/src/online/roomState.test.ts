@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot } from '@games/shared/protocol'
 import { initialRoomState, isFatal, presenceEvents, roomReducer } from './roomState'
 
 const snapshot: RoomSnapshot = {
-  protocol: 2,
+  protocol: PROTOCOL_VERSION,
   code: 'KX3F9M',
   game: 'chess',
   visibility: 'private',

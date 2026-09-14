@@ -16,6 +16,17 @@ export interface OnlinePanelProps {
   appearance?: 'chess'
 }
 
+/**
+ * Who is at a public table. A seat a bot is in is taken, but a table of bots is
+ * not a table of people — saying "3/4 seated" would send someone to a room
+ * expecting two opponents and one free chair.
+ */
+function seated(room: PublicRoomSummary): string {
+  const people = room.seatsTaken - room.bots
+  const count = `${people}/${room.seatsTotal} seated`
+  return room.bots ? `${count} · ${room.bots} bot${room.bots === 1 ? '' : 's'}` : count
+}
+
 export default function OnlinePanel({ game, basePath, seatChoices, appearance }: OnlinePanelProps) {
   const navigate = useNavigate()
   const identity = useIdentity()
@@ -249,13 +260,11 @@ export default function OnlinePanel({ game, basePath, seatChoices, appearance }:
                 {chess ? (
                   <span>
                     <strong>{room.hostName}</strong>
-                    <small>
-                      {room.seatsTaken}/{room.seatsTotal} seated
-                    </small>
+                    <small>{seated(room)}</small>
                   </span>
                 ) : (
                   <span>
-                    {room.hostName} · {room.seatsTaken}/{room.seatsTotal} seated
+                    {room.hostName} · {seated(room)}
                   </span>
                 )}
                 <button

@@ -11,6 +11,8 @@ export interface HearthSeatPlayer {
   awaySince?: number
   /** The room is already playing this seat — there is nothing left to claim. */
   abandoned?: boolean
+  /** Nobody is behind this seat: the room plays it, and the table should say so. */
+  bot?: { skill: string }
 }
 
 /**
@@ -69,11 +71,17 @@ export function hearthSession(
         connected: info.connected,
         awaySince: info.awaySince,
         abandoned: info.abandoned,
+        bot: info.bot,
       }
   }
 
   const send = (action: HearthOnlineAction) => api.action(action)
-  const others = snapshot.seatIds.filter((seat) => seat !== you.seat && snapshot.seats[seat])
+  // Bots are left out: one never asks for a rematch and the server never waits
+  // for one either, so counting them would leave the table saying "waiting" for
+  // a game that has already restarted.
+  const others = snapshot.seatIds.filter(
+    (seat) => seat !== you.seat && snapshot.seats[seat] && !snapshot.seats[seat]!.bot,
+  )
   return {
     state,
     mySeat: (you.seat && colourOf(you.seat)) || null,

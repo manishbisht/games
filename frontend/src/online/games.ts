@@ -16,6 +16,17 @@ export interface RoomViewProps {
   leave: () => void
 }
 
+/**
+ * One thing a bot can be. The id is the server's — it validates against its own
+ * adapter and the browser never sees the list — so this is the label for it,
+ * and nothing more. Wildrise's three are pace rather than strength, which is
+ * why the labels are written per game rather than generated from the id.
+ */
+export interface BotSkill {
+  id: string
+  label: string
+}
+
 /** The part of a game's room config that isn't already in the catalog. */
 interface OnlineGameConfig {
   /**
@@ -26,6 +37,13 @@ interface OnlineGameConfig {
   minSeats: number
   /** What the button that takes this seat should say. */
   seatLabel(seat: SeatId, index: number): string
+  /**
+   * Skills this game's bots accept, easiest first. The ids mirror the adapter's
+   * `bots.skills` on the server, which is the only thing that validates them;
+   * a games.test.ts case holds the two lists together. Absent when a game has
+   * no bots yet.
+   */
+  botSkills?: BotSkill[]
   /** Lazy so a room page never drags a game's 3D scene in before it is needed. */
   RoomView: LazyExoticComponent<ComponentType<RoomViewProps>>
 }
@@ -40,6 +58,8 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
   chess: {
     minSeats: 2,
     seatLabel: (seat) => (seat === 'w' ? 'Play as White' : 'Play as Black'),
+    // Chess gets its bot when its search moves to the server; until then the
+    // room would refuse an addBot with NOT_ALLOWED.
     RoomView: lazy(() => import('../games/chess/online/ChessRoomView')),
   },
   estate: {
@@ -47,6 +67,9 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     // Tokens and colours are handed out at the start, once the room knows who
     // turned up, so a seat taken beforehand cannot promise one.
     seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    // One strength: Estate's bot has no difficulty to pick, so the picker is
+    // left out entirely rather than offering a choice of one.
+    botSkills: [{ id: 'standard', label: 'Bot' }],
     RoomView: lazy(() => import('../games/monopoly/online/EstateRoomView')),
   },
   hearth: {
@@ -54,6 +77,11 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     // Colours are handed out at the start, once the room knows who turned up, so
     // a seat taken beforehand cannot promise one.
     seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    botSkills: [
+      { id: 'easy', label: 'Easy' },
+      { id: 'medium', label: 'Medium' },
+      { id: 'hard', label: 'Hard' },
+    ],
     RoomView: lazy(() => import('../games/hearth/online/HearthRoomView')),
   },
   prism: {
@@ -61,6 +89,11 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     // Seats are numbered, not dealt: which hand a seat gets is the shuffle's to
     // decide, once the room knows who turned up.
     seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    botSkills: [
+      { id: 'easy', label: 'Easy' },
+      { id: 'medium', label: 'Medium' },
+      { id: 'hard', label: 'Hard' },
+    ],
     RoomView: lazy(() => import('../games/prism/online/PrismRoomView')),
   },
   wildrise: {
@@ -68,6 +101,12 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     // Colours are handed out at the start, once the room knows who turned up, so
     // a seat taken beforehand cannot promise one.
     seatLabel: (_seat, index) => `Take seat ${index + 1}`,
+    // Pace, not strength — there is nothing to be good at on this board.
+    botSkills: [
+      { id: 'casual', label: 'Casual · take it easy' },
+      { id: 'fast', label: 'Fast · keep it moving' },
+      { id: 'fun', label: 'Fun · a little expressive' },
+    ],
     RoomView: lazy(() => import('../games/wildrise/online/WildriseRoomView')),
   },
 }

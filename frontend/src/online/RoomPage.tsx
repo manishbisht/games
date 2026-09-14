@@ -6,14 +6,25 @@ import type { ReactNode } from 'react'
 import { useIdentity } from './identity'
 import { useRoom } from './useRoom'
 import { onlineGame } from './games'
-import type { OnlineGame } from './games'
+import type { BotSkill, OnlineGame } from './games'
 import { presenceEvents } from './roomState'
-import { Check, Copy, Link2 } from 'lucide-react'
+import { Bot, Check, Copy, Link2, UserMinus } from 'lucide-react'
 import ChessShell from '../games/chess/ChessShell'
 import { chessGame } from '../games/catalog'
 import './online.css'
 
 const TOAST_MS = 4000
+
+/** A skill's label, or the raw id if the server offers one we have no word for. */
+const skillLabel = (skills: BotSkill[], id: string) =>
+  skills.find((skill) => skill.id === id)?.label ?? id
+
+/** Say who is actually at the table, rather than how many seats are full. */
+function startLabel(people: number, bots: number, full: boolean): string {
+  const who = `${people} player${people === 1 ? '' : 's'}`
+  const withBots = bots ? `${who} and ${bots} bot${bots === 1 ? '' : 's'}` : who
+  return full ? `Start the game · ${withBots}` : `Start with ${withBots}`
+}
 
 export default function RoomPage({ game }: { game: string }) {
   const { code: raw } = useParams()
@@ -103,6 +114,9 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   const isChess = config.basePath === chessGame.path
 
   // Presence toasts: announce the other seats' disconnects/reconnects.
+  // The skill each empty seat's picker is showing. Seats nobody has chosen for
+  // fall back to the first the game offers, which is what the server would pick.
+  const [chosen, setChosen] = useState<Partial<Record<SeatId, string>>>({})
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([])
@@ -164,33 +178,76 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
       </>
     )
 
-  const seatButton = (seat: SeatId, index: number) => {
+  const isHost = Boolean(you?.isHost)
+  const skills = config.botSkills ?? []
+
+  const seatSlot = (seat: SeatId, index: number) => {
     const occupant = snapshot.seats[seat]
     const mine = you?.seat === seat
+    const bot = occupant?.bot
+    const label = config.seatLabel(seat, index)
+    // A bot is at the table for every purpose, so the seat button is simply
+    // taken. It is the host's to give back, which the control below does.
     return (
-      <button
-        key={seat}
-        className={`ch-room-seat ${mine ? 'ch-room-seat-mine' : ''}`}
-        disabled={Boolean(occupant) && !mine}
-        onClick={() => (mine ? api.leaveSeat() : api.sit(seat))}
-      >
-        {config.basePath === chessGame.path && (
-          <span className={`ch-room-piece ch-room-piece-${seat}`} aria-hidden="true">
-            {seat === 'w' ? '♔' : '♚'}
+      <div key={seat} className="ch-room-seat-slot">
+        <button
+          className={`ch-room-seat ${mine ? 'ch-room-seat-mine' : ''}`}
+          disabled={Boolean(occupant) && !mine}
+          onClick={() => (mine ? api.leaveSeat() : api.sit(seat))}
+        >
+          {config.basePath === chessGame.path && (
+            <span className={`ch-room-piece ch-room-piece-${seat}`} aria-hidden="true">
+              {seat === 'w' ? '♔' : '♚'}
+            </span>
+          )}
+          <strong>{mine ? 'Leave seat' : label}</strong>
+          <span>
+            {occupant
+              ? `${occupant.player.name}${bot ? ` · ${skillLabel(skills, bot.skill)}` : occupant.connected ? '' : ' (away)'}`
+              : 'Open seat'}
           </span>
+        </button>
+        {isHost && bot && (
+          <button
+            className="ch-room-bot-remove"
+            onClick={() => api.removeBot(seat)}
+            aria-label={`Remove ${occupant!.player.name}`}
+          >
+            <UserMinus size={14} /> Remove
+          </button>
         )}
-        <strong>{mine ? 'Leave seat' : config.seatLabel(seat, index)}</strong>
-        <span>
-          {occupant ? `${occupant.player.name}${occupant.connected ? '' : ' (away)'}` : 'Open seat'}
-        </span>
-      </button>
+        {isHost && !occupant && skills.length > 0 && (
+          <div className="ch-room-bot-add">
+            {skills.length > 1 && (
+              <select
+                aria-label={`Bot skill for ${label}`}
+                value={chosen[seat] ?? skills[0].id}
+                onChange={(event) => setChosen((all) => ({ ...all, [seat]: event.target.value }))}
+              >
+                {skills.map((skill) => (
+                  <option key={skill.id} value={skill.id}>
+                    {skill.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button onClick={() => api.addBot(seat, chosen[seat] ?? skills[0].id)}>
+              <Bot size={14} /> Add bot
+            </button>
+          </div>
+        )}
+      </div>
     )
   }
 
-  const isHost = Boolean(you?.isHost)
   // A game that does not insist on a full table plays with whoever turned up, so
   // "ready" is its own minimum rather than every seat being taken.
   const taken = snapshot.seatIds.filter((seat) => snapshot.seats[seat]).length
+  // Bots fill seats for every purpose, fullness included, so `ready` counts
+  // them — but the button says both numbers, because "start with 3 players"
+  // when two of them are bots is not true.
+  const bots = snapshot.seatIds.filter((seat) => snapshot.seats[seat]?.bot).length
+  const people = taken - bots
   const ready = taken >= config.minSeats
   return (
     <RoomFrame config={config}>
@@ -228,14 +285,10 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
           {copyError && <p role="status">Select and copy the invite link above to share it.</p>}
         </div>
         {isChess && <p className="ch-room-seat-label">CHOOSE YOUR SIDE</p>}
-        <div className="ch-room-seats">{snapshot.seatIds.map(seatButton)}</div>
+        <div className="ch-room-seats">{snapshot.seatIds.map(seatSlot)}</div>
         {isHost ? (
           <button className="ch-room-start" disabled={!ready} onClick={api.start}>
-            {!ready
-              ? 'Waiting for players…'
-              : taken === snapshot.seatIds.length
-                ? 'Start the game'
-                : `Start with ${taken} players`}
+            {!ready ? 'Waiting for players…' : startLabel(people, bots, taken === snapshot.seatIds.length)}
           </button>
         ) : (
           <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>

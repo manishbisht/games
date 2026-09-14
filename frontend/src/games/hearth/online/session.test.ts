@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createGame } from '@games/shared/hearth'
+import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 import { claimTarget, hearthSession } from './session'
@@ -11,6 +12,8 @@ const api = (): RoomApi => ({
   action: vi.fn(),
   rematch: vi.fn(),
   claim: vi.fn(),
+  addBot: vi.fn(),
+  removeBot: vi.fn(),
   dismissError: vi.fn(),
 })
 
@@ -24,7 +27,7 @@ const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
 /** A three-seat table mid-game, with whatever the test wants true of its seats. */
 function table(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = {}) {
   const snapshot: RoomSnapshot = {
-    protocol: 2,
+    protocol: PROTOCOL_VERSION,
     code: 'ABC234',
     game: 'hearth',
     visibility: 'private',
@@ -86,7 +89,7 @@ describe('hearthSession', () => {
 
   it('sends the two wire actions the adapter accepts', () => {
     const snapshot: RoomSnapshot = {
-      protocol: 2,
+      protocol: PROTOCOL_VERSION,
       code: 'ABC234',
       game: 'hearth',
       visibility: 'private',
