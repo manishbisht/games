@@ -1,6 +1,8 @@
+import ThemeControl from '../../theme/ThemeControl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
+import { HeaderAuth } from '../../online/identity'
 import { Link } from 'react-router'
 import {
   ArrowDownToLine,
@@ -250,6 +252,8 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               <LogOut size={18} />
             </button>
           )}
+          <ThemeControl />
+          <HeaderAuth readOnly={Boolean(online)} />
         </nav>
       </header>
       <main className="pr-arena">
@@ -263,6 +267,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               onChange={setOptions}
               onStart={() => start()}
               onHelp={() => setDialog('rules')}
+              disabled={room.disabled}
             />
             <div className="pr-menu-table-label">
               <span className="pr-eyebrow">YOUR TABLE IS READY</span>

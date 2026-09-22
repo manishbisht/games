@@ -1,23 +1,23 @@
+import ThemeControl from '../theme/ThemeControl'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { RoomSnapshot, SeatId } from '@games/shared/protocol'
 import type { ReactNode } from 'react'
-import { useIdentity } from './identity'
+import { HeaderAuth, useIdentity } from './identity'
 import { useRoom } from './useRoom'
 import { onlineGame } from './games'
 import type { BotSkill, OnlineGame } from './games'
 import { presenceEvents } from './roomState'
-import { Bot, Check, Copy, Link2, UserMinus } from 'lucide-react'
+import { ArrowLeft, Bot, Check, Copy, Link2, UserMinus } from 'lucide-react'
 import ChessShell from '../games/chess/ChessShell'
-import { chessGame } from '../games/catalog'
+import { chessGame, games } from '../games/catalog'
 import './online.css'
 
 const TOAST_MS = 4000
 
 /** A skill's label, or the raw id if the server offers one we have no word for. */
-const skillLabel = (skills: BotSkill[], id: string) =>
-  skills.find((skill) => skill.id === id)?.label ?? id
+const skillLabel = (skills: BotSkill[], id: string) => skills.find((skill) => skill.id === id)?.label ?? id
 
 /** Say who is actually at the table, rather than how many seats are full. */
 function startLabel(people: number, bots: number, full: boolean): string {
@@ -52,13 +52,40 @@ export default function RoomPage({ game }: { game: string }) {
   return <Room code={code} config={config} />
 }
 
-function RoomFrame({ config, children }: { config?: OnlineGame; children: ReactNode }) {
-  return config?.basePath === chessGame.path ? <ChessShell>{children}</ChessShell> : <>{children}</>
+function RoomFrame({
+  config,
+  children,
+  inRoom = true,
+}: {
+  config?: OnlineGame
+  children: ReactNode
+  inRoom?: boolean
+}) {
+  if (config?.basePath === chessGame.path) return <ChessShell inRoom={inRoom}>{children}</ChessShell>
+  const game = games.find((entry) => entry.path === config?.basePath)
+  return (
+    <div className={`room-shell room-shell-${game?.id ?? 'estate'}`}>
+      <header className="room-header">
+        <Link to={config?.basePath ?? '/'} className="room-brand">
+          {game && <img src={`${import.meta.env.BASE_URL}${game.icon}`} alt="" width="32" height="32" />}
+          {config?.name ?? 'Games'}
+        </Link>
+        <nav aria-label="Game navigation">
+          <Link to="/">
+            <ArrowLeft size={15} /> All games
+          </Link>
+          <ThemeControl />
+          <HeaderAuth readOnly={inRoom} />
+        </nav>
+      </header>
+      {children}
+    </div>
+  )
 }
 
 function Notice({ title, children, config }: { title: string; children?: ReactNode; config?: OnlineGame }) {
   return (
-    <RoomFrame config={config}>
+    <RoomFrame config={config} inRoom={false}>
       <main className="ch-room-notice">
         {config?.basePath === chessGame.path && (
           <span className="ch-room-emblem" aria-hidden="true">
@@ -252,9 +279,13 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   return (
     <RoomFrame config={config}>
       <main className="ch-room">
-        {isChess && <p className="ch-eyebrow">A GOOD GAME IS ONE INVITE AWAY</p>}
+        <p className="ch-eyebrow">A GOOD GAME IS ONE INVITE AWAY</p>
         <h1>Room {snapshot.code}</h1>
-        {isChess && <p className="ch-room-intro">Share a link. Choose a side. Meet at the board.</p>}
+        <p className="ch-room-intro">
+          {isChess
+            ? 'Share a link. Choose a side. Meet at the board.'
+            : 'Invite friends, choose a seat, or add bots to get started.'}
+        </p>
         <div className="ch-room-invite">
           <label htmlFor="room-invite">
             <Link2 size={15} /> Invite a friend

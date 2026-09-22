@@ -127,3 +127,187 @@
   background: rgba(20, 20, 20, 0.85);
   color: #fff;
 }
+
+/* Invitations should feel like the game they lead into, even before the board loads. */
+.room-shell {
+  --room-bg: var(--theme-page);
+  --room-panel: var(--theme-surface);
+  --room-ink: var(--theme-text);
+  --room-muted: var(--theme-muted);
+  --room-border: var(--theme-border);
+  --room-accent: var(--theme-accent);
+  --room-button-ink: light-dark(#fffef9, #18211c);
+  min-height: 100svh;
+  background: var(--room-bg);
+  color: var(--room-ink);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+.room-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  min-height: 88px;
+  padding: 16px 5%;
+  border-bottom: 1px solid var(--room-border);
+}
+.room-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font:
+    600 24px Georgia,
+    serif;
+  text-decoration: none;
+}
+.room-header nav,
+.room-header nav > a {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 12px;
+  text-decoration: none;
+}
+.room-header nav > a {
+  gap: 6px;
+}
+.room-shell .ch-room,
+.room-shell .ch-room-notice {
+  max-width: 580px;
+  margin: 48px auto;
+  padding: 28px;
+  border: 1px solid var(--room-border);
+  border-radius: 20px;
+  background: var(--room-panel);
+  gap: 20px;
+}
+.room-shell .ch-eyebrow {
+  color: var(--room-muted);
+  font-size: 9px;
+  letter-spacing: 1.6px;
+}
+.room-shell h1 {
+  font:
+    400 clamp(26px, 5vw, 36px)/1.2 Georgia,
+    serif;
+}
+.room-shell .ch-room-intro,
+.room-shell .ch-room-notice p {
+  color: var(--room-muted);
+  line-height: 1.7;
+  font-size: 13px;
+}
+.room-shell input,
+.room-shell select,
+.room-shell button {
+  min-height: 44px;
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--room-bg);
+  color: var(--room-ink);
+  font-size: 13px;
+}
+.room-shell input:focus-visible,
+.room-shell select:focus-visible,
+.room-shell button:focus-visible,
+.room-shell a:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 3px;
+}
+.room-shell .ch-room-invite {
+  display: grid;
+  gap: 10px;
+  padding-block: 18px;
+  border-block: 1px solid var(--room-border);
+}
+.room-shell .ch-room-invite label,
+.room-shell .ch-room-copy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.room-shell .ch-room-invite > div,
+.room-shell .ch-room-notice form {
+  display: flex;
+  gap: 8px;
+}
+.room-shell .ch-room-invite input,
+.room-shell .ch-room-notice input {
+  flex: 1;
+  width: 0;
+}
+.room-shell .ch-room-copy {
+  flex-shrink: 0;
+}
+.room-shell .ch-room-seat {
+  min-height: 98px;
+  text-align: left;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+.room-shell .ch-room-seat:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.room-shell .ch-room-seat span {
+  color: var(--room-muted);
+  font-size: 12px;
+}
+.room-shell .ch-room-seat-mine {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -2px;
+}
+.room-shell .ch-room-start,
+.room-shell .ch-room-notice button {
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+  color: var(--room-button-ink);
+  min-height: 48px;
+}
+.room-shell .ch-room-leave,
+.room-shell .ch-room-notice > a {
+  justify-self: center;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--room-muted);
+  font-size: 12px;
+  text-underline-offset: 4px;
+}
+.room-shell .ch-room-loading {
+  padding: 60px 24px;
+  text-align: center;
+}
+.ch-room-toasts {
+  width: max-content;
+  max-width: calc(100vw - 32px);
+}
+.ch-room-toast {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+@media (max-width: 600px) {
+  .room-header {
+    flex-wrap: wrap;
+    padding: 16px 20px;
+    gap: 12px;
+  }
+  .room-header nav {
+    flex: 1;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .room-shell .ch-room,
+  .room-shell .ch-room-notice {
+    margin: 24px 16px;
+    padding: 20px;
+    border-radius: 14px;
+  }
+  .room-shell input,
+  .room-shell select {
+    font-size: 16px;
+  }
+}

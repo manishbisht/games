@@ -4,13 +4,16 @@ import { HashRouter } from 'react-router'
 import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './online/identity'
+import { ThemeProvider } from './theme/ThemeProvider'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AuthProvider>
-      <HashRouter>
-        <App />
-      </HashRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </AuthProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

@@ -4,7 +4,7 @@ An original 3D woodland take on snakes and ladders. Open `/#/wildrise` or choose
 
 ## Play
 
-The setup offers two ways in. **Play vs bot** seats you against 1–3 bot companions on this device: rename the players, choose a table personality, and start. **Play online** creates or joins a room so 2–4 people play the same board from their own devices. The first player is chosen randomly either way. Click **Roll dice**, tap the physical die, or press Space; the game completes movement and passes the turn automatically.
+The setup offers two ways in. **Play vs bot** creates a private online room against 1–3 bot companions: choose your name and a table personality, then start. **Play online** creates or joins a room so 2–4 people play the same board from their own devices. The first player is chosen randomly either way. Click **Roll dice**, tap the physical die, or press Space; the game completes movement and passes the turn automatically.
 
 ## Online tables
 
@@ -14,7 +14,7 @@ The one thing a seat sends is `{ kind: 'roll' }`. Everything else a turn is made
 
 Default rules: start off the board, exact roll to 100, shared spaces, no bonus turn for a six. The setup can disable exact finish. Landing on a ladder bottom climbs; landing on a snake head slides. Passing over either does nothing. Victory shows the winner's position, turns and ladder count, with replay and menu actions.
 
-Drag to rotate, scroll/pinch to zoom, or use the labeled camera controls. The roll control stays visible on mobile. Rules and pause dialogs suspend the current turn without losing its remaining animation time. Background tabs also pause. Sound is synthesized locally and the mute preference survives starting or replaying a match. Reduced motion shortens transitions, removes spinning/bouncing and disables confetti.
+Drag to rotate, scroll/pinch to zoom, or use the labeled camera controls. The roll control stays visible on mobile. The server keeps turns moving while rules dialogs or background tabs are open. Sound is synthesized locally and the mute preference survives starting or replaying a match. Reduced motion shortens transitions, removes spinning/bouncing and disables confetti.
 
 ## Structure and configuration
 
@@ -25,13 +25,12 @@ The rules live in `shared/src/wildrise/` so the browser and the room server can 
 - `@games/shared/wildrise/engine`: pure reducer and injectable random source. Guards phase transitions, commits a single roll, applies a whole walk in one action, resolves the landing and declares the winner.
 - `@games/shared/wildrise/timing`: shared presentation durations, priced per square for a walk. Casual, Fast and Fun bots differ in pacing; all use the same roll function and rules.
 - `shared/src/wildrise/adapter.ts`: the room's seam — seat rules, the server-thrown die, the timed beats, and what happens when a seat goes quiet.
-- `game/useGameClock.ts`: automatic phase/bot scheduling with pause/resume and cleanup. Inert online, where the server keeps the beats instead.
 - `online/session.ts` and `online/WildriseRoomView.tsx`: turn a room snapshot into the colours and callbacks the table already speaks.
 - `scene/models.ts`: original procedural geometry, animal miniatures, artwork, die and transport curves.
 - `scene/createScene.ts`: lighting, camera, interaction and state-driven animation. The renderer never decides a move, dice result or winner; its resources are disposed on navigation.
 - `WildriseGame.tsx` and `components/`: setup, accessible dialogs, live text status, event history and winner UI.
 
-The reducer can also configure starting on square 1, extra turns for sixes, blocking occupied destinations, and the number of configured snakes/ladders. These remain code options rather than a full custom-rules editor, and an online room plays the printed defaults — the only thing a host chooses is the table size. There is no saved-game persistence: a room lives for 24 hours and a local game lives in the tab.
+The reducer can also configure starting on square 1, extra turns for sixes, blocking occupied destinations, and the number of configured snakes/ladders. These remain code options rather than a full custom-rules editor, and an online room plays the printed defaults — the only thing a host chooses is the table size. All games live in server rooms for 24 hours and can be resumed from their links. There is no offline or local play mode.
 
 ## Verify
 
@@ -46,6 +45,6 @@ npm run lint
 
 The rules and the room adapter are tested from the repository root with `npm test -w shared`.
 
-The repository's browser configuration uses installed Google Chrome and starts the frontend and shared test backend. Use Node 22 or newer for that backend. Wildrise itself runs entirely in the browser. WebGL is required for the tabletop; a failure message preserves access to text positions and turn controls.
+The repository's browser configuration uses installed Google Chrome and starts the frontend and shared test backend. Use Node 22 or newer for that backend. Wildrise requires the backend, including when playing against bots. WebGL is required for the tabletop; a failure message preserves access to text positions and turn controls.
 
-Tests cover phase guards, the one-beat walk, both transport types, finish variants, occupancy, bonus turns, immutable/serializable state, fair dice and completed seeded games. The adapter suite covers seat rules, off-turn and wrong-phase rejection, the server-thrown die, each timed beat's action and delay, rolling for an absent seat, and rematch. Browser coverage plays through a complete local match, exact-finish rejection and replay; tests all bot counts, keyboard and mobile controls, physical-die clicking, pause timing and navigation; and drives two browsers through a real room from create to shared board. Screenshots go to the ignored `frontend/test-results/` directory.
+Tests cover phase guards, the one-beat walk, both transport types, finish variants, occupancy, bonus turns, immutable/serializable state, fair dice and completed seeded games. The adapter suite covers seat rules, off-turn and wrong-phase rejection, the server-thrown die, each timed beat's action and delay, rolling for an absent seat, and rematch. Browser coverage checks bot rooms, setup choices, keyboard and mobile controls, navigation, and two browsers joining a shared board. Screenshots go to the ignored `frontend/test-results/` directory.

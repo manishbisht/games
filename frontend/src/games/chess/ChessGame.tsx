@@ -1,6 +1,8 @@
+import ThemeControl from '../../theme/ThemeControl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
+import { HeaderAuth } from '../../online/identity'
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -393,6 +395,8 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
           <button onClick={() => setDialog('settings')} aria-label="Settings">
             <Settings2 size={18} />
           </button>
+          <ThemeControl />
+          <HeaderAuth readOnly={Boolean(online)} />
         </nav>
       </header>
 

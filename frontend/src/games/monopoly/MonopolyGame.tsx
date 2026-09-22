@@ -1,5 +1,7 @@
+import ThemeControl from '../../theme/ThemeControl'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
+import { HeaderAuth } from '../../online/identity'
 import {
   ArrowLeft,
   ArrowDownUp,
@@ -426,6 +428,8 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           <button className="icon-button" aria-label="Game settings" onClick={() => setModal('settings')}>
             <Settings2 size={19} />
           </button>
+          <ThemeControl />
+          <HeaderAuth readOnly={Boolean(online)} />
         </div>
       </header>
       <main className="main-content">
@@ -780,7 +784,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         </div>
       )}
       {modal === 'setup' && (
-        <SetupDialog onClose={() => setModal(null)} onStart={startGame} />
+        <SetupDialog onClose={() => setModal(null)} onStart={startGame} disabled={room.disabled} />
       )}
       {modal === 'portfolio' && (
         <PortfolioDialog

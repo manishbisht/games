@@ -1,0 +1,89 @@
+/* Shared UI colors. Boards, playing cards, and player colors keep their artwork. */
+:root {
+  --theme-page: light-dark(#faf9f5, #18211c);
+  --theme-surface: light-dark(#fffef9, #202c24);
+  --theme-inset: light-dark(#eef0e7, #28362c);
+  --theme-border: light-dark(#d8dfd1, #3c4d3f);
+  --theme-text: light-dark(#303c35, #edf0e5);
+  --theme-muted: light-dark(#66735e, #a8b5a0);
+  --theme-accent: light-dark(#526849, #cdb887);
+  --theme-danger: light-dark(#a44534, #e9a591);
+}
+
+.theme-control {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  position: relative;
+  color: var(--theme-muted);
+}
+.theme-control > svg {
+  position: absolute;
+  left: 10px;
+  pointer-events: none;
+}
+.theme-control select.theme-select {
+  width: 108px;
+  min-height: 44px;
+  padding: 8px 6px 8px 32px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: var(--theme-surface);
+  color: var(--theme-text);
+  font:
+    500 12px 'DM Sans',
+    sans-serif;
+  cursor: pointer;
+}
+.theme-control select.theme-select:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1200px) {
+  .collection-header-note,
+  .ch-brand small,
+  .ch-brand-divider,
+  .pr-header-note,
+  .wr-header-note,
+  .brand-description,
+  .hh-local-badge {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .collection-header:has(.theme-control),
+  .hh-header:has(.theme-control),
+  .site-header:has(.theme-control),
+  .ch-app .ch-header:has(.theme-control),
+  .pr-header:has(.theme-control),
+  .wr-header:has(.theme-control),
+  .room-header:has(.theme-control) {
+    display: flex;
+    height: auto;
+    min-height: 74px;
+    flex-wrap: wrap;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    row-gap: 12px;
+  }
+  .hh-header-actions:has(.theme-control),
+  .header-right:has(.theme-control),
+  .ch-header nav:has(.theme-control),
+  .pr-header-actions:has(.theme-control),
+  .wr-header-actions:has(.theme-control),
+  .room-header nav:has(.theme-control) {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .collection-header .collection-free {
+    display: none;
+  }
+  .collection-header {
+    column-gap: 12px;
+  }
+  .collection-header .theme-control {
+    margin-left: auto;
+  }
+}

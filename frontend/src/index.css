@@ -1,21 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap');
+@import './theme/theme.css';
 :root {
   font-family: 'DM Sans', sans-serif;
-  color: #e9edf2;
-  background: #111722;
+  color: var(--theme-text);
+  background: var(--theme-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-weight: 400;
-  color-scheme: dark;
+  color-scheme: light dark;
   font-size: 14px;
-  --bg: #111722;
-  --panel: #19212e;
-  --muted: #8b95a5;
-  --text: #edf0f5;
-  --accent: #e9b47d;
-  --border: #2a3240;
+  --bg: light-dark(#faf9f5, #111722);
+  --panel: light-dark(#fffef9, #19212e);
+  --muted: light-dark(#66735e, #8b95a5);
+  --text: light-dark(#303c35, #edf0f5);
+  --accent: light-dark(#805a2e, #e9b47d);
+  --border: light-dark(#d8dfd1, #2a3240);
+}
+/* Keep explicit schemes in CSS too, so the production CSS fallback follows the
+   saved preference instead of only the device's media query. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 * {
   box-sizing: border-box;

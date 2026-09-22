@@ -1,41 +1,16 @@
 .play-options {
-  --po-ink: #edf0f5;
-  --po-muted: #a2abba;
-  --po-border: #34404c;
-  --po-field: #141d28;
-  --po-accent: #e9b47d;
-  --po-button-ink: #25221e;
-  --po-selected: #e9b47d1a;
+  --po-ink: var(--theme-text);
+  --po-muted: var(--theme-muted);
+  --po-border: var(--theme-border);
+  --po-field: var(--theme-surface);
+  --po-accent: var(--theme-accent);
+  --po-button-ink: light-dark(#fffef9, #18211c);
+  --po-selected: var(--theme-inset);
   margin-top: 20px;
   min-width: 0;
 }
-.hh-setup .play-options {
-  --po-ink: #504d43;
-  --po-muted: #857e6d;
-  --po-border: #e3ddd0;
-  --po-field: #fffdf8;
-  --po-accent: #718263;
-  --po-button-ink: #fff;
-  --po-selected: #71826314;
-}
 .pr-setup .play-options {
   margin-top: 0;
-  --po-ink: #e5e8d9;
-  --po-muted: #aebbaa;
-  --po-border: #425346;
-  --po-field: #1e342b;
-  --po-accent: #d4be8b;
-  --po-button-ink: #243327;
-  --po-selected: #d4be8b15;
-}
-.wr-setup .play-options {
-  --po-ink: #454f3a;
-  --po-muted: #7c8770;
-  --po-border: #dce1cf;
-  --po-field: #fbfcf5;
-  --po-accent: #667b50;
-  --po-button-ink: #fff;
-  --po-selected: #667b5012;
 }
 .play-options-modes {
   display: grid;
@@ -84,7 +59,8 @@
   gap: 8px;
   font-size: 12px;
 }
-.play-options .ch-online input:not([type='checkbox']) {
+.play-options .ch-online input:not([type='checkbox']),
+.play-options .play-options-name input {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--po-border);
@@ -94,7 +70,8 @@
   padding: 10px 12px;
   font-size: 13px;
 }
-.play-options .ch-online input::placeholder {
+.play-options .ch-online input::placeholder,
+.play-options .play-options-name input::placeholder {
   color: var(--po-muted);
 }
 .play-options .ch-online input[type='checkbox'] {
@@ -183,7 +160,7 @@
   overflow-y: auto;
 }
 .play-options .ch-online-error {
-  color: #cc806c;
+  color: light-dark(var(--theme-danger), #cc806c);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -202,7 +179,8 @@
   outline-offset: 3px;
 }
 @media (max-width: 700px), (pointer: coarse) {
-  .play-options .ch-online input:not([type='checkbox']) {
+  .play-options .ch-online input:not([type='checkbox']),
+  .play-options .play-options-name input {
     font-size: 16px;
   }
   .play-options .ch-online button {
@@ -220,8 +198,24 @@
 /* Asked once, above the tabs: both ways of playing make a real room now. */
 .play-options-name {
   display: grid;
-  gap: 0.3rem;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--po-ink);
+  font-size: 12px;
 }
 .play-options-name input {
   width: 100%;
+}
+.play-options-guest-note {
+  margin-top: 6px;
+  color: var(--po-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.play-options-identity {
+  margin-top: 16px;
+  color: var(--po-ink);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }

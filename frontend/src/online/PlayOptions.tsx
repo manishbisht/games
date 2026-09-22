@@ -12,10 +12,7 @@ import './PlayOptions.css'
  * server deals it — which is why the name is asked for once, up here, rather
  * than by whichever tab happens to need it.
  */
-export default function PlayOptions({
-  children,
-  ...room
-}: OnlinePanelProps & { children: ReactNode }) {
+export default function PlayOptions({ children, ...room }: OnlinePanelProps & { children: ReactNode }) {
   const [mode, setMode] = useState<'bot' | 'online'>('bot')
   const identity = useIdentity()
   const [name, setName] = useState(identity.name)
@@ -40,27 +37,43 @@ export default function PlayOptions({
           <Globe2 size={16} /> Play online
         </button>
       </div>
-      {!identity.isSignedIn && (
-        <label className="play-options-name">
-          Your name
-          <input
-            value={name}
-            maxLength={24}
-            autoComplete="nickname"
-            placeholder="What should we call you?"
-            onChange={(event) => {
-              setName(event.target.value)
-              identity.setName(event.target.value)
-            }}
-          />
-        </label>
+      {!identity.isReady ? (
+        <p className="play-options-identity" role="status">
+          Loading your player profile…
+        </p>
+      ) : identity.isSignedIn ? (
+        <p className="play-options-identity">
+          Playing as <strong>{identity.name}</strong>
+        </p>
+      ) : (
+        <div>
+          <label className="play-options-name">
+            Your name
+            <input
+              value={name}
+              maxLength={24}
+              autoComplete="nickname"
+              placeholder="What should we call you?"
+              aria-describedby={`${panelId}-guest-note`}
+              onChange={(event) => {
+                setName(event.target.value)
+                identity.setName(event.target.value)
+              }}
+            />
+          </label>
+          <p className="play-options-guest-note" id={`${panelId}-guest-note`}>
+            Play as a guest. No account needed.
+          </p>
+        </div>
       )}
       <p className="play-options-description">
         {mode === 'bot'
-          ? 'Your seat. A little computer competition.'
-          : 'Create a room or join friends on their own devices.'}
+          ? 'Your own room with bot opponents. Internet required.'
+          : 'Create a room or join friends on their own devices. Internet required.'}
       </p>
-      <div id={panelId}>{mode === 'bot' ? children : <OnlinePanel {...room} nameAsked={!identity.isSignedIn} />}</div>
+      <div id={panelId}>
+        {mode === 'bot' ? children : <OnlinePanel {...room} nameAsked={!identity.isSignedIn} />}
+      </div>
     </div>
   )
 }

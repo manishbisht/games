@@ -125,7 +125,15 @@ export default function OnlinePanel({
       ) : (
         <h3>Play online</h3>
       )}
-      {!identity.isSignedIn && !nameAsked ? (
+      {!identity.isReady ? (
+        // A host that asked for the name also owns the waiting message; saying
+        // it here as well would announce it twice to a screen reader.
+        !nameAsked && (
+          <p className="ch-online-identity" role="status">
+            Loading your player profile…
+          </p>
+        )
+      ) : !identity.isSignedIn && !nameAsked ? (
         <label className="ch-online-name">
           Your name
           <input
@@ -145,6 +153,11 @@ export default function OnlinePanel({
             Playing as <strong>{identity.name}</strong>
           </p>
         )
+      )}
+      {chess && (
+        <p className="ch-online-identity">
+          {identity.isSignedIn ? 'Internet required.' : 'No account needed. Internet required.'}
+        </p>
       )}
       {seatChoices && (
         <div className="ch-online-seats" role="group" aria-label="Table size">

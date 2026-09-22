@@ -5,6 +5,7 @@ import { roomSocketUrl } from './api'
 import { initialRoomState, isFatal, roomReducer } from './roomState'
 import type { RoomClientState } from './roomState'
 import { useIdentity } from './identity'
+import type { IdentityCredentials } from './identity'
 
 export interface RoomApi {
   sit: (seat: SeatId) => void
@@ -61,7 +62,25 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
           ws.send('ping')
         }, HEARTBEAT_MS)
         const me = identityRef.current
-        const credentials = await me.credentials()
+        let credentials: IdentityCredentials
+        try {
+          credentials = await me.credentials()
+        } catch (cause) {
+          // A signed-in player whose token has gone refuses to be downgraded to
+          // a guest, because joining under a second id would cost them their
+          // seat. Say so and let the usual reconnect try again.
+          if (disposed) return
+          dispatch({
+            type: 'message',
+            message: {
+              type: 'error',
+              code: 'BAD_TOKEN',
+              message: cause instanceof Error ? cause.message : 'We could not confirm who you are.',
+            },
+          })
+          ws.close()
+          return
+        }
         // `credentials()` can hit the network (Clerk), and the socket may have
         // closed or been replaced while we waited.
         if (disposed || ws.readyState !== WebSocket.OPEN) return

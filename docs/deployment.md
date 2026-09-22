@@ -24,13 +24,21 @@ skipping the Clerk section just means everyone plays as a guest.
 
 ## Clerk (optional sign-in)
 
-1. Create a Clerk application (clerk.com), enable the sign-in methods you want.
+1. Create a Clerk application (clerk.com), and enable the Google social connection for sign-in and sign-up. The frontend uses Clerk’s sign-in modal with Google shown among the social buttons.
 2. Add `https://games.manishbisht.me` (and localhost for dev) to allowed origins.
 3. Repo variable `CLERK_PUBLISHABLE_KEY` — the production publishable key
    (`pk_live_…`). Baked into the frontend as `VITE_CLERK_PUBLISHABLE_KEY`.
 4. Backend secret: `cd backend && npx wrangler secret put CLERK_SECRET_KEY`
    (the matching secret key). Without it the API rejects Clerk tokens but
    guests are unaffected.
+
+The Google sign-in button appears on the collection and all five game menus when
+`VITE_CLERK_PUBLISHABLE_KEY` is present at build time. Without that key, the UI
+shows a guest identity and games remain playable as guests. If a deployed build
+is missing the button, check the `CLERK_PUBLISHABLE_KEY` Actions variable and
+rebuild the Pages site; changing it does not update an already-built bundle.
+Google OAuth also requires the Google connection and production credentials to
+be configured in the matching Clerk instance.
 
 ## Local development
 
@@ -42,4 +50,5 @@ skipping the Clerk section just means everyone plays as a guest.
 - Optional Clerk in dev: put `VITE_CLERK_PUBLISHABLE_KEY=pk_test_…` in
   `frontend/.env.local` and `CLERK_SECRET_KEY=sk_test_…` in `backend/.dev.vars`.
 - Tests: `npm test` (all workspaces) · e2e: `npm run test:e2e -w frontend`
-  (boots both dev servers itself).
+  (starts the local backend and serves a production frontend build).
+- Longer bot gameplay checks: `npm run test:smoke -w frontend`.

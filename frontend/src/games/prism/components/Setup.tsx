@@ -14,11 +14,14 @@ export default function Setup({
   onChange,
   onStart,
   onHelp,
+  disabled = false,
 }: {
   options: SetupOptions
   onChange: (next: SetupOptions) => void
   onStart: () => void
   onHelp: () => void
+  /** True while the identity is still settling: starting would do nothing. */
+  disabled?: boolean
 }) {
   const update = (next: Partial<SetupOptions>) => onChange({ ...options, ...next })
   return (
@@ -77,7 +80,7 @@ export default function Setup({
                   : 'A sharper table. Every card counts.'}
             </p>
           </div>
-          <button className="pr-primary pr-start" onClick={onStart}>
+          <button className="pr-primary pr-start" onClick={onStart} disabled={disabled}>
             Let’s play <ArrowRight size={19} />
           </button>
           <div className="pr-setup-foot">

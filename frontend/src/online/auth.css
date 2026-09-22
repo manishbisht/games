@@ -1,0 +1,110 @@
+.account-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.account-control > button.account-signin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+  color: #3c4043;
+  font:
+    500 12px 'DM Sans',
+    sans-serif;
+  white-space: nowrap;
+}
+.account-control > button.account-signin:hover {
+  background: #f3f6fa;
+  border-color: #b4bac4;
+  color: #202124;
+}
+.account-control > button.account-signin:focus-visible {
+  outline: 2px solid #4285f4;
+  outline-offset: 3px;
+}
+.account-status {
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 8px;
+}
+.account-status img {
+  border-radius: 50%;
+  object-fit: cover;
+}
+.account-status-name {
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Give the account action its own row on phones, keeping the full Google label. */
+@media (max-width: 1100px) {
+  .collection-header-note,
+  .ch-brand small,
+  .ch-brand-divider,
+  .pr-header-note,
+  .wr-header-note {
+    display: none;
+  }
+  .ch-header nav {
+    gap: 14px;
+  }
+}
+@media (max-width: 1000px) {
+  .hh-header:has(.account-control) {
+    display: flex;
+  }
+}
+@media (max-width: 700px) {
+  .collection-header:has(.account-control),
+  .hh-header:has(.account-control),
+  .site-header:has(.account-control),
+  .ch-app .ch-header:has(.account-control),
+  .pr-header:has(.account-control),
+  .wr-header:has(.account-control) {
+    height: auto;
+    min-height: 74px;
+    flex-wrap: wrap;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    row-gap: 12px;
+  }
+  .hh-header-actions:has(.account-control),
+  .header-right:has(.account-control),
+  .ch-header nav:has(.account-control),
+  .pr-header-actions:has(.account-control),
+  .wr-header-actions:has(.account-control) {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .hh-header-actions > .account-control,
+  .header-right > .account-control,
+  .ch-header nav > .account-control,
+  .pr-header-actions > .account-control,
+  .wr-header-actions > .account-control {
+    margin-left: auto;
+  }
+  .collection-header .collection-free {
+    display: none;
+  }
+  .account-status-name {
+    max-width: 110px;
+  }
+  .ch-header nav > .ch-header-line {
+    display: none;
+  }
+  .ch-app .ch-header nav .account-signin span {
+    display: inline;
+  }
+}

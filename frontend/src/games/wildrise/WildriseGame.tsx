@@ -1,5 +1,7 @@
+import ThemeControl from '../../theme/ThemeControl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
+import { HeaderAuth } from '../../online/identity'
 import { Link } from 'react-router'
 import {
   ArrowDownRight,
@@ -116,6 +118,7 @@ function Table({
   options,
   onOptions,
   onStart,
+  startDisabled = false,
   soundOn,
   setSoundOn,
   online,
@@ -124,6 +127,8 @@ function Table({
   options: SetupOptions
   onOptions: (o: SetupOptions) => void
   onStart: () => void
+  /** True while the identity is still settling: starting would do nothing. */
+  startDisabled?: boolean
   soundOn: boolean
   setSoundOn: (on: boolean) => void
   online?: OnlineWildriseSession
@@ -263,6 +268,8 @@ function Table({
               <Pause size={18} />
             </button>
           )}
+          <ThemeControl />
+          <HeaderAuth readOnly={Boolean(online)} />
         </nav>
       </header>
       <main className="wr-main">
@@ -354,7 +361,7 @@ function Table({
         <aside className="wr-sidebar">
           {menu ? (
             <>
-              <Setup options={options} onChange={onOptions} onStart={start} />
+              <Setup options={options} onChange={onOptions} onStart={start} disabled={startDisabled} />
             </>
           ) : (
             <>
@@ -701,6 +708,7 @@ export default function WildriseGame({ online }: { online?: OnlineWildriseSessio
       options={options}
       onOptions={setOptions}
       onStart={start}
+      startDisabled={room.disabled}
       soundOn={soundOn}
       setSoundOn={setSoundOn}
       online={online}

@@ -15,10 +15,13 @@ export default function Setup({
   options,
   onChange,
   onStart,
+  disabled = false,
 }: {
   options: SetupOptions
   onChange: (options: SetupOptions) => void
   onStart: () => void
+  /** True while the identity is still settling: starting would do nothing. */
+  disabled?: boolean
 }) {
   return (
     <section className="wr-setup" aria-labelledby="wr-setup-title">
@@ -105,7 +108,7 @@ export default function Setup({
             <Check size={11} />
           </span>
         </label>
-        <button className="wr-primary wr-start" onClick={onStart}>
+        <button className="wr-primary wr-start" onClick={onStart} disabled={disabled}>
           Start game <ArrowRight size={18} />
         </button>
         <p className="wr-small-note">

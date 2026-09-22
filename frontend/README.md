@@ -15,6 +15,8 @@ A React frontend for original 3D tabletop games, using React, TypeScript, Three.
 
 The route path is `/hearth-and-home` or `/estate`; `HashRouter` adds the `#` in the browser URL. Hash routes support direct links and refreshes without requiring server-side route rewrites. Page titles, descriptions, and favicons follow the active game.
 
+The **Appearance** control on the collection, game menus, and room headers offers **System**, **Light**, and **Dark**. System follows the device setting; an explicit choice persists across games and reloads and syncs between tabs. Menus and dialogs follow the selected appearance while boards, cards, and player colors retain their artwork.
+
 ## Hearth & Home
 
 An original physical-looking tabletop game with a walnut slab, ivory tiles, four garden courts, lacquer miniatures, brass details, soft shadows and an orbiting 3D camera. Board artwork, piece designs, branding and synthesized sounds are generated locally; there are no downloaded Ludo assets.
@@ -29,15 +31,15 @@ Roll a six to leave the nest, or advance an existing piece by the roll. Click a 
 
 The shared counterclockwise perimeter has 52 spaces. Complete it to enter your own five-space arrow lane, then reach the central home with an exact roll. The eight star tiles (entries and corners) are safe. Elsewhere, landing on an opponent sends all opposing pieces on that tile back to their nests. Pieces can share spaces and pass each other; there are no blockades. Rolling six grants another roll by default, even if no move is available. Captures grant no bonus roll, and there is no three-sixes penalty. The first player to bring every piece home wins.
 
-Drag to orbit, scroll/pinch or use the camera buttons to zoom. Pause and rule/settings dialogs suspend the turn. Audio starts muted and can be enabled from the header. Reduced-motion preferences shorten game animations automatically. The victory dialog reports home counts, rolls, captures, elapsed time and offers replay.
+Drag to orbit, scroll/pinch or use the camera buttons to zoom. Rule/settings dialogs do not pause the server’s turn. Audio starts muted and can be enabled from the header. Reduced-motion preferences shorten game animations automatically. The victory dialog reports home counts, rolls, captures, elapsed time and offers replay.
 
-`src/games/hearth/game/engine.ts` is the immutable source of truth for rules, legal moves, turns, events and victory. `board.ts` defines routes and coordinates; `ai.ts` scores only legal moves with caller-supplied randomness. React schedules actions; `scene/` renders state and animates recorded movement paths. No game rule depends on WebGL, and the numbered controls remain usable if WebGL is unavailable.
+`shared/src/hearth/engine.ts` is the immutable source of truth for rules, legal moves, turns, events and victory. `board.ts` defines routes and coordinates; `ai.ts` scores only legal moves with caller-supplied randomness. The server schedules actions; `scene/` renders state and animates recorded movement paths. No game rule depends on WebGL, and the numbered controls remain usable if WebGL is unavailable.
 
-This milestone supports local play and AI, plus online rooms (see Multiplayer & deployment below). Hearth & Home sessions are held in memory; refreshing starts a new setup, and saved Hearth sessions are not implemented.
+All Hearth & Home games, including bot games, run in online rooms. Reopen the room link to resume within its 24-hour lifetime; there is no offline or pass-and-play mode.
 
 ## Gambit / Chess
 
-Open `http://localhost:5173/#/chess`. Gambit is played in a room: create one and share its link, or join an open table from the lobby. It is the one game with no bot yet — its search has still to move to the server — so it takes two people for now.
+Open `http://localhost:5173/#/chess`. Gambit opens directly to online rooms: create one and share its link, or join an open table from the lobby. Hosts can also fill an empty seat with an Easy or Medium bot; the server plays its moves.
 
 Click or tap a piece and then a marked destination. Filled dots indicate ordinary moves and rings indicate captures. Drag to orbit, scroll or pinch to zoom, and use the board toolbar to flip, reset, or view from above. Focus the board with Tab, use arrow keys to explore from e2, and press Enter or Space to select and move; Escape deselects. A functional 2D board is available if WebGL fails.
 
@@ -57,28 +59,32 @@ Open `http://localhost:5173/#/prism`, choose 2–4 players and select **Let’s 
 
 Match the active color, number or action. Select a highlighted card, then tap it again or use **Play card**. **Draw card** takes one card; if it matches, play that card or **Keep & pass**. Wild cards open a color chooser. **Pause** skips, **Turn** reverses (and skips in two-player games), **Take Two** and **Take Four** draw penalties and skip the recipient. Take Four is legal only without another card of the active color. The 108-card deck uses Fisher–Yates shuffling and a numbered opening discard. Used cards recycle when the draw pile runs out, preserving the top discard.
 
-**Call Prism!** with two cards before playing, or with one before the next accepted play/draw. Another player can catch a missed call during that window for two cards. AI allows 2.4 seconds before catching; this timer only schedules the opponent, while the engine's deadline is defined by accepted actions. Calls remain available during local handoff. Final-card penalties resolve before scoring: numbers are face value, actions 20 and wilds 50. **Play again** retains cumulative scores. A fully blocked table with no recyclable cards ends in a draw.
+**Call Prism!** with two cards before playing, or with one before the next accepted play/draw. Another player can catch a missed call during that window for two cards. AI allows 2.4 seconds before catching; this timer only schedules the opponent, while the engine's deadline is defined by accepted actions. Calls are sent to the room and validated by the server. Final-card penalties resolve before scoring: numbers are face value, actions 20 and wilds 50. **Play again** retains cumulative scores. A fully blocked table with no recyclable cards ends in a draw.
 
-The pure command engine lives in `src/games/prism/game/engine.ts`; centralized defaults and state types are in `game/types.ts`. `handView()` derives playability from authoritative state rather than persisting stale flags. AI uses legal cards, its own hand and public opponent counts. `scene/` renders physical mesh cards, an oval felt table and event-based card animations; the accessible hand controls work even without WebGL. Original card textures and sounds are generated locally.
+The pure command engine lives in `shared/src/prism/engine.ts`; centralized defaults and state types are in `shared/src/prism/types.ts`. `handView()` derives playability from authoritative state rather than persisting stale flags. AI uses legal cards, its own hand and public opponent counts. `scene/` renders physical mesh cards, an oval felt table and event-based card animations; the accessible hand controls work even without WebGL. Original card textures and sounds are generated locally.
 
-Settings include sound, reduced motion and AI pace. Classic rules are the initial UI; stacking, immediate drawn-card play, draw-until-playable, Draw Four restrictions, call penalties and scoring are engine options. Jump-in and 7–0 cannot be enabled until implemented. Custom-rule UI, tournament formats, music and saved sessions are outside this milestone. Prism also plays online (see Multiplayer & deployment below). Rounds remain in memory; refreshing resets the game.
+Settings include sound, reduced motion and AI pace. Classic rules are the initial UI; stacking, immediate drawn-card play, draw-until-playable, Draw Four restrictions, call penalties and scoring are engine options. Jump-in and 7–0 cannot be enabled until implemented. Custom-rule UI, tournament formats, music and saved sessions are outside this milestone. All Prism rounds run in online rooms, including bot games. Refreshing the room link reconnects to the same game during its 24-hour lifetime.
 
-Verification: `npx vitest run src/games/prism` and `npx playwright test tests/prism.spec.ts`. Browser tests play a complete local round, including calls after handoff, wild choices, victory/replay, and check mobile AI play. Seeded engine simulations verify card conservation across complete rounds.
+Verification: `npx vitest run src/games/prism` and `npx playwright test tests/prism.spec.ts`. Browser tests check server-backed bot rooms, setup options, mobile controls and multiplayer play. Seeded engine simulations verify card conservation across complete rounds.
 
 ## Run
 
+Use Node.js 22 or newer for the local backend and browser tests; CI uses Node.js 24.
+
 ```sh
 npm install
-npm run dev
+npm run dev -w backend
+# In another terminal:
+npm run dev -w frontend
 ```
 
-Open the printed local address and choose a game from the homepage, or go directly to `http://localhost:5173/#/estate` and choose **Start game**. Rename players, choose local humans or computer opponents, and select classic or quick mode. No account or backend is needed.
+Open the printed local address and choose a game from the homepage, or go directly to `http://localhost:5173/#/estate` and choose **Start game**. Choose a guest name, select bot opponents or an online room, and choose classic or quick mode. Every game needs the backend and a network connection; an account is optional.
 
 ## Multiplayer & deployment
 
 **Every game is played on the server**, including a game against bots. Choosing "Play vs bot" creates a private room, seats you, fills the rest with bots and deals — so a bot game and a game with friends are one program with the same room at the end of both. A bot is a seat the room takes the turns for, not something the browser simulates.
 
-From a game's page you can also create a room to share — private, or listed in the public lobby for anyone to find — and pass on its six-character code or invite link, or join an open table straight from the lobby. A host waiting on someone who never turned up can fill the empty seats with bots and start anyway. Playing only ever needs a name: as a guest, or optionally with Clerk so your identity carries across sessions.
+From a game's page you can also create a room to share — private, or listed in the public lobby for anyone to find — and pass on its six-character code or invite link, or join an open table straight from the lobby. A host waiting on someone who never turned up can fill the empty seats with bots and start anyway. Playing only ever needs a name: as a guest, or optionally through Google sign-in with Clerk so your identity carries across sessions. The collection and all five game menus show the account control. In a live room, the header displays your player identity; return to the game menu to change accounts.
 
 A room is resumable from its link for 24 hours. There is no offline play: every move, including a bot's, needs the network.
 
@@ -135,7 +141,7 @@ House rules: passed properties remain available (no auctions), free parking has 
 
 The camera also has top-down and reset buttons. Native dialogs support keyboard focus and touch input. Game sounds are synthesized locally and can be muted. Settings can speed up computer decisions.
 
-Stable game phases save locally under `estate-game-v1`. Reloading during an animation restores the preceding stable phase; the seeded random state preserves the next roll. Invalid or incompatible saves recover to setup. Storage is local to the browser, so private browsing or clearing site data can remove progress.
+Estate game state is stored in its server room. Reload the room link to reconnect; the old `estate-game-v1` local save is no longer used. Guest identity remains tied to this browser, so clearing site data can prevent reclaiming a guest seat.
 
 ## Structure
 
@@ -145,10 +151,9 @@ Stable game phases save locally under `estate-game-v1`. Reloading during an anim
 - `src/pages/HomePage.tsx`: responsive game collection and play links.
 - `src/games/monopoly/MonopolyGame.tsx`: state orchestration, turn scheduling, controls, status, and events.
 - `src/games/monopoly/MonopolyGame.css`: Monopoly styles.
-- `src/games/monopoly/game/board.ts`: board definitions and original card decks.
-- `src/games/monopoly/game/engine.ts`: pure reducer, seeded randomness, financial rules, trades, and computer decisions.
-- `src/games/monopoly/game/types.ts`: central game state and action contracts.
-- `src/games/monopoly/game/storage.ts`: stable snapshots and recovery validation.
+- `shared/src/estate/board.ts`: board definitions and original card decks.
+- `shared/src/estate/engine.ts`: pure reducer, seeded randomness, financial rules, trades, and computer decisions.
+- `shared/src/estate/types.ts`: central game state and action contracts.
 - `src/games/monopoly/scene/`: procedural geometry, textures, lighting, camera, dice, token movement, and resource cleanup.
 - `src/games/monopoly/components/`: setup, portfolios, property management, trading, and accessible dialogs.
 
@@ -158,7 +163,7 @@ The 3D layer consumes state and renders it. All money, ownership, movement desti
 
 Create its component and supporting files in `src/games/<game-name>/`, then add an entry to `games` in `src/games/catalog.ts` with its name, canonical path, legacy aliases (if any), description, card tags, icon, theme color, and lazy component import. The homepage card and route are generated from that catalog. Add the game's board illustration in `src/pages/HomePage.tsx` and its styles in `HomePage.css`.
 
-Use the catalog's canonical path with React Router's `<Link>` for navigation between games. Keep each game's state and saved-game storage key separate; Estate continues using `estate-game-v1` so existing saves still load.
+Use the catalog's canonical path with React Router's `<Link>` for navigation between games. Register the game’s server adapter and room view so its state and actions are validated on the backend.
 
 ## Verify
 
@@ -166,9 +171,11 @@ Use the catalog's canonical path with React Router's `<Link>` for navigation bet
 npm test
 npm run lint
 npm run build
-npm run test:e2e
+npm run test:e2e -w frontend
+# Longer gameplay checks against server-controlled bots:
+npm run test:smoke -w frontend
 ```
 
-The browser suite starts or reuses the dev server at `http://127.0.0.1:5173` and uses an installed Google Chrome. It checks the homepage, canonical game links, legacy redirects, direct-link refreshes, return navigation, mobile layout, and page titles. Game coverage is what a browser is responsible for: each setup panel, the table it asks the server for, a bot's turn arriving, and the table settings surviving the crossing. The rules themselves — a game played to victory, trades, bankruptcies, redacted hands — are covered where they run, in `shared/` and `backend/`. Screenshots are written to the ignored `test-results/` directory. Unit tests exercise rule boundaries, invalid actions, AI strategy, and complete deterministic games without loading a renderer.
+The browser suite starts the local backend and builds and serves the frontend at `http://127.0.0.1:5173`, reusing existing servers when available. It uses an installed Google Chrome. It checks the homepage, canonical game links, legacy redirects, direct-link refreshes, return navigation, mobile layout, page titles, and appearance settings across games and dialogs. Game coverage is what a browser is responsible for: each setup panel, the table it asks the server for, a bot's turn arriving, and the table settings surviving the crossing. The separate smoke suite plays multiple turns against bots in all five games and checks browser and network errors. The rules themselves — a game played to victory, trades, bankruptcies, redacted hands — are covered where they run, in `shared/` and `backend/`. Screenshots are written to the ignored `test-results/` directory. Unit tests exercise rule boundaries, invalid actions, AI strategy, and complete deterministic games without loading a renderer.
 
 The 3D boards require WebGL. Google Fonts are an optional enhancement with local font fallbacks. Every game needs the backend, bots included, and none of them need an account (see Multiplayer & deployment above).

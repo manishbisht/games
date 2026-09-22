@@ -40,6 +40,12 @@ for (const [id, path] of [
     await page.getByRole('button', { name: 'Create room', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`${path}/room/[A-Z2-9]{6}$`))
     await expect(page.getByRole('heading', { name: /^Room / })).toBeVisible()
+    // The room wears the game it belongs to, and its header says who you are
+    // playing as without offering to change accounts mid-seat.
+    await expect(page.locator(`.room-shell-${id}`)).toBeVisible()
+    const header = page.locator('.room-header')
+    await expect(header.getByRole('link', { name: 'All games', exact: true })).toBeVisible()
+    await expect(header.locator('.account-status')).toContainText('Robin')
     await page.getByRole('link', { name: 'Leave room', exact: true }).click()
     await expect(page).toHaveURL(`/#${path}`)
   })

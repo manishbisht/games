@@ -1,14 +1,16 @@
+import ThemeControl from '../../theme/ThemeControl'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, BookOpen } from 'lucide-react'
 import { Link } from 'react-router'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
+import { HeaderAuth } from '../../online/identity'
 import Modal from './components/Modal'
 import './ChessGame.css'
 import './ChessLobby.css'
 
 /** Shared surroundings for chess's lobby, invitations, and waiting room. */
-export default function ChessShell({ children }: { children: ReactNode }) {
+export default function ChessShell({ children, inRoom = false }: { children: ReactNode; inRoom?: boolean }) {
   const [help, setHelp] = useState(false)
   return (
     <div className="ch-app ch-online-shell">
@@ -33,6 +35,8 @@ export default function ChessShell({ children }: { children: ReactNode }) {
             <BookOpen size={16} />
             <span>How to play</span>
           </button>
+          <ThemeControl />
+          <HeaderAuth readOnly={inRoom} />
         </nav>
       </header>
       {children}

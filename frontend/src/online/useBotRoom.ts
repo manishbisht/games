@@ -44,5 +44,7 @@ export function useBotRoom(game: GameId, basePath: string) {
     [busy, identity, game, basePath, navigate],
   )
 
-  return { start, busy, error }
+  // `start` refuses to act until the identity settles, so callers disable their
+  // control rather than leaving a button that quietly swallows the click.
+  return { start, busy, error, disabled: busy || !identity.isReady }
 }

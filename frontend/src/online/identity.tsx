@@ -4,6 +4,7 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { guestId, guestName, saveGuestName } from './guest'
+import AccountStatus from './AccountStatus'
 
 export interface IdentityCredentials {
   guestId?: string
@@ -76,10 +77,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function HeaderAuth() {
-  if (!CLERK_KEY) return null
+export function HeaderAuth({ readOnly = false }: { readOnly?: boolean }) {
+  const identity = useIdentity()
+  if (readOnly || !CLERK_KEY) return <AccountStatus {...identity} loading={!identity.isReady} />
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<AccountStatus loading />}>
       <ClerkHeaderAuth />
     </Suspense>
   )

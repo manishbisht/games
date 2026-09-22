@@ -9,10 +9,13 @@ export default function SetupPanel({
   initialConfig,
   onStart,
   onPreview,
+  disabled = false,
 }: {
   initialConfig: GameConfig
   onStart: (config: GameConfig) => void
   onPreview?: (config: GameConfig) => void
+  /** True while the identity is still settling: starting would do nothing. */
+  disabled?: boolean
 }) {
   const [config, setConfig] = useState<GameConfig>(() => ({
     ...initialConfig,
@@ -163,7 +166,7 @@ export default function SetupPanel({
             ))}
           </div>
         )}
-        <button className="hh-primary" onClick={() => onStart(config)}>
+        <button className="hh-primary" onClick={() => onStart(config)} disabled={disabled}>
           Start game <ArrowRight size={18} />
         </button>
         <p className="hh-local-note">

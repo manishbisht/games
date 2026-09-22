@@ -1,4 +1,5 @@
-import { ArrowRight, Bot, Dices, Heart, House, Monitor, Users } from 'lucide-react'
+import ThemeControl from '../theme/ThemeControl'
+import { ArrowRight, Bot, Dices, Globe2, Heart, House, Monitor, Users } from 'lucide-react'
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
 import { HeaderAuth } from '../online/identity'
@@ -106,6 +107,7 @@ export default function HomePage() {
           <i /> Free to play. Always.
         </span>
         <PlayersOnlineBadge className="collection-online" />
+        <ThemeControl />
         <HeaderAuth />
       </header>
 
@@ -131,6 +133,9 @@ export default function HomePage() {
             </span>
             <span>
               <Bot size={16} /> Or challenge the computer
+            </span>
+            <span>
+              <Globe2 size={16} /> All games play online
             </span>
           </div>
         </section>

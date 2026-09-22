@@ -1,5 +1,7 @@
+import ThemeControl from '../../theme/ThemeControl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
+import { HeaderAuth } from '../../online/identity'
 import {
   ArrowLeft,
   ArrowRight,
@@ -308,6 +310,8 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           <button className="hh-icon-button" aria-label="Game settings" onClick={() => setDialog('settings')}>
             <Settings2 size={19} />
           </button>
+          <ThemeControl />
+          <HeaderAuth readOnly={Boolean(online)} />
         </div>
       </header>
 
@@ -395,7 +399,12 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           <aside className="hh-sidebar" aria-label="Game controls">
             {!started ? (
               <>
-                <SetupPanel initialConfig={config} onStart={start} onPreview={onPreview} />
+                <SetupPanel
+                  initialConfig={config}
+                  onStart={start}
+                  onPreview={onPreview}
+                  disabled={room.disabled}
+                />
               </>
             ) : (
               <>

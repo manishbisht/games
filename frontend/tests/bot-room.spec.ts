@@ -97,7 +97,6 @@ test('a table the host has filled offers no more chairs', async ({ page }) => {
 
 test('a chess room offers the two strengths its search can afford', async ({ page }) => {
   await page.goto('/#/chess')
-  await page.getByRole('button', { name: 'Play online', exact: true }).click()
   await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Create room', exact: true }).click()
   await expect(page).toHaveURL(/\/chess\/room\/[A-Z2-9]{6}$/)

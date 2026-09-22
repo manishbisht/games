@@ -10,9 +10,12 @@ import { estateGame } from '../../catalog'
 export default function SetupDialog({
   onClose,
   onStart,
+  disabled = false,
 }: {
   onClose: () => void
   onStart: (players: PlayerConfig[], mode: GameState['mode']) => void
+  /** True while the identity is still settling: starting would do nothing. */
+  disabled?: boolean
 }) {
   const [players, setPlayers] = useState(DEFAULT_PLAYERS),
     [mode, setMode] = useState<GameState['mode']>('classic')
@@ -87,7 +90,11 @@ export default function SetupDialog({
             </button>
           ))}
         </div>
-        <button className="primary-button full-width" onClick={() => onStart(players, mode)}>
+        <button
+          className="primary-button full-width"
+          onClick={() => onStart(players, mode)}
+          disabled={disabled}
+        >
           Start game <ArrowRight size={19} />
         </button>
         <p className="dialog-footnote">2–4 players · You + bot opponents · Resumable from its link</p>

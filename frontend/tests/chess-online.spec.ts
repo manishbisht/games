@@ -47,7 +47,6 @@ test('two browsers create, join, and play in the same room', async ({ browser })
   const guest = await newPlayer(browser, errors)
 
   await host.goto('/#/chess')
-  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name').fill('Ann')
   await host.getByRole('button', { name: 'Create room' }).click()
   await expect(host).toHaveURL(/#\/chess\/room\/[A-Z2-9]{6}$/)
@@ -120,7 +119,6 @@ test('public rooms appear in the lobby and can be joined', async ({ browser }) =
   const host = await newPlayer(browser, errors)
   const guest = await newPlayer(browser, errors)
   await host.goto('/#/chess')
-  await host.getByRole('button', { name: 'Play online', exact: true }).click()
   await host.getByLabel('Your name', { exact: true }).fill('Public host')
   await host.getByLabel('List in the public lobby').check()
   await host.getByRole('button', { name: 'Create room', exact: true }).click()
@@ -128,7 +126,6 @@ test('public rooms appear in the lobby and can be joined', async ({ browser }) =
   const code = host.url().match(/room\/([A-Z2-9]{6})/)![1]
   await expect(host.getByRole('heading', { name: `Room ${code}` })).toBeVisible()
   await guest.goto('/#/chess')
-  await guest.getByRole('button', { name: 'Play online', exact: true }).click()
   await guest.getByLabel('Your name', { exact: true }).fill('Guest')
   const join = guest.getByRole('button', { name: `Join ${code}`, exact: true })
   await expect(join).toBeVisible()
