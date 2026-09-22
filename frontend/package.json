@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test": "vitest run src",
     "test:e2e": "playwright test",
+    "test:smoke": "SMOKE=1 playwright test tests/smoke.spec.ts",
     "format": "prettier --write src tests playwright.config.ts",
     "preview": "vite preview"
   },

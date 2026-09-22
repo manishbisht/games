@@ -1,6 +1,9 @@
 import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: './tests',
+  // The smoke run plays every game a good way in and takes minutes of its own:
+  // `npm run test:smoke` opts into it, the default run leaves it out.
+  testIgnore: process.env.SMOKE === '1' ? [] : ['**/smoke.spec.ts'],
   timeout: 60000,
   /**
    * Vitest's five seconds is short for this suite. Every game mounts a WebGL
