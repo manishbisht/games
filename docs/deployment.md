@@ -13,8 +13,8 @@ skipping the Clerk section just means everyone plays as a guest.
    - Secret `CLOUDFLARE_ACCOUNT_ID` — Cloudflare dashboard → Workers → Account ID.
 3. Push to `main` (or run `npx wrangler deploy` from `backend/` once). Note the
    Worker URL, e.g. `https://games-api.<account>.workers.dev`.
-4. Repo variable `API_URL` — that Worker URL. The Pages build bakes it in as
-   `VITE_API_URL`.
+4. In the `github-pages` environment, add secret `VITE_API_BASE_URL` — that
+   Worker URL. The Pages build bakes it in as `VITE_API_URL`.
 5. Recommended before going live: add Cloudflare Rate Limiting rules on the
    two unauthenticated write endpoints:
    - `POST /api/rooms` (e.g. 10 requests per minute per IP) — room creation.
@@ -26,8 +26,10 @@ skipping the Clerk section just means everyone plays as a guest.
 
 1. Create a Clerk application (clerk.com), and enable the Google social connection for sign-in and sign-up. The frontend uses Clerk’s sign-in modal with Google shown among the social buttons.
 2. Add `https://games.manishbisht.me` (and localhost for dev) to allowed origins.
-3. Repo variable `CLERK_PUBLISHABLE_KEY` — the production publishable key
-   (`pk_live_…`). Baked into the frontend as `VITE_CLERK_PUBLISHABLE_KEY`.
+3. GitHub repo → Settings → Environments → `github-pages` → Environment
+   secrets: add `VITE_CLERK_PUBLISHABLE_KEY` — the production publishable key
+   (`pk_live_…`). This publishable key is baked into the frontend; never put a
+   Clerk secret key (`sk_…`) here.
 4. Backend secret: `cd backend && npx wrangler secret put CLERK_SECRET_KEY`
    (the matching secret key). Without it the API rejects Clerk tokens but
    guests are unaffected.
@@ -35,8 +37,11 @@ skipping the Clerk section just means everyone plays as a guest.
 The Google sign-in button appears on the collection and all five game menus when
 `VITE_CLERK_PUBLISHABLE_KEY` is present at build time. Without that key, the UI
 shows a guest identity and games remain playable as guests. If a deployed build
-is missing the button, check the `CLERK_PUBLISHABLE_KEY` Actions variable and
-rebuild the Pages site; changing it does not update an already-built bundle.
+is missing the button, check the `github-pages` environment secret
+`VITE_CLERK_PUBLISHABLE_KEY` and rebuild the Pages site; changing it does not
+update an already-built bundle. The **build** job must reference `environment: github-pages`
+to read those secrets. Setting the environment only on the deploy job is too
+late: Vite has already produced the guest-only bundle.
 Google OAuth also requires the Google connection and production credentials to
 be configured in the matching Clerk instance.
 

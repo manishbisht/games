@@ -15,6 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: github-pages
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -43,8 +44,8 @@ jobs:
       - name: Build for GitHub Pages
         env:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
-          VITE_API_URL: ${{ vars.API_URL }}
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+          VITE_API_URL: ${{ secrets.VITE_API_BASE_URL }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: npm run build -w frontend -- --base "${PAGES_BASE_PATH}/"
 
       - name: Upload site artifact
