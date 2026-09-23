@@ -69,6 +69,9 @@ jobs:
   deploy-api:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    # The Cloudflare token is a secret of this environment, and a job only sees
+    # an environment's secrets when it names that environment.
+    environment: backend
     # Mapped at job level so the deploy step can ask whether they exist: secrets
     # are empty on forks and on repos that never configured Cloudflare, and the
     # tests below should still run there.
