@@ -143,6 +143,15 @@ function transition(from: string, to: string, action: string, apply: () => void)
  * Paired with `useTransitions={false}` on the router, so the state update the
  * listener makes is synchronous and `flushSync` can commit it inside the
  * transition's update callback.
+ *
+ * Built on two exports React Router marks as not public — `UNSAFE_createHashHistory`
+ * here and `unstable_HistoryRouter` in main.tsx — which is why frontend/package.json
+ * pins it to one exact version. Before moving that pin, check: both exports still
+ * exist; `history.listen` is still the one door the router hears navigations
+ * through, with `{ action, location }` updates (wrap it and log); the router still
+ * takes `useTransitions={false}` and applies the update synchronously; and
+ * `npx playwright test tests/routing.spec.ts` passes — it walks home → game →
+ * home and back/forward with view transitions on.
  */
 export function createAppHistory() {
   const history = UNSAFE_createHashHistory({ v5Compat: true })
