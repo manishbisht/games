@@ -130,8 +130,50 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
     if ((moving || dirty) && camera) {
       dirty = false
       renderer.render(scene, camera)
+      if (moving && running) measure(delta)
+      else slow = sampled = 0
     }
   }
+
+  /*
+   * Adaptive quality. Only frames that were actually animating are measured
+   * (an idle board renders nothing), and only sustained slowness counts: a
+   * couple of seconds of animation averaging under ~45 fps steps one tier
+   * down — first the pixel ratio, then shadows. It never steps back up within
+   * a visit; flapping between tiers looks worse than either tier.
+   */
+  let quality: QualityTier = readQuality(),
+    slow = 0,
+    sampled = 0
+  const qualityListeners = new Set<(tier: QualityTier) => void>()
+  function measure(delta: number) {
+    if (quality === 0 || delta > 250) return
+    sampled += delta
+    if (delta > 22) slow += delta
+    if (sampled < 2500) return
+    const tooSlow = slow / sampled > 0.6
+    slow = sampled = 0
+    if (tooSlow) applyQuality((quality - 1) as QualityTier)
+  }
+  function applyQuality(tier: QualityTier) {
+    quality = tier
+    try {
+      sessionStorage.setItem(QUALITY_KEY, String(tier))
+    } catch {
+      // Only this stage remembers it then.
+    }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, tier === 2 ? maxRatio : tier === 1 ? 1.25 : 1))
+    if (tier === 0 && renderer.shadowMap.enabled) {
+      renderer.shadowMap.enabled = false
+      scene.traverse((object) => {
+        const material = (object as THREE.Mesh).material
+        if (material) for (const m of Array.isArray(material) ? material : [material]) m.needsUpdate = true
+      })
+    }
+    resize()
+    for (const callback of qualityListeners) callback(tier)
+  }
+  if (quality < 2) applyQuality(quality)
 
   const stage = {
     renderer,
@@ -175,14 +217,31 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
     },
     /** Ray-casts a pointer event against `objects` with the current camera. */
     pick(event: { clientX: number; clientY: number }, objects: THREE.Object3D[], recursive = true) {
-      if (!camera) return []
+      if (!stage.ray(event)) return []
+      return raycaster.intersectObjects(objects, recursive)
+    },
+    /**
+     * The world-space ray under a pointer, for intersecting a plane or a box
+     * without a mesh to hit. Reused between calls: copy it to keep it.
+     */
+    ray(event: { clientX: number; clientY: number }) {
+      if (!camera) return null
       const rect = renderer.domElement.getBoundingClientRect()
       pointer.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1,
       )
       raycaster.setFromCamera(pointer, camera)
-      return raycaster.intersectObjects(objects, recursive)
+      return raycaster.ray
+    },
+    /** 2 is full quality; the stage steps down on its own if frames run slow. */
+    get quality() {
+      return quality
+    },
+    /** Called when the quality tier drops, so a game can thin out its extras. */
+    onQuality(callback: (tier: QualityTier) => void) {
+      qualityListeners.add(callback)
+      return () => void qualityListeners.delete(callback)
     },
     /** Projects a world point to CSS pixels relative to the canvas. */
     toScreen(point: THREE.Vector3, out = new THREE.Vector2()) {
@@ -221,6 +280,29 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
   return stage
 }
 export type Stage = ReturnType<typeof createStage>
+
+/** 2 full, 1 lower pixel ratio, 0 lowest ratio and no shadows. */
+export type QualityTier = 0 | 1 | 2
+const QUALITY_KEY = 'games-quality'
+/** A device that was slow on one board will be slow on the next; start there. */
+function readQuality(): QualityTier {
+  try {
+    const saved = Number(sessionStorage.getItem(QUALITY_KEY))
+    return saved === 0 || saved === 1 ? saved : 2
+  } catch {
+    return 2
+  }
+}
+
+/**
+ * OrbitControls writes `touch-action: none` onto the canvas inline, which
+ * silently beats any stylesheet and traps a phone's page scroll on the board.
+ * On touch screens this hands vertical swipes back to the page; sideways
+ * drags and pinches still orbit and zoom. Call it after creating the controls.
+ */
+export function allowPageScroll(canvas: HTMLElement) {
+  if (window.matchMedia('(pointer: coarse)').matches) canvas.style.touchAction = 'pan-y'
+}
 
 /** Disposes every geometry, material and texture reachable from `root`, once each. */
 export function disposeTree(root: THREE.Object3D) {

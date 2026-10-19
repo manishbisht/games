@@ -5,11 +5,12 @@ import { reducedMotion } from './preference'
 /**
  * A number that counts to its new value instead of jumping — money, a score, a
  * square on the board. Under reduced motion it jumps. `ms` scales down for
- * small changes so a +1 doesn't crawl.
+ * small changes so a +1 doesn't crawl. Pass `from` to count in on first
+ * appearance (a stat in a results dialog counting up from 0).
  */
-export function useCountUp(value: number, ms = 650) {
-  const [shown, setShown] = useState(value)
-  const current = useRef(value)
+export function useCountUp(value: number, ms = 650, { from }: { from?: number } = {}) {
+  const [shown, setShown] = useState(from ?? value)
+  const current = useRef(from ?? value)
   useEffect(() => {
     const from = current.current
     if (from === value) return

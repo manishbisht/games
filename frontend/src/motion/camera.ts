@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { dampFactor, hash01 } from './ease'
+import { clamp01, dampFactor, hash01, inOutCubic, lerp } from './ease'
+import type { Ease } from './ease'
 
 /**
  * A camera director that shares the camera with OrbitControls instead of
@@ -14,6 +15,24 @@ export interface Shot {
   position?: THREE.Vector3
   target?: THREE.Vector3
   zoom?: number
+}
+
+/**
+ * A move around the target rather than through the scene: azimuth and polar
+ * are interpolated as angles (the short way round), so a half-turn flip arcs
+ * over the board instead of cutting across it. `swoop` lifts the polar angle
+ * towards top-down mid-move, for a flip that rises as it turns.
+ */
+export interface Orbit {
+  azimuth?: number
+  polar?: number
+  radius?: number
+  target?: THREE.Vector3
+  zoom?: number
+  swoop?: number
+  ms?: number
+  delay?: number
+  ease?: Ease
 }
 
 export function createCameraRig(
@@ -31,11 +50,20 @@ export function createCameraRig(
     shakeStrength = 0,
     shakeSeed = 0,
     userUntil = 0,
-    clock = 0
+    clock = 0,
+    orbit: {
+      goal: Orbit
+      elapsed: number
+      from: THREE.Spherical | null
+      fromTarget: THREE.Vector3
+      fromZoom: number
+      toAzimuth: number
+    } | null = null
   const offset = new THREE.Vector3(),
     delta = new THREE.Vector3(),
     goal = new THREE.Vector3(),
-    applied = new THREE.Vector3()
+    applied = new THREE.Vector3(),
+    spherical = new THREE.Spherical()
 
   const onStart = () => {
     userUntil = clock + yieldMs
@@ -61,6 +89,24 @@ export function createCameraRig(
       shotRate = rate
       userUntil = 0
     },
+    /** Swing round the target to a new angle; see `Orbit`. */
+    orbit(goal: Orbit) {
+      shot = null
+      userUntil = 0
+      orbit = {
+        goal: { ...goal, target: goal.target?.clone() },
+        elapsed: -(goal.delay ?? 0),
+        from: null,
+        fromTarget: new THREE.Vector3(),
+        fromZoom: camera.zoom,
+        toAzimuth: 0,
+      }
+    },
+    /** The camera's current angle around its target, in `Orbit` terms. */
+    get angle() {
+      spherical.setFromVector3(offset.subVectors(camera.position, controls.target))
+      return { azimuth: spherical.theta, polar: spherical.phi, radius: spherical.radius }
+    },
     /**
      * Keep `point()` centred while it moves (return null to pause). The camera
      * translates with the target, so the viewer's orbit angle is kept.
@@ -82,6 +128,10 @@ export function createCameraRig(
     get userControlled() {
       return clock < userUntil
     },
+    /** True while a shot, orbit or shake is still playing. */
+    get busy() {
+      return Boolean(shot || orbit || shakeLeft > 0)
+    },
     step(dt: number) {
       clock += dt * 1000
       camera.position.sub(applied)
@@ -101,6 +151,43 @@ export function createCameraRig(
         }
         if (shot.zoom !== undefined && setZoom(shot.zoom, k)) done = false
         if (done) shot = null
+        moving = true
+      }
+      if (orbit && user) orbit = null
+      if (orbit && dt > 0) {
+        orbit.elapsed += dt * 1000
+        if (orbit.elapsed >= 0) {
+          const { goal } = orbit
+          if (!orbit.from) {
+            orbit.from = new THREE.Spherical().setFromVector3(
+              offset.subVectors(camera.position, controls.target),
+            )
+            orbit.fromTarget.copy(controls.target)
+            orbit.fromZoom = camera.zoom
+            let to = goal.azimuth ?? orbit.from.theta
+            while (to - orbit.from.theta > Math.PI) to -= Math.PI * 2
+            while (to - orbit.from.theta < -Math.PI) to += Math.PI * 2
+            orbit.toAzimuth = to
+          }
+          const raw = clamp01(orbit.elapsed / (goal.ms ?? 950)),
+            e = (goal.ease ?? inOutCubic)(raw),
+            from = orbit.from
+          controls.target.lerpVectors(orbit.fromTarget, goal.target ?? orbit.fromTarget, e)
+          spherical.set(
+            lerp(from.radius, goal.radius ?? from.radius, e),
+            Math.max(
+              0.001,
+              lerp(from.phi, goal.polar ?? from.phi, e) - (goal.swoop ?? 0) * Math.sin(Math.PI * raw),
+            ),
+            lerp(from.theta, orbit.toAzimuth, e),
+          )
+          camera.position.setFromSpherical(spherical).add(controls.target)
+          if (goal.zoom !== undefined) {
+            camera.zoom = lerp(orbit.fromZoom, goal.zoom, e)
+            camera.updateProjectionMatrix()
+          }
+          if (raw >= 1) orbit = null
+        }
         moving = true
       }
       const point = follow && !user ? follow() : null

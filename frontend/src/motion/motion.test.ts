@@ -123,3 +123,24 @@ describe('presentation queue', () => {
     expect(queue.busy).toBe(false)
   })
 })
+
+describe('camera rig orbit', () => {
+  it('swings round the target the short way and lands on the angle asked for', async () => {
+    const THREE = await import('three')
+    const { createCameraRig } = await import('./camera')
+    const camera = new THREE.PerspectiveCamera()
+    camera.position.set(0, 5, 10)
+    const controls = Object.assign(new THREE.EventDispatcher(), { target: new THREE.Vector3() })
+    const rig = createCameraRig(camera, controls as never)
+    rig.orbit({ azimuth: -Math.PI + 0.1, ms: 500 })
+    let minDistance = Infinity
+    for (let i = 0; i < 40; i++) {
+      rig.step(1 / 60)
+      minDistance = Math.min(minDistance, camera.position.distanceTo(controls.target))
+    }
+    expect(rig.angle.azimuth).toBeCloseTo(-Math.PI + 0.1, 3)
+    // An orbit keeps its distance; a straight line through the target would not.
+    expect(minDistance).toBeCloseTo(Math.hypot(5, 10), 3)
+    expect(rig.busy).toBe(false)
+  })
+})

@@ -44,6 +44,7 @@ export function createDieThrow(die: THREE.Object3D, options: DieThrowOptions) {
     spin = new THREE.Quaternion(),
     shakeEuler = new THREE.Euler(),
     shakeFrom = new THREE.Vector3(),
+    releasedFrom = new THREE.Vector3(),
     handPoint = new THREE.Vector3()
   let turns = 2
 
@@ -74,6 +75,12 @@ export function createDieThrow(die: THREE.Object3D, options: DieThrowOptions) {
       die.position.y = lerp(start.y, rest.y, local * local) + arc(local, size * 0.5)
     else if (t < BOUNCES[BOUNCES.length - 1].at) die.position.y = rest.y + arc(local, size * 1.1 * hop.height)
     else die.position.y = rest.y
+    // Carried from wherever it was let go (the hand, mid-lift, or at rest) into
+    // the toss, so a quick click still throws from a real height and nothing pops.
+    if (t < 0.16) {
+      handPoint.copy(die.position)
+      die.position.lerpVectors(releasedFrom, handPoint, outCubic(t / 0.16))
+    }
 
     // Squash at each contact, recovering over ~6% of the throw.
     let squash = 0
@@ -110,8 +117,9 @@ export function createDieThrow(die: THREE.Object3D, options: DieThrowOptions) {
       shakeFrom.copy(die.position)
     },
     /**
-     * Toss onto `value`. `ms` should fit inside the server's roll beat. Call
-     * `shake()` first; without it the toss starts from the release point.
+     * Toss onto `value`. `ms` should fit inside the server's roll beat.
+     * Calling `shake()` first (to cover the round trip) is optional: the toss
+     * always rises to the release point from wherever the die is.
      */
     throw(value: number, ms = 900) {
       seed++
@@ -119,8 +127,8 @@ export function createDieThrow(die: THREE.Object3D, options: DieThrowOptions) {
       elapsed = 0
       contacts = 0
       // From the hand if it was shaking, otherwise from the release point.
-      if (mode === 'shake') start.copy(die.position)
-      else start.copy(rest).add(release)
+      releasedFrom.copy(die.position)
+      start.copy(rest).add(release)
       startQuat.copy(die.quaternion)
       mode = 'throw'
       final.copy(face(value))
