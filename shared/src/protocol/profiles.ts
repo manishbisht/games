@@ -19,8 +19,9 @@ export const roomPath = (game: GameId, code: string) => `${GAME_ROUTES[game].pat
 export type GameResult = 'win' | 'loss' | 'draw'
 
 /**
- * Someone else who was at the table. `handle` links to their public profile and
- * is only there for people — a bot has no profile to link to.
+ * Someone else who was at the table. `handle` links to their public profile; it
+ * is only on the player's own record (`/api/me`), and only for people — a bot
+ * has no profile to link to, and a public profile links to nobody else's.
  */
 export interface Opponent {
   name: string
@@ -37,7 +38,7 @@ export interface PublicGameRecord {
   /** How many seats the game was played with. */
   seats: number
   opponents: Opponent[]
-  /** Server clock when the game finished. */
+  /** Server clock when the game finished; on a public profile, the start of that day (UTC). */
   at: number
   /** Present only for a rated game: the rating before and after it. */
   rating?: { before: number; after: number }
@@ -84,7 +85,7 @@ export interface PublicProfile {
   name: string
   avatar?: string
   isGuest: boolean
-  /** When this player finished their first game here. */
+  /** When this player finished their first game here; on a public profile, the start of that day (UTC). */
   since: number
   stats: Partial<Record<GameId, GameStats>>
   ratings: { chess?: Rating }

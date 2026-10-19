@@ -127,9 +127,16 @@ describe('finished games', () => {
     for (const secret of [annId, benId, code, 'guest:']) expect(text).not.toContain(secret)
     const ben2 = JSON.parse(text) as PublicProfile
     expect(ben2).toMatchObject({ handle: benHandle, name: 'Ben', ratings: { chess: { rating: 1220 } } })
-    expect(ben2.recent[0]).toMatchObject({ result: 'win', opponents: [{ name: 'Ann', handle: annHandle }] })
+    expect(ben2.recent[0]).toMatchObject({ result: 'win', opponents: [{ name: 'Ann' }] })
     expect(ben2.recent[0]).not.toHaveProperty('code')
     expect(ben2).not.toHaveProperty('active')
+    // Nobody else's profile is a link away from a public page, and it says
+    // which day Ben played, not the minute.
+    expect(text).not.toContain(annHandle)
+    expect(ben2.recent[0].opponents[0]).not.toHaveProperty('handle')
+    expect(ben2.recent[0].at % 86_400_000).toBe(0)
+    expect(ben2.since % 86_400_000).toBe(0)
+    expect(Date.now() - ben2.recent[0].at).toBeLessThan(86_400_000)
   })
 
   it('leaks no guest id through /api/me either', async () => {

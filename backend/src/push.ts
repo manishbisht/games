@@ -190,18 +190,34 @@ const PUSH_HOSTS = [
   /^[a-z0-9-]+\.notify\.windows\.com$/,
 ]
 
-/** A browser's subscription narrowed to something this server will store and send to, or null. */
-export function validSubscription(raw: unknown): PushSubscriptionKeys | null {
-  if (!raw || typeof raw !== 'object') return null
-  const { endpoint, keys } = raw as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }
-  if (typeof endpoint !== 'string' || endpoint.length > 1024) return null
+/**
+ * Whether this server will POST to `endpoint`: https, on its default port, at
+ * one of the push services above. Checked when a subscription is stored and
+ * again as each push leaves, so a row stored under an older, looser rule is
+ * never sent to.
+ */
+export function deliverable(endpoint: unknown): endpoint is string {
+  if (typeof endpoint !== 'string' || endpoint.length > 1024) return false
   let url: URL
   try {
     url = new URL(endpoint)
   } catch {
-    return null
+    return false
   }
-  if (url.protocol !== 'https:' || !PUSH_HOSTS.some((host) => host.test(url.hostname))) return null
+  return (
+    url.protocol === 'https:' &&
+    url.port === '' &&
+    !url.username &&
+    !url.password &&
+    PUSH_HOSTS.some((host) => host.test(url.hostname))
+  )
+}
+
+/** A browser's subscription narrowed to something this server will store and send to, or null. */
+export function validSubscription(raw: unknown): PushSubscriptionKeys | null {
+  if (!raw || typeof raw !== 'object') return null
+  const { endpoint, keys } = raw as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }
+  if (!deliverable(endpoint)) return null
   const p256dh = keys?.p256dh,
     auth = keys?.auth
   if (typeof p256dh !== 'string' || typeof auth !== 'string') return null
@@ -227,6 +243,7 @@ export interface PushMessage {
  * Deliver one message to one subscription. Answers the push service's status:
  * 201 delivered, 404/410 the subscription is gone for good (the caller forgets
  * it), anything else worth no more than a shrug — a notification is a nicety.
+ * 0 when the endpoint is not one this server sends to.
  */
 export async function sendPush(
   subscription: PushSubscriptionKeys,
@@ -234,9 +251,13 @@ export async function sendPush(
   keys: VapidKeys,
   fetcher: typeof fetch = fetch,
 ): Promise<number> {
+  if (!deliverable(subscription.endpoint)) return 0
   const body = await encryptPayload(utf8(JSON.stringify(message)), subscription)
   const response = await fetcher(subscription.endpoint, {
     method: 'POST',
+    // A push service answers; it never sends us on. A redirect would carry this
+    // POST somewhere the allowlist never approved, so it counts as a failure.
+    redirect: 'manual',
     headers: {
       Authorization: await vapidAuthorization(subscription.endpoint, keys),
       'Content-Encoding': 'aes128gcm',

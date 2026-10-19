@@ -1,5 +1,6 @@
 import { GAME_ROUTES, roomPath } from '@games/shared/protocol'
 import type { GameId, RoomStatus, SeatId } from '@games/shared/protocol'
+import { cleanName } from './auth'
 import type { PushMessage } from './push'
 
 /**
@@ -62,9 +63,15 @@ export function turnMessage(game: GameId, code: string, others: string[]): PushM
   }
 }
 
+/**
+ * Someone sat down at the host's table. Their name is text a stranger chose
+ * that lands on the host's lock screen, so it goes out cleaned and capped (as
+ * every name a room accepts already is), and a name with nothing printable
+ * left in it is simply "Someone".
+ */
 export function joinedMessage(game: GameId, code: string, name: string): PushMessage {
   return {
-    title: `${name} joined your table`,
+    title: `${cleanName(name) ?? 'Someone'} joined your table`,
     body: `${GAME_ROUTES[game].name} · room ${code}`,
     path: roomPath(game, code),
     tag: `joined-${code}`,

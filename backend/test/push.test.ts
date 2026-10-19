@@ -169,6 +169,23 @@ describe('RFC 8292 VAPID', () => {
     expect(headers.get('TTL')).toBe('3600')
     expect(headers.get('Authorization')).toMatch(/^vapid t=.+, k=/)
     expect((seen[0].init.body as Uint8Array).length).toBeGreaterThan(86)
+    // A push service answers; it is never followed anywhere else.
+    expect(seen[0].init.redirect).toBe('manual')
+  })
+
+  it('treats a redirect as a failure, and never sends to an endpoint off the list', async () => {
+    const message = { title: 't', body: 'b', path: '/', tag: 'x' }
+    const sub = (endpoint: string) => ({ endpoint, p256dh: RFC.uaPublic, auth: RFC.auth })
+    const seen: string[] = []
+    const fetcher = (async (url: RequestInfo | URL) => {
+      seen.push(String(url))
+      return new Response(null, { status: 307, headers: { Location: 'https://elsewhere.example/' } })
+    }) as typeof fetch
+    expect(await sendPush(sub('https://fcm.googleapis.com/fcm/send/a'), message, keys, fetcher)).toBe(307)
+    // Stored under an older, looser rule: refused as it leaves.
+    for (const endpoint of ['https://fcm.googleapis.com:8443/fcm/send/a', 'https://evil.example/x'])
+      expect(await sendPush(sub(endpoint), message, keys, fetcher)).toBe(0)
+    expect(seen).toEqual(['https://fcm.googleapis.com/fcm/send/a'])
   })
 })
 
@@ -195,5 +212,18 @@ describe('validSubscription', () => {
     ).toBeNull()
     expect(validSubscription(null)).toBeNull()
     expect(validSubscription({ endpoint: 42 })).toBeNull()
+  })
+
+  it('refuses a push service on any but its default port, or with credentials in the URL', () => {
+    for (const endpoint of [
+      'https://fcm.googleapis.com:8443/fcm/send/abc',
+      'https://fcm.googleapis.com:80/fcm/send/abc',
+      'https://user:pass@fcm.googleapis.com/fcm/send/abc',
+    ])
+      expect(validSubscription({ endpoint, keys })).toBeNull()
+    // The default port spelled out is the default port.
+    expect(
+      validSubscription({ endpoint: 'https://fcm.googleapis.com:443/fcm/send/abc', keys }),
+    ).not.toBeNull()
   })
 })

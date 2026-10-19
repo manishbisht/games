@@ -11,6 +11,7 @@ import type {
   Rating,
 } from '@games/shared/protocol'
 import { track } from './analytics'
+import { cleanName } from './auth'
 import { nextRating, PROVISIONAL_GAMES, START_RATING } from './elo'
 import type { Env } from './env'
 import { sendPush, type PushMessage, type PushSubscriptionKeys } from './push'
@@ -34,9 +35,31 @@ export interface GameEntry {
   seats: number
   opponents: Opponent[]
   at: number
-  /** Rated games only: the opponent's rating going in. */
-  rated?: { opponent: number }
+  /**
+   * Rated games only: the opponent's rating going in, and their handle — kept
+   * privately, to count rated games against the same person (see `chessRating`).
+   */
+  rated?: { opponent: number; against?: string }
 }
+
+/** What a room weighs before rating a chess game for this player (see `RoomDO.recordFinish`). */
+export interface ChessStanding {
+  rating: number
+  /** Rated chess games so far. */
+  games: number
+  /** Finished games of any kind so far: what makes a guest more than a throwaway. */
+  played: number
+  /** Rated games against the opponent being asked about, today (UTC). */
+  againstToday: number
+}
+
+/** A guest counts as a real opponent for a settled player once they have finished this many games. */
+export const CREDIBLE_GAMES = 5
+/** Rated games against one opponent per UTC day; any more are recorded, unrated. */
+export const RATED_PER_OPPONENT_DAILY = 3
+
+const DAY_MS = 86_400_000
+const dayOf = (at: number) => Math.floor(at / DAY_MS)
 
 export type NotifyKind = 'turn' | 'joined'
 
@@ -110,6 +133,9 @@ export class PlayerDO extends DurableObject<Env> {
         endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS notified (k TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS rated_against (
+        opponent TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (opponent, day)
+      );
     `)
   }
 
@@ -125,10 +151,27 @@ export class PlayerDO extends DurableObject<Env> {
     )
   }
 
-  /** The chess rating a room should rate this player's next game from. */
-  async chessRating(): Promise<{ rating: number; games: number }> {
-    const chess = this.exists() ? this.meta().chess : undefined
-    return { rating: chess?.rating ?? START_RATING, games: chess?.games ?? 0 }
+  /**
+   * The chess rating a room should rate this player's next game from, and what
+   * it needs to decide whether to rate it at all: how much history this player
+   * has, and how many rated games they have already had today against
+   * `opponent` (a handle).
+   */
+  async chessRating(opponent?: string, now = Date.now()): Promise<ChessStanding> {
+    if (!this.exists()) return { rating: START_RATING, games: 0, played: 0, againstToday: 0 }
+    this.schema()
+    const chess = this.meta().chess
+    const played = this.sql.exec<{ n: number | null }>(`SELECT SUM(played) AS n FROM stats`).one().n ?? 0
+    const againstToday = opponent
+      ? (this.sql
+          .exec<{ n: number }>(
+            `SELECT n FROM rated_against WHERE opponent = ? AND day = ?`,
+            opponent,
+            dayOf(now),
+          )
+          .toArray()[0]?.n ?? 0)
+      : 0
+    return { rating: chess?.rating ?? START_RATING, games: chess?.games ?? 0, played, againstToday }
   }
 
   /**
@@ -180,6 +223,16 @@ export class PlayerDO extends DurableObject<Env> {
     if (after !== null) {
       const games = (meta.chess?.games ?? 0) + 1
       meta.chess = { rating: after, games, peak: Math.max(meta.chess?.peak ?? START_RATING, after) }
+    }
+    if (entry.rated?.against) {
+      const day = dayOf(entry.at)
+      this.sql.exec(
+        `INSERT INTO rated_against (opponent, day, n) VALUES (?, ?, 1)
+          ON CONFLICT (opponent, day) DO UPDATE SET n = n + 1`,
+        entry.rated.against,
+        day,
+      )
+      this.sql.exec(`DELETE FROM rated_against WHERE day < ?`, day - 1)
     }
     meta.self = entry.self
     meta.since ??= entry.at
@@ -298,7 +351,12 @@ export class PlayerDO extends DurableObject<Env> {
         result: row.result as GameResult,
         ...(row.place === null ? {} : { place: row.place }),
         seats: row.seats,
-        opponents: JSON.parse(row.opponents) as Opponent[],
+        // Cleaned again on the way out: a name stored before names were cleaned
+        // the way they are now must not reach a page in its old shape.
+        opponents: (JSON.parse(row.opponents) as Opponent[]).map((opponent) => ({
+          ...opponent,
+          name: cleanName(opponent.name) ?? 'Player',
+        })),
         at: row.at,
         ...(row.rating_before === null || row.rating_after === null
           ? {}
@@ -306,15 +364,28 @@ export class PlayerDO extends DurableObject<Env> {
       }))
     const base = {
       handle,
-      name: meta.self?.name ?? '',
+      name: cleanName(meta.self?.name) ?? '',
       ...(meta.self?.avatar ? { avatar: meta.self.avatar } : {}),
       isGuest: meta.self?.isGuest ?? true,
       since: meta.since ?? 0,
       stats,
       ratings: chess ? { chess } : {},
     }
-    // Field by field, so nothing private can ride along on a public profile.
-    if (!owner) return { ...base, recent: recent.map(({ code: _code, ...rest }) => rest) }
+    // Field by field, so nothing private can ride along on a public profile. A
+    // public page says which day a game was played, not the minute, and names
+    // its opponents without linking them: an opponent's handle would let anyone
+    // who finds this page walk on to every profile it touches, and from those
+    // to theirs. The owner's own page keeps the links to people they played.
+    if (!owner)
+      return {
+        ...base,
+        since: base.since && dayOf(base.since) * DAY_MS,
+        recent: recent.map(({ code: _code, at, opponents, ...rest }) => ({
+          ...rest,
+          opponents: opponents.map(({ handle: _handle, ...opponent }) => opponent),
+          at: dayOf(at) * DAY_MS,
+        })),
+      }
     const active: ActiveTable[] = this.sql
       .exec<{
         code: string
