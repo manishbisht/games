@@ -27,7 +27,9 @@ The rules live in `shared/src/wildrise/` so the browser and the room server can 
 - `shared/src/wildrise/adapter.ts`: the room's seam — seat rules, the server-thrown die, the timed beats, and what happens when a seat goes quiet.
 - `online/session.ts` and `online/WildriseRoomView.tsx`: turn a room snapshot into the colours and callbacks the table already speaks.
 - `scene/models.ts`: original procedural geometry, animal miniatures, artwork, die and transport curves.
-- `scene/createScene.ts`: lighting, camera, interaction and state-driven animation. The renderer never decides a move, dice result or winner; its resources are disposed on navigation.
+- `scene/story.ts`: turns each state the room sends into ordered beats (roll, walk, ride, a head-shake at an overshoot, the win). A state that follows the last one plays at the table's pace; joining or reconnecting mid-turn catches up quickly instead of replaying.
+- `scene/createScene.ts`: lighting, camera direction, interaction and the beats themselves, on the shared `src/motion` toolkit (stage, camera rig, die throw, particles, tweens and queue). The renderer never decides a move, dice result or winner; its resources are disposed on navigation.
+- `scene/ambient.ts`: the idle table — pollen, falling leaves, steam, swaying plants — drawn at a low idle rate and off under reduced motion.
 - `WildriseGame.tsx` and `components/`: setup, accessible dialogs, live text status, event history and winner UI.
 
 The reducer can also configure starting on square 1, extra turns for sixes, blocking occupied destinations, and the number of configured snakes/ladders. These remain code options rather than a full custom-rules editor, and an online room plays the printed defaults — the only thing a host chooses is the table size. All games live in server rooms for 24 hours and can be resumed from their links. There is no offline or local play mode.

@@ -60,8 +60,13 @@ function print(map: THREE.Texture, w: number, h: number, y: number) {
   return mesh
 }
 
+/**
+ * The board, and its hundred tiles by square (index 0 is square 1) so a landing
+ * can press the one it lands on and the finish can glow when someone is close.
+ */
 export function makeBoard(state: GameState) {
-  const group = new THREE.Group()
+  const group = new THREE.Group(),
+    tiles: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[] = []
   const foundation = box(11.35, 0.44, 11.35, '#7c533b', 0.16)
   foundation.position.y = -0.22
   group.add(foundation)
@@ -86,6 +91,7 @@ export function makeBoard(state: GameState) {
     const tile = box(0.976, 0.075, 0.976, color, 0.035)
     tile.position.set(x, 0.187, z)
     group.add(tile)
+    tiles[n - 1] = tile as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
   }
   const artwork = canvasTexture(2048, (ctx) => {
     const cell = 204.8
@@ -167,7 +173,7 @@ export function makeBoard(state: GameState) {
   const plaque = print(name, 2.9, 2.9, 0.145)
   plaque.position.z = 5.32
   group.add(plaque)
-  return group
+  return { group, tiles }
 }
 
 export function snakeCurve(route: Route) {
@@ -187,6 +193,32 @@ export function snakeCurve(route: Route) {
   })
   return new THREE.CatmullRomCurve3(points)
 }
+/** Where along the body (0 head, 1 tail) each belly stripe sits. */
+const STRIPES = Array.from({ length: 22 }, (_, i) => (i + 2) / 25)
+
+/**
+ * The body's motion, shared by its vertex shader and the stripes riding on it
+ * so the two can never part: a slither that travels head to tail, a swallowed
+ * bulge at `bulgeAt`, and the tail's flick at the end of a slide.
+ */
+export interface SnakeMotion {
+  time: number
+  wave: number
+  bulgeAt: number
+  bulge: number
+  flick: number
+}
+export const slither = (along: number, m: SnakeMotion) =>
+  Math.sin(along * 18 - m.time * 9) * m.wave * (0.25 + 0.75 * along)
+export const bulge = (along: number, m: SnakeMotion) => {
+  const d = (along - m.bulgeAt) / 0.07
+  return Math.exp(-d * d) * m.bulge
+}
+export const flick = (along: number, m: SnakeMotion) => {
+  const tail = THREE.MathUtils.smoothstep(along, 0.8, 1)
+  return tail * tail * m.flick
+}
+
 export function makeSnake(route: Route) {
   const group = new THREE.Group(),
     curve = snakeCurve(route)
@@ -197,49 +229,162 @@ export function makeSnake(route: Route) {
     emissive: route.color,
     emissiveIntensity: 0,
   })
+  const motion: SnakeMotion = { time: 0, wave: 0, bulgeAt: -1, bulge: 0, flick: 0 }
+  const uniforms = {
+    uTime: { value: 0 },
+    uWave: { value: 0 },
+    uBulgeAt: { value: -1 },
+    uBulge: { value: 0 },
+    uFlick: { value: 0 },
+  }
+  const body = skin.clone()
+  body.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        attribute float aAlong;
+        attribute vec3 aSide;
+        uniform float uTime, uWave, uBulgeAt, uBulge, uFlick;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `vec3 transformed = vec3(position);
+        transformed += aSide * sin(aAlong * 18.0 - uTime * 9.0) * uWave * (0.25 + 0.75 * aAlong);
+        float bulgeD = (aAlong - uBulgeAt) / 0.07;
+        transformed += objectNormal * exp(-bulgeD * bulgeD) * uBulge;
+        float tail = smoothstep(0.8, 1.0, aAlong);
+        transformed.y += tail * tail * uFlick;`,
+      )
+  }
   const geometry = new THREE.TubeGeometry(curve, 100, 0.125, 12, false)
   const position = geometry.attributes.position
+  const along = new Float32Array(position.count),
+    side = new Float32Array(position.count * 3)
+  const center = new THREE.Vector3(),
+    v = new THREE.Vector3(),
+    tangent = new THREE.Vector3()
   for (let i = 0; i <= 100; i++) {
-    const center = curve.getPointAt(i / 100),
-      taper = 1 - 0.84 * Math.pow(i / 100, 3)
+    curve.getPointAt(i / 100, center)
+    curve.getTangentAt(i / 100, tangent)
+    const taper = 1 - 0.84 * Math.pow(i / 100, 3),
+      length = Math.hypot(tangent.x, tangent.z) || 1
     for (let j = 0; j <= 12; j++) {
       const index = i * 13 + j
-      const v = new THREE.Vector3()
-        .fromBufferAttribute(position, index)
-        .sub(center)
-        .multiplyScalar(taper)
-        .add(center)
+      v.fromBufferAttribute(position, index).sub(center).multiplyScalar(taper).add(center)
       position.setXYZ(index, v.x, v.y, v.z)
+      along[index] = i / 100
+      side.set([-tangent.z / length, 0, tangent.x / length], index * 3)
     }
   }
+  geometry.setAttribute('aAlong', new THREE.BufferAttribute(along, 1))
+  geometry.setAttribute('aSide', new THREE.BufferAttribute(side, 3))
   geometry.computeVertexNormals()
-  const body = new THREE.Mesh(geometry, skin)
-  body.castShadow = true
-  body.receiveShadow = true
-  group.add(body)
+  const mesh = new THREE.Mesh(geometry, body)
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  group.add(mesh)
+
+  // The head opens: the crown and the chin are hinged at the back of the skull,
+  // with a mouth and fangs inside that only show when it does.
   const head = new THREE.Group()
   head.position.copy(curve.getPoint(0))
+  head.rotation.order = 'YXZ'
   group.add(head)
-  const face = ball(head, route.color, 0, 0.035, 0, 0.21, 0.145, 0.245)
+  const upper = new THREE.Group(),
+    lower = new THREE.Group()
+  upper.position.set(0, 0.02, -0.13)
+  lower.position.set(0, -0.02, -0.1)
+  head.add(upper, lower)
+  const face = ball(upper, route.color, 0, 0.015, 0.13, 0.21, 0.145, 0.245)
   face.material = skin
-  ball(head, '#f7e7b9', 0, -0.035, 0.1, 0.158, 0.068, 0.15)
   for (const x of [-0.125, 0.125]) {
-    ball(head, '#fff7db', x, 0.125, 0.085, 0.071)
-    ball(head, '#263c35', x, 0.166, 0.119, 0.029)
-    ball(head, '#ffffff', x - 0.008, 0.179, 0.134, 0.008)
+    ball(upper, '#fff7db', x, 0.105, 0.215, 0.071)
+    ball(upper, '#263c35', x, 0.146, 0.249, 0.029)
+    ball(upper, '#ffffff', x - 0.008, 0.159, 0.264, 0.008)
+    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.07, 6), material('#fffbea', 0.3))
+    fang.position.set(x * 0.45, -0.075, 0.31)
+    fang.rotation.x = Math.PI
+    upper.add(fang)
   }
-  const tangent = curve.getTangent(0)
+  ball(head, '#7c3238', 0, -0.01, 0.06, 0.16, 0.06, 0.18)
+  ball(lower, '#f7e7b9', 0, -0.015, 0.2, 0.158, 0.068, 0.15)
+  const tongue = new THREE.Group()
+  tongue.position.set(0, 0.01, 0.2)
+  const tongueMaterial = material('#c8454f', 0.4)
+  const stem = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.01, 0.17), tongueMaterial)
+  stem.position.z = 0.085
+  tongue.add(stem)
+  for (const x of [-1, 1]) {
+    const fork = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.009, 0.06), tongueMaterial)
+    fork.position.set(x * 0.014, 0, 0.19)
+    fork.rotation.y = x * 0.45
+    tongue.add(fork)
+  }
+  tongue.scale.z = 0.01
+  tongue.visible = false
+  lower.add(tongue)
+  curve.getTangent(0, tangent)
   head.rotation.y = Math.atan2(-tangent.x, -tangent.z)
-  for (let i = 2; i < 24; i++) {
-    const p = curve.getPointAt(i / 25)
-    ball(group, '#f2deab', p.x, p.y + 0.104 * (1 - i / 35), p.z, 0.044 * (1 - i / 32), 0.014, 0.047)
+  const forward = new THREE.Vector3(-tangent.x, 0, -tangent.z).normalize()
+
+  const stripes = STRIPES.map((t) => {
+    curve.getPointAt(t, center)
+    curve.getTangentAt(t, tangent)
+    const length = Math.hypot(tangent.x, tangent.z) || 1,
+      i = Math.round(t * 25)
+    const mesh = ball(
+      group,
+      '#f2deab',
+      center.x,
+      center.y + 0.104 * (1 - i / 35),
+      center.z,
+      0.044 * (1 - i / 32),
+      0.014,
+      0.047,
+    )
+    return {
+      mesh,
+      along: t,
+      base: mesh.position.clone(),
+      side: new THREE.Vector3(-tangent.z / length, 0, tangent.x / length),
+    }
+  })
+  return {
+    group,
+    head,
+    upper,
+    lower,
+    tongue,
+    forward,
+    rest: head.position.clone(),
+    skin,
+    body,
+    curve,
+    route,
+    motion,
+    /** Pushes `motion` to the shader and the stripes; only the snake in play needs it each frame. */
+    apply() {
+      uniforms.uTime.value = motion.time
+      uniforms.uWave.value = motion.wave
+      uniforms.uBulgeAt.value = motion.bulgeAt
+      uniforms.uBulge.value = motion.bulge
+      uniforms.uFlick.value = motion.flick
+      for (const stripe of stripes) {
+        const lateral = slither(stripe.along, motion)
+        stripe.mesh.position.copy(stripe.base).addScaledVector(stripe.side, lateral)
+        stripe.mesh.position.y += bulge(stripe.along, motion) * 0.9 + flick(stripe.along, motion)
+      }
+    },
   }
-  return { group, head, skin, curve, route }
 }
-export function ladderPoint(route: Route, t: number) {
+export type Snake = ReturnType<typeof makeSnake>
+
+export function ladderPoint(route: Route, t: number, out = new THREE.Vector3()) {
   const a = spaceCoordinates(route.from),
     b = spaceCoordinates(route.to)
-  return new THREE.Vector3(a.x + (b.x - a.x) * t, 0.39 + 0.16 * t, a.z + (b.z - a.z) * t)
+  return out.set(a.x + (b.x - a.x) * t, 0.39 + 0.16 * t, a.z + (b.z - a.z) * t)
 }
 export function makeLadder(route: Route) {
   const group = new THREE.Group(),
@@ -250,15 +395,17 @@ export function makeLadder(route: Route) {
     group.add(
       rod(a.clone().addScaledVector(side, sign), b.clone().addScaledVector(side, sign), 0.052, '#bd975d'),
     )
-  const count = Math.ceil(a.distanceTo(b) / 0.31)
-  for (let i = 0; i <= count; i++) {
-    const point = a.clone().lerp(b, i / count)
+  const rungs = Math.ceil(a.distanceTo(b) / 0.31)
+  for (let i = 0; i <= rungs; i++) {
+    const point = a.clone().lerp(b, i / rungs)
     group.add(
       rod(point.clone().sub(side), point.clone().add(side), 0.041, i % 3 === 0 ? '#ddbc7c' : '#cda466'),
     )
   }
-  return { group, route }
+  /** Climbers step rung to rung, so a climb is counted in these. */
+  return { group, route, rungs, yaw: Math.atan2(b.x - a.x, b.z - a.z) }
 }
+export type Ladder = ReturnType<typeof makeLadder>
 
 export function makeToken(id: PlayerId) {
   const group = new THREE.Group(),
@@ -393,20 +540,21 @@ export function makeDie() {
   group.userData.die = true
   return group
 }
-export function dieQuaternion(n: number) {
-  const angles = [
-    [0, 0, 0],
-    [0, 0, 0],
-    [-Math.PI / 2, 0, 0],
-    [0, 0, Math.PI / 2],
-    [0, 0, -Math.PI / 2],
-    [Math.PI / 2, 0, 0],
-    [Math.PI, 0, 0],
-  ][n]
-  return new THREE.Quaternion()
-    .setFromEuler(new THREE.Euler(...(angles as [number, number, number])))
-    .premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.15))
-}
+/** The orientation that shows `n` on top, made once per face rather than per frame. */
+const FACES = [
+  [0, 0, 0],
+  [0, 0, 0],
+  [-Math.PI / 2, 0, 0],
+  [0, 0, Math.PI / 2],
+  [0, 0, -Math.PI / 2],
+  [Math.PI / 2, 0, 0],
+  [Math.PI, 0, 0],
+].map(([x, y, z]) =>
+  new THREE.Quaternion()
+    .setFromEuler(new THREE.Euler(x, y, z))
+    .premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.15)),
+)
+export const dieQuaternion = (n: number) => FACES[n] ?? FACES[1]
 
 export function makePlant(x: number, z: number, size = 1) {
   const group = new THREE.Group()
@@ -416,13 +564,17 @@ export function makePlant(x: number, z: number, size = 1) {
   pot.position.y = 0.26
   pot.castShadow = true
   group.add(pot)
+  // The leaves hang from a crown at the soil so they can sway as one.
+  const crown = new THREE.Group()
+  crown.position.y = 0.5
+  group.add(crown)
   for (let i = 0; i < 7; i++) {
     const angle = i * 2.4,
       leaf = ball(
-        group,
+        crown,
         i % 2 ? '#5f7850' : '#79916b',
         Math.cos(angle) * 0.26,
-        0.85 + (i % 3) * 0.1,
+        0.35 + (i % 3) * 0.1,
         Math.sin(angle) * 0.26,
         0.15,
         0.48,
@@ -431,5 +583,5 @@ export function makePlant(x: number, z: number, size = 1) {
     leaf.rotation.z = Math.cos(angle) * -0.7
     leaf.rotation.x = Math.sin(angle) * 0.7
   }
-  return group
+  return { group, crown }
 }
