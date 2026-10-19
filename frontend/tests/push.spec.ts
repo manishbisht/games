@@ -52,7 +52,14 @@ test('the service worker takes the page and keeps a copy of the shell', async ({
   expect(cached.every((url) => !url.startsWith('http://127.0.0.1:8787'))).toBe(true)
 })
 
-test('the notification switch asks only when pressed, and says what happened', async ({ browser }) => {
+test('the notification switch asks only when pressed, and says what happened', async ({
+  browser,
+  request,
+}) => {
+  // A server without its VAPID private key (a clean checkout, CI) sends no push
+  // at all, and the switch is shown disabled — there is nothing to subscribe to.
+  const { key } = await (await request.get(`${API}/api/push/key`)).json()
+  test.skip(!key, 'this game server has no VAPID key configured')
   const guestId = crypto.randomUUID()
   const context = await browser.newContext()
   await context.addInitScript((id) => {
