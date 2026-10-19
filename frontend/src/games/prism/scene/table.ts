@@ -198,7 +198,8 @@ export function createTable(scene: THREE.Scene, tweens: Tweens, color: Color) {
   const tint = new THREE.Color(COLOR_HEX[color]),
     from = new THREE.Color(),
     target = new THREE.Color()
-  let direction: 1 | -1 = 1
+  let direction: 1 | -1 = 1,
+    thin = false
 
   function ripple(
     at: THREE.Vector3,
@@ -265,6 +266,10 @@ export function createTable(scene: THREE.Scene, tweens: Tweens, color: Color) {
     ripple,
     recolor,
     squashToken,
+    /** On a device the stage has stepped all the way down, each wave is a single ring. */
+    thin(next: boolean) {
+      thin = next
+    },
     /** Sets everything to `next` at once, for a table that is snapping into place. */
     setColor(next: Color) {
       tint.set(COLOR_HEX[next])
@@ -287,7 +292,7 @@ export function createTable(scene: THREE.Scene, tweens: Tweens, color: Color) {
         return
       }
       ripple(PILE, COLOR_HEX[next], { radius: 3.9, ms: 900, opacity: 0.85, ellipse: 1.75 })
-      ripple(PILE, '#fff3d0', { radius: 2.2, ms: 520, opacity: 0.55 })
+      if (!thin) ripple(PILE, '#fff3d0', { radius: 2.2, ms: 520, opacity: 0.55 })
       recolor(next, { delay: 120, ms: 360 })
       gold(arrowMaterial, 0.5, 900)
     },

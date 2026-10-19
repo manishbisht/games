@@ -1,5 +1,6 @@
 import type { PrismOnlineAction } from '@games/shared/prism/online'
 import type { Command, GameState } from '@games/shared/prism/types'
+import { beatElapsed } from '@games/shared/protocol'
 import type { RoomSnapshot, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 
@@ -27,6 +28,12 @@ export interface OnlinePrismSession {
   /** Indexed by player, so `players[state.currentPlayer]` is whoever is on turn. */
   players: (PrismSeatPlayer | undefined)[]
   rematch: { mine: boolean; theirs: boolean }
+  /**
+   * When this state began at the room, on this browser's `performance.now()`
+   * clock: the server says how long ago, by its own clock, so the two clocks
+   * never have to agree. A browser that arrives mid-beat starts it part-way in.
+   */
+  since?: number
   send: {
     /** The engine's own command; who played it is the socket's to say, not ours. */
     command: (command: Command) => void
@@ -100,6 +107,7 @@ export function prismSession(
       // only deals once the whole table has asked for it.
       theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
     },
+    ...(snapshot.timing ? { since: performance.now() - beatElapsed(snapshot.timing) } : {}),
     send: {
       command: (command) => api.action(wireAction(command)),
       rematch: api.rematch,

@@ -41,6 +41,7 @@ import type { Cue, TableApi, TableHost, TableView } from './scene/createScene'
 import { warmImages } from './scene/artwork'
 import { setMotionPreference, useReducedMotion } from '../../motion/preference'
 import { useHeld } from '../../motion/hooks'
+import { haptic } from '../../motion/audio'
 import { useBotRoom } from '../../online/useBotRoom'
 import { prismGame } from '../catalog'
 import Setup from './components/Setup'
@@ -209,9 +210,13 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
     slot: motion.slot,
     cue: (cue) => {
       if (cue.kind === 'sound') {
-        if (!muted) sound(cue.sound)
+        if (!muted) sound(cue.sound, cue.pan)
+        if (cue.sound === 'win' && game.winner === viewer && !watching) haptic([18, 60, 26])
         return
       }
+      // Felt, sparingly: only what lands on this seat.
+      const hit = cue.kind === 'skip' || (cue.kind === 'penalty' && cue.landed === 0)
+      if (hit && !watching && cue.player === viewer) haptic(16)
       setCues((current) => {
         const previous = current[cue.kind]
         // A penalty counting its cards in is one moment, not one per card.
@@ -319,7 +324,11 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
       </header>
       <main className="pr-arena" aria-busy={shown.busy || undefined}>
         <div className="pr-scene-wrap">
-          <TableScene ref={table} state={{ game, viewer, menu, watching }} host={host} />
+          <TableScene
+            ref={table}
+            state={{ game, viewer, menu, watching, since: online?.since }}
+            host={host}
+          />
         </div>
         {menu ? (
           <>

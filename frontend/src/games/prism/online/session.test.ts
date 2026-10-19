@@ -105,6 +105,26 @@ describe('prismSession', () => {
     expect(all.rematch).toEqual({ mine: false, theirs: true })
   })
 
+  it('says when the state began on this page’s clock, from how long ago the server says it did', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(50_000)
+    const snapshot: RoomSnapshot = {
+      protocol: PROTOCOL_VERSION,
+      code: 'ABC234',
+      game: 'prism',
+      visibility: 'private',
+      status: 'playing',
+      seatIds: ['p0', 'p1'],
+      seats: { p0: seat('Ann'), p1: seat('Ben') },
+      gameState: dealt(['Ann', 'Ben']),
+      // The server's clock is nowhere near this page's; only the difference counts.
+      timing: { now: 1_700_000_001_200, since: 1_700_000_000_000 },
+    }
+    const you = { id: 'ann', seat: 'p0' as const, isHost: true }
+    expect(prismSession(snapshot, you, api(), () => {}).since).toBe(48_800)
+    expect(prismSession({ ...snapshot, timing: undefined }, you, api(), () => {}).since).toBeUndefined()
+    now.mockRestore()
+  })
+
   it('sends a command to the room rather than playing it here', () => {
     const snapshot: RoomSnapshot = {
       protocol: PROTOCOL_VERSION,
