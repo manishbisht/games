@@ -3,17 +3,51 @@ name: pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Deploys queue behind each other and never cancel; a pull request only checks,
+# so a newer push to it replaces the run still going.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('check-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Everything a change has to pass before either half of the site ships. It
+  # names no environment, so it runs on pull requests (and forks) without any
+  # secret, and both deploys below wait on it: a failing backend test keeps the
+  # frontend that talks to it from going out too.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint -w frontend
+
+      - name: Test shared and frontend
+        run: npm run test -w shared --if-present && npm run test -w frontend
+
+      - name: Test and typecheck backend
+        run: npm run test -w backend && npm run typecheck -w backend
+
   build:
+    needs: check
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: github-pages
     steps:
@@ -34,12 +68,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Lint
-        run: npm run lint -w frontend
-
-      - name: Run unit tests
-        run: npm run test -w shared --if-present && npm run test -w frontend
 
       - name: Build for GitHub Pages
         env:
@@ -68,14 +96,14 @@ jobs:
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
 
   deploy-api:
+    needs: check
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     # The Cloudflare token is a secret of this environment, and a job only sees
     # an environment's secrets when it names that environment.
     environment: backend
     # Mapped at job level so the deploy step can ask whether they exist: secrets
-    # are empty on forks and on repos that never configured Cloudflare, and the
-    # tests below should still run there.
+    # are empty on forks and on repos that never configured Cloudflare.
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -92,9 +120,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Test shared and backend
-        run: npm run test -w shared && npm run test -w backend && npm run typecheck -w backend
 
       - name: Deploy Worker
         if: env.CLOUDFLARE_API_TOKEN != ''
