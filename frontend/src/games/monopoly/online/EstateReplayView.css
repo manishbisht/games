@@ -1,0 +1,125 @@
+/*
+ * Estate's replay: the board fills the replay page's stage, with the news and
+ * the players' cash laid over it. Site tokens, so it sits in the replay page's
+ * frame rather than in the table's own navy.
+ */
+@scope (.estate-replay) {
+  /* Out-ranks the table's own root rule, which would make this a whole page. */
+  :scope.estate-app {
+    position: relative;
+    min-height: clamp(300px, 60svh, 680px);
+    background: none;
+    overflow: hidden;
+    color: var(--theme-text);
+  }
+
+  :scope > .board-canvas {
+    inset: 0;
+  }
+
+  /* The news up top, the players along the bottom — both up top on a phone, clear of the sticky player bar. */
+  .estate-replay-hud {
+    position: absolute;
+    z-index: 2;
+    inset: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .estate-replay-news {
+    max-width: min(420px, 100%);
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--theme-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--theme-surface) 92%, transparent);
+    font-size: 13px;
+    line-height: 1.45;
+    animation: estate-replay-news var(--motion-base, 0.24s) var(--ease-out, ease-out) both;
+  }
+
+  .estate-replay-players {
+    margin: auto 0 0;
+    align-self: stretch;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .estate-replay-players li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 6px 12px 6px 6px;
+    border: 1px solid var(--theme-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--theme-surface) 92%, transparent);
+    font-size: 13px;
+  }
+
+  .estate-replay-players li.on-turn {
+    border-color: var(--player-color);
+    box-shadow: inset 3px 0 0 var(--player-color);
+  }
+
+  .estate-replay-players li.bankrupt {
+    text-decoration: line-through;
+    text-decoration-color: var(--theme-muted);
+  }
+
+  .estate-replay-players li > span {
+    display: grid;
+    min-width: 0;
+  }
+
+  .estate-replay-players b {
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .estate-replay-players small {
+    color: var(--theme-muted);
+    font-size: 11px;
+  }
+
+  .estate-replay-players .counted-money {
+    margin-left: 4px;
+  }
+
+  .webgl-message p {
+    color: var(--theme-muted);
+  }
+
+  @media (max-width: 560px) {
+    .estate-replay-hud {
+      inset: 10px;
+      justify-content: flex-start;
+    }
+    .estate-replay-news {
+      font-size: 12px;
+    }
+    .estate-replay-players {
+      margin-top: 0;
+    }
+    .estate-replay-players li {
+      flex: 1 1 calc(50% - 4px);
+      font-size: 12px;
+    }
+  }
+}
+
+@keyframes estate-replay-news {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}

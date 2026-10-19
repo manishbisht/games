@@ -1274,6 +1274,11 @@ function MonopolyGame({
               One more round? <RotateCcw size={18} />
             </button>
           )}
+          {online?.replay && (
+            <Link className="secondary-button full-width winner-replay" to={online.replay}>
+              <Play size={16} /> Watch the replay
+            </Link>
+          )}
           <button className="text-button" onClick={() => setWinnerDismissed(true)}>
             Take a look at the final board
           </button>

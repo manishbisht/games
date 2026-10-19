@@ -261,6 +261,11 @@
     margin: 13px 0;
   }
 
+  .winner-replay {
+    margin-top: 10px;
+    text-decoration: none;
+  }
+
   .winner-dialog > p {
     font-size: 11px;
     color: light-dark(var(--theme-muted), #9facc0);

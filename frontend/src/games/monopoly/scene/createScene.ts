@@ -66,6 +66,16 @@ export interface SceneApi {
    * where the room already is.
    */
   update: (state: GameState, since?: number) => void
+  /**
+   * Put the board straight onto `state`, with nothing played on the way: a
+   * replay's scrub or step back, where there is no story between the two.
+   */
+  land: (state: GameState) => void
+  /**
+   * How fast the board tells its stories, 1 being the room's own pace. A replay
+   * sets it so each state's story fits the time that state stays on screen.
+   */
+  pace: (rate: number) => void
   select: (id: number | null) => void
   /** Rattle the dice in the hand while the roll is on its way to the server. */
   shake: () => void
@@ -110,12 +120,22 @@ export function createScene(
     onSelect,
     onCue,
     since,
-  }: { onSelect: (id: number) => void; onCue: (cue: SceneCue) => void; since?: number },
+    watch = false,
+  }: {
+    onSelect: (id: number) => void
+    onCue: (cue: SceneCue) => void
+    since?: number
+    /** A replay: the board is only watched, so nothing on it can be picked or hovered. */
+    watch?: boolean
+  },
 ): SceneApi {
   let state = initial,
-    disposed = false
+    disposed = false,
+    rate = 1
   const stage = createStage(container, {
-    label: 'Interactive 3D Estate board. Drag to rotate, scroll to zoom. Select a space for its details.',
+    label: watch
+      ? 'A replay of an Estate game on its 3D board. Drag to rotate, scroll to zoom.'
+      : 'Interactive 3D Estate board. Drag to rotate, scroll to zoom. Select a space for its details.',
     exposure: 1,
     environmentIntensity: 0.22,
     maxPixelRatio: 2,
@@ -1318,14 +1338,16 @@ export function createScene(
     const hit = stage.pick(event, tiles, false)[0]
     return hit ? (hit.object.userData.spaceId as number) : null
   }
-  const offTap = onTap(stage.canvas, (event) => {
-    const id = spaceAt(event)
-    if (id === null) return
-    selectedSpace = id
-    refreshFocus()
-    tooltip.hidden = true
-    onSelect(id)
-  })
+  const offTap = watch
+    ? () => {}
+    : onTap(stage.canvas, (event) => {
+        const id = spaceAt(event)
+        if (id === null) return
+        selectedSpace = id
+        refreshFocus()
+        tooltip.hidden = true
+        onSelect(id)
+      })
   const onDown = () => {
     tooltip.hidden = true
   }
@@ -1354,9 +1376,11 @@ export function createScene(
     tooltip.hidden = true
     refreshFocus()
   }
-  stage.canvas.addEventListener('pointerdown', onDown)
-  stage.canvas.addEventListener('pointermove', onMove)
-  stage.canvas.addEventListener('pointerleave', onLeave)
+  if (!watch) {
+    stage.canvas.addEventListener('pointerdown', onDown)
+    stage.canvas.addEventListener('pointermove', onMove)
+    stage.canvas.addEventListener('pointerleave', onLeave)
+  }
 
   // A hidden tab stops the clock; coming back to a long backlog lands it rather than replaying it.
   const onVisible = () => {
@@ -1376,7 +1400,7 @@ export function createScene(
     // stalled thread) left a story that keeps time with the room behind it:
     // play that time forward too, so the token lands when everyone else's does.
     const drift = stage.takeDrift(),
-      ms = dt * 1000 + (queue.busy ? drift : 0)
+      ms = (dt * 1000 + (queue.busy ? drift : 0)) * rate
     tweens.speed = queue.speed
     let moving = tweens.step(ms)
     if (queue.step(ms)) moving = true
@@ -1431,6 +1455,17 @@ export function createScene(
 
   return {
     update,
+    land(next) {
+      if (disposed) return
+      const prev = state
+      state = next
+      seen = true
+      if (next.players.some((p, i) => p.token !== prev.players[i]?.token)) setupTokens()
+      snap(next)
+    },
+    pace(next) {
+      rate = next > 0 ? next : 1
+    },
     select(id) {
       selectedSpace = id
       refreshFocus()

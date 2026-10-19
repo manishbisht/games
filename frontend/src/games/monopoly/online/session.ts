@@ -1,6 +1,7 @@
 import type { EstateOnlineAction } from '@games/shared/estate/online'
 import type { GameAction, GameState } from '@games/shared/estate/types'
 import type { ReactionId, SeatId } from '@games/shared/protocol'
+import { replayUrl } from '../../../online/games'
 import type { RoomViewProps } from '../../../online/games'
 import type { ReactionEntry } from '../../../online/roomState'
 import {
@@ -30,6 +31,8 @@ export interface OnlineEstateSession {
    * are both told — and a page that joins mid-roll joins it where the room is.
    */
   beats: RoomBeat<GameState>[]
+  /** Where this table's finished game plays back, once the room has finished it. */
+  replay: string | null
   send: {
     action: (action: EstateOnlineAction) => void
     rematch: () => void
@@ -167,6 +170,7 @@ export function estateSession({
     players: seatPlayers(snapshot, (_seat, index) => String(index)),
     rematch: rematchState(snapshot, you),
     beats: roomBeats<GameState>({ snapshot, receivedAt, recent }),
+    replay: snapshot.status === 'finished' ? replayUrl('estate', snapshot.code) : null,
     send: {
       action: (action) => api.action(action),
       rematch: api.rematch,
