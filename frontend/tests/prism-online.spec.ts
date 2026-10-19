@@ -69,6 +69,8 @@ function sawOnlyItsOwn(watch: SocketWatch, atLeast: number) {
 
 async function newPlayer(browser: Browser, errors: string[]) {
   const context = await browser.newContext()
+  // The first-table guide has its own spec (prism-guide).
+  await context.addInitScript(() => localStorage.setItem('games-guide-prism', 'done'))
   const page = await context.newPage()
   page.on('pageerror', (error) => errors.push(error.message))
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -248,5 +250,18 @@ test('a table made for four deals to the two who turned up', async ({ browser })
   await expect(host.locator('.pr-opponent')).toContainText('Ben')
   await expect(myTurn(host)).toBeVisible()
   await expect(turnLine(guest)).toHaveText('Ann’s turn')
+
+  // A reaction rises from the seat that sent it: Ben's from his side of the
+  // table on Ann's screen, and from his own corner of the hand on his.
+  await guest.getByRole('group', { name: 'Send a reaction' }).getByRole('button', { name: 'Wow' }).click()
+  const seen = host.locator('.pr-reaction[data-player="1"]')
+  await expect(seen).toContainText('Ben')
+  const bubble = (await seen.boundingBox())!,
+    badge = (await host.locator('.pr-opponent').boundingBox())!,
+    hand = (await host.locator('.pr-hand').boundingBox())!
+  expect(Math.abs(bubble.x + bubble.width / 2 - (badge.x + badge.width / 2))).toBeLessThan(160)
+  expect(bubble.y + bubble.height).toBeLessThan(hand.y)
+  await expect(guest.locator('.pr-reaction[data-player="1"]')).toContainText('You')
+  await host.screenshot({ path: 'test-results/prism-online-reaction.png' })
   expect(errors).toEqual([])
 })

@@ -22,6 +22,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('games-test-clock', 'on')
     localStorage.setItem('games-motion', 'full')
+    localStorage.setItem('games-guide-prism', 'done')
   })
 })
 

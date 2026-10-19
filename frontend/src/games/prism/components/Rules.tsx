@@ -1,9 +1,10 @@
-import { ArrowRight, Layers, Megaphone, Palette, Trophy } from 'lucide-react'
+import { ArrowRight, Layers, Megaphone, Palette, Route, Trophy } from 'lucide-react'
 import Dialog, { DialogDismiss } from './Dialog'
 import CardFace from './CardFace'
 import { createDeck } from '@games/shared/prism'
 
-export default function Rules({ onClose }: { onClose: () => void }) {
+/** `onGuide` brings back the first-table guide: now, at a table, or at the next one from the menu. */
+export default function Rules({ onClose, onGuide }: { onClose: () => void; onGuide?: () => void }) {
   const deck = createDeck()
   return (
     <Dialog title="How to play Prism" onClose={onClose}>
@@ -69,9 +70,16 @@ export default function Rules({ onClose }: { onClose: () => void }) {
         deck? We recycle the discards, keeping the top card. If all cards are held and nobody can play, the
         round is a draw. Play against bots or meet friends in an online room.
       </p>
-      <DialogDismiss className="pr-primary">
-        Back to the table <ArrowRight size={17} />
-      </DialogDismiss>
+      <div className="pr-dialog-actions">
+        {onGuide && (
+          <button className="pr-secondary" onClick={onGuide}>
+            <Route size={16} /> Show the guide again
+          </button>
+        )}
+        <DialogDismiss className="pr-primary">
+          Back to the table <ArrowRight size={17} />
+        </DialogDismiss>
+      </div>
     </Dialog>
   )
 }

@@ -3,7 +3,7 @@ import { createGame } from '@games/shared/prism'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
-import { claimTarget, prismSession, wireAction } from './session'
+import { prismSession, tableReactions, wireAction } from './session'
 
 const api = (): RoomApi => ({
   sit: vi.fn(),
@@ -15,6 +15,7 @@ const api = (): RoomApi => ({
   addBot: vi.fn(),
   removeBot: vi.fn(),
   dismissError: vi.fn(),
+  react: vi.fn(),
 })
 
 const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
@@ -27,7 +28,11 @@ const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
 const dealt = (names: string[]) => createGame(names.map((name) => ({ name, kind: 'human' as const })))
 
 /** A three-seat table mid-round, with whatever the test wants true of its seats. */
-function room(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = {}) {
+function room(
+  seats: Partial<Record<string, SeatInfo>>,
+  you: Partial<YouInfo> = {},
+  gameState: RoomSnapshot['gameState'] = dealt(['Ann', 'Ben', 'Cai']),
+) {
   const snapshot: RoomSnapshot = {
     protocol: PROTOCOL_VERSION,
     code: 'ABC234',
@@ -36,7 +41,7 @@ function room(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = 
     status: 'playing',
     seatIds: ['p0', 'p1', 'p2'],
     seats,
-    gameState: dealt(['Ann', 'Ben', 'Cai']),
+    gameState,
   }
   const info: YouInfo = { id: 'ann', seat: 'p0', isHost: true, ...you }
   return prismSession(snapshot, 0, info, api(), () => {})
@@ -148,16 +153,16 @@ describe('prismSession', () => {
   })
 })
 
-describe('claimTarget', () => {
+describe('the claim', () => {
   /** Seat one opens the round, so Ann is the one the table can get stuck on. */
   const onTurnAway = { ...seated, p0: seat('Ann', { connected: false, awaySince: 1 }) }
 
   it('names the away player the table is stuck on', () => {
-    expect(claimTarget(room(onTurnAway, { id: 'ben', seat: 'p1' }))?.name).toBe('Ann')
+    expect(room(onTurnAway, { id: 'ben', seat: 'p1' }).blocker?.name).toBe('Ann')
   })
 
   it('offers nobody to a watcher, who has no seat to claim with', () => {
-    expect(claimTarget(room(onTurnAway, { id: 'eve', seat: null }))).toBeNull()
+    expect(room(onTurnAway, { id: 'eve', seat: null }).blocker).toBeNull()
   })
 
   it('offers nobody once the claim has already been granted', () => {
@@ -166,18 +171,34 @@ describe('claimTarget', () => {
       { id: 'ben', seat: 'p1' },
     )
     // The room is playing Ann's seat now; asking again would settle nothing.
-    expect(claimTarget(session)).toBeNull()
+    expect(session.blocker).toBeNull()
   })
 
   it('offers nobody while the player on turn is still here, or when it is your own turn', () => {
-    expect(claimTarget(room(seated, { id: 'ben', seat: 'p1' }))).toBeNull()
+    expect(room(seated, { id: 'ben', seat: 'p1' }).blocker).toBeNull()
     // Ann is away, but it is Ann's own browser asking — she is not stuck on herself.
-    expect(claimTarget(room(onTurnAway))).toBeNull()
+    expect(room(onTurnAway).blocker).toBeNull()
   })
 
   it('offers nobody once the round is over', () => {
-    const session = room(onTurnAway, { id: 'ben', seat: 'p1' })
-    const won = { ...session, state: { ...session.state, status: 'won' as const, winner: 0 } }
-    expect(claimTarget(won)).toBeNull()
+    const won = { ...dealt(['Ann', 'Ben', 'Cai']), status: 'won' as const, winner: 1 }
+    expect(room(onTurnAway, { id: 'ben', seat: 'p1' }, won).blocker).toBeNull()
+  })
+})
+
+describe('tableReactions', () => {
+  it('tells each reaction by the player its seat holds, and a watcher’s by nobody', () => {
+    const snapshot = { seatIds: ['p0', 'p1', 'p2'] } as unknown as RoomSnapshot
+    const entry = (id: string, seat: 'p0' | 'p2' | null) => ({
+      id,
+      seat,
+      reaction: 'wow' as const,
+      at: 1,
+      receivedAt: 2,
+    })
+    expect(tableReactions(snapshot, [entry('a', 'p2'), entry('b', null)])).toEqual([
+      { id: 'a', player: 2, reaction: 'wow', receivedAt: 2 },
+      { id: 'b', player: null, reaction: 'wow', receivedAt: 2 },
+    ])
   })
 })

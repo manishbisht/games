@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test'
 
+// The first-table guide has its own spec (prism-guide); these tables start without it.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('games-guide-prism', 'done'))
+})
+
 test('Prism opens from the collection, renders its table, and has working settings and help', async ({
   page,
 }) => {
@@ -48,6 +53,8 @@ test('a bot round is dealt by the server, and the bot plays without this tab', a
   // Dealt on arrival: a solo table has nobody to wait for.
   await expect(page.getByRole('heading', { name: /^Room / })).toHaveCount(0)
   await expect(page.locator('.pr-card')).toHaveCount(7, { timeout: 20000 })
+  // Muted on the setup screen stays muted at the table, a page and a mount later.
+  await expect(page.getByRole('button', { name: 'Turn sound on', exact: true })).toBeVisible()
 
   // Your hand is the only one this browser holds. The bot's is a count.
   await expect(page.getByText('Jules')).toBeVisible()

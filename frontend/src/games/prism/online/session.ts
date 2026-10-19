@@ -1,19 +1,10 @@
 import type { PrismOnlineAction } from '@games/shared/prism/online'
 import type { Command, GameState } from '@games/shared/prism/types'
-import { beatElapsed } from '@games/shared/protocol'
-import type { RoomSnapshot, YouInfo } from '@games/shared/protocol'
+import type { ReactionId, RoomSnapshot, YouInfo } from '@games/shared/protocol'
+import type { ReactionEntry } from '../../../online/roomState'
+import { beganAt, claimTarget, rematchState, seatPlayer, seatPlayers } from '../../../online/session'
+import type { SeatPlayer } from '../../../online/session'
 import type { RoomApi } from '../../../online/useRoom'
-
-export interface PrismSeatPlayer {
-  name: string
-  connected: boolean
-  /** Server timestamp of when they dropped; absent while they are here. */
-  awaySince?: number
-  /** The room is already playing this seat — there is nothing left to claim. */
-  abandoned?: boolean
-  /** Nobody is behind this seat: the room plays it, and the table should say so. */
-  bot?: { skill: string }
-}
 
 /**
  * One online table, in the terms the cards already think in. The room speaks
@@ -26,14 +17,13 @@ export interface OnlinePrismSession {
   /** The player index this browser holds, or `null` for someone watching. */
   viewer: number | null
   /** Indexed by player, so `players[state.currentPlayer]` is whoever is on turn. */
-  players: (PrismSeatPlayer | undefined)[]
+  players: (SeatPlayer | undefined)[]
+  /** The away player the table is stuck on, when this seat may claim against them. */
+  blocker: SeatPlayer | null
   rematch: { mine: boolean; theirs: boolean }
   /**
    * When this state began at the room, on this browser's `performance.now()`
-   * clock: the server says how long before the snapshot left it, by its own
-   * clock, and that is counted back from when the snapshot arrived — not from
-   * when it rendered — so the two clocks never have to agree. A browser that
-   * arrives mid-beat starts it part-way in.
+   * clock (see `beganAt`). A browser that arrives mid-beat starts it part-way in.
    */
   since?: number
   send: {
@@ -41,8 +31,17 @@ export interface OnlinePrismSession {
     command: (command: Command) => void
     rematch: () => void
     claim: () => void
+    react?: (reaction: ReactionId) => void
   }
   leave: () => void
+}
+
+/** A reaction, told by the player index it came from — `null` for someone watching. */
+export interface TableReaction {
+  id: string
+  player: number | null
+  reaction: ReactionId
+  receivedAt: number
 }
 
 /**
@@ -57,19 +56,12 @@ export function wireAction(command: Command): PrismOnlineAction {
   return { kind: command.type }
 }
 
-/**
- * The player a claim can be made against right now, or `null`. Three things have
- * to hold at once: the table is genuinely stuck on someone who has gone, this
- * browser holds a seat of its own to claim with — a watcher has no standing, and
- * the server would only answer NOT_SEATED — and no claim has been granted yet,
- * because after one the room plays that seat and there is nothing to ask.
- */
-export function claimTarget(session: OnlinePrismSession): PrismSeatPlayer | null {
-  const { state, viewer, players } = session
-  if (viewer === null || state.status !== 'playing' || state.currentPlayer === viewer) return null
-  const blocker = players[state.currentPlayer]
-  return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
-}
+/** The room's reactions, each told by the player index its seat holds at this table. */
+export const tableReactions = (snapshot: RoomSnapshot, entries: ReactionEntry[]): TableReaction[] =>
+  entries.map(({ id, seat, reaction, receivedAt }) => {
+    const index = seat ? snapshot.seatIds.indexOf(seat) : -1
+    return { id, player: index >= 0 ? index : null, reaction, receivedAt }
+  })
 
 export function prismSession(
   snapshot: RoomSnapshot,
@@ -80,41 +72,31 @@ export function prismSession(
 ): OnlinePrismSession {
   // Safe by construction: this only runs for a prism room with a live game.
   const state = snapshot.gameState as GameState
-  const players: (PrismSeatPlayer | undefined)[] = state.players.map(() => undefined)
-  for (const [index, seat] of snapshot.seatIds.entries()) {
-    const info = snapshot.seats[seat]
-    if (info && index < players.length)
-      players[index] = {
-        name: info.player.name,
-        connected: info.connected,
-        awaySince: info.awaySince,
-        abandoned: info.abandoned,
-        bot: info.bot,
-      }
-  }
-
+  const players = state.players.map((_, index) => {
+    const info = snapshot.seats[snapshot.seatIds[index]]
+    return info && seatPlayer(info)
+  })
   const mine = you.seat ? snapshot.seatIds.indexOf(you.seat) : -1
-  // Bots are left out: one never asks for a rematch and the server never waits
-  // for one either, so counting them would leave the table saying "waiting" for
-  // a game that has already restarted.
-  const others = snapshot.seatIds.filter(
-    (seat) => seat !== you.seat && snapshot.seats[seat] && !snapshot.seats[seat]!.bot,
-  )
   return {
     state,
     viewer: mine >= 0 ? mine : null,
     players,
-    rematch: {
-      mine: you.seat ? (snapshot.seats[you.seat]?.wantsRematch ?? false) : false,
-      // Two to four at the table, so "them" is everyone else — and the next round
-      // only deals once the whole table has asked for it.
-      theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
-    },
-    ...(snapshot.timing ? { since: receivedAt - beatElapsed(snapshot.timing) } : {}),
+    // Counted in seats, which line up with the engine's players one for one.
+    blocker: claimTarget(
+      seatPlayers(snapshot, (seat) => seat),
+      snapshot.seatIds[state.currentPlayer] ?? null,
+      you.seat,
+      state.status !== 'playing',
+    ),
+    // Two to four at the table, so "theirs" is everyone else — and the next
+    // round only deals once the whole table has asked for it.
+    rematch: rematchState(snapshot, you),
+    ...(snapshot.timing ? { since: beganAt(snapshot, receivedAt) } : {}),
     send: {
       command: (command) => api.action(wireAction(command)),
       rematch: api.rematch,
       claim: api.claim,
+      react: api.react,
     },
     leave,
   }

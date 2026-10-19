@@ -1,5 +1,5 @@
 import ThemeControl from '../../theme/ThemeControl'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import { HeaderAuth } from '../../online/identity'
@@ -42,6 +42,7 @@ import { warmImages } from './scene/artwork'
 import { setMotionPreference, useReducedMotion } from '../../motion/preference'
 import { useHeld } from '../../motion/hooks'
 import { haptic } from '../../motion/audio'
+import { useSound } from '../../motion/sound'
 import { useBotRoom } from '../../online/useBotRoom'
 import { prismGame } from '../catalog'
 import Setup from './components/Setup'
@@ -50,8 +51,12 @@ import CardFace from './components/CardFace'
 import Dialog, { DialogDismiss } from './components/Dialog'
 import { useHandMotion } from './components/useHandMotion'
 import Rules from './components/Rules'
-import { claimTarget } from './online/session'
-import type { OnlinePrismSession } from './online/session'
+import { ReactionControl, SeatReactions } from './components/Reactions'
+import type { ReactionAnchor } from './components/Reactions'
+import Guide from './components/Guide'
+import { guideDone, rememberGuide } from './game/guide'
+import type { GuideStep, GuideTarget } from './components/Guide'
+import type { OnlinePrismSession, TableReaction } from './online/session'
 import './PrismGame.css'
 
 const AI_NAMES = ['You', 'Jules', 'Cleo', 'Milo']
@@ -111,13 +116,37 @@ function AbandonmentNotice({
 
 type CueKind = Exclude<Cue['kind'], 'sound'>
 type Cues = Partial<Record<CueKind, Cue & { key: number }>>
+/**
+ * The box round `elements` on screen, for the guide to ring; `null` while none
+ * is laid out. A hand wider than the screen scrolls, so only what is in view counts.
+ */
+function boxOf(...elements: (Element | null | undefined)[]): GuideTarget | null {
+  const rects = elements.flatMap((element) => {
+    const rect = element?.getBoundingClientRect()
+    return rect?.width ? [rect] : []
+  })
+  if (!rects.length) return null
+  const left = Math.max(Math.min(...rects.map((r) => r.left)), 0),
+    right = Math.min(Math.max(...rects.map((r) => r.right)), window.innerWidth),
+    top = Math.min(...rects.map((r) => r.top)),
+    bottom = Math.max(...rects.map((r) => r.bottom))
+  return { x: left, y: top, width: right - left, height: bottom - top, element: elements.find(Boolean)! }
+}
+
 /** The newest cue of `kind`, if it is about `player`. */
 function cueFor<K extends CueKind>(cues: Cues, kind: K, player: number) {
   const cue = cues[kind] as (Extract<Cue, { kind: K }> & { key: number }) | undefined
   return cue && 'player' in cue && cue.player === player ? cue : null
 }
 
-export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
+export default function PrismGame({
+  online,
+  reactions = [],
+}: {
+  online?: OnlinePrismSession
+  /** The room's recent reactions, told by player; each rises from its seat. */
+  reactions?: TableReaction[]
+}) {
   const [options, setOptions] = useState<SetupOptions>(DEFAULT_OPTIONS)
   // The table shown behind the setup panel. It is never played: choosing a
   // game creates a room, and the room deals the real one.
@@ -127,14 +156,21 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
   // selection only counts in the round it was made.
   const [selection, setSelection] = useState<{ round: number; id: string } | null>(null)
   const [wildCard, setWildCard] = useState<Card | null>(null)
-  const [muted, setMuted] = useState(false)
+  // Remembered per game, so muting on the setup screen still holds once the table opens.
+  const [soundOn, setSoundOn] = useSound('prism', true)
+  const muted = !soundOn,
+    setMuted = (mute: boolean) => setSoundOn(!mute)
   const reducedMotion = useReducedMotion()
   const [showFeed, setShowFeed] = useState(false)
   const [sort, setSort] = useState(false)
   const [view, setView] = useState<TableView | null>(null)
   const [cues, setCues] = useState<Cues>({})
-  const table = useRef<Pick<TableApi, 'zoom'>>(null),
-    handElement = useRef<HTMLDivElement>(null)
+  const table = useRef<Pick<TableApi, 'zoom' | 'locate'>>(null),
+    handElement = useRef<HTMLDivElement>(null),
+    arena = useRef<HTMLElement>(null)
+  // The first-table guide: remembered per game, and back on request from the rules.
+  const [guideWanted, setGuideWanted] = useState(() => !guideDone())
+  const [guideStep, setGuideStep] = useState(0)
   // The room is the only source of a dealt table, and the hand this browser is
   // shown is the only one in the state that is real.
   const game = online ? online.state : preview
@@ -180,7 +216,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
       (enabled && me.hand.length === 2 && game.preCalled !== viewer))
   /** A watcher is shown seat one's hand, and it arrives already face-down. */
   const hideHand = watching
-  const awayBlocking = online ? claimTarget(online) : null
+  const awayBlocking = online?.blocker ?? null
   const visibleHand = useMemo(() => {
     const cards = handView(game, viewer)
     return sort
@@ -194,15 +230,100 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
   }, [game, viewer, sort])
   const held = me.hand.filter((c) => !arriving.has(c.id)).length
 
-  const send = useCallback(
-    (command: Command) => {
-      // Nothing is applied here: the command goes to the room, and the table
-      // moves when the room says it did.
-      online?.send.command(command)
-      if (command.type === 'play' || command.type === 'draw' || command.type === 'pass') setSelection(null)
+  /**
+   * The guide, pointing at the real things. It waits for the deal and is never
+   * shown to someone watching; the steps that name an action move on when the
+   * player takes it.
+   */
+  const guideSteps: (GuideStep & { done?: Command['type'][] })[] = [
+    {
+      id: 'pile',
+      title: 'Match the pile',
+      text: 'Play a card that matches the color or the number of the card on top of the pile.',
+      target: () => {
+        const at = table.current?.locate('pile'),
+          size = Math.min(Math.max(window.innerWidth * 0.08, 76), 124)
+        return at ? { x: at.x - size / 2, y: at.y - size / 2, width: size, height: size } : null
+      },
     },
-    [online],
-  )
+    {
+      id: 'hand',
+      title: 'Play from your hand',
+      text: 'Glowing cards fit. Tap one to pick it up, then tap it again to play it.',
+      // The cards themselves, not the strip they sit in.
+      target: () =>
+        boxOf(...(handElement.current?.querySelectorAll('.pr-card:not(.pr-pending)') ?? [])) ??
+        boxOf(handElement.current),
+      done: ['play'],
+    },
+    {
+      id: 'draw',
+      title: 'Draw when you can’t',
+      text: 'Nothing fits? Draw a card. If it matches you can play it, or keep it and pass.',
+      target: () => boxOf(arena.current?.querySelector('.pr-play-controls .pr-secondary')),
+      done: ['draw', 'pass'],
+    },
+    {
+      id: 'actions',
+      title: 'Action cards',
+      text: 'Skip, Reverse and +2 bend the turn. A Wild plays on anything and picks the next color.',
+      target: () =>
+        boxOf(
+          arena.current?.querySelector('.pr-card[data-action]') ??
+            arena.current?.querySelector('.pr-direction'),
+        ),
+    },
+    {
+      id: 'call',
+      title: 'Call “Prism!”',
+      text: 'Down to your last card? Call Prism! before the next player moves, or be caught for two.',
+      target: () => boxOf(arena.current?.querySelector('.pr-call')),
+      done: ['call'],
+    },
+  ]
+  const guiding = guideWanted && !watching && !menu && !shown.dealing && now.status === 'playing'
+  const closeGuide = () => {
+    rememberGuide(true)
+    setGuideWanted(false)
+  }
+  const nextGuideStep = () =>
+    guideStep >= guideSteps.length - 1 ? closeGuide() : setGuideStep(guideStep + 1)
+
+  function send(command: Command) {
+    // Nothing is applied here: the command goes to the room, and the table
+    // moves when the room says it did.
+    online?.send.command(command)
+    if (command.type === 'play' || command.type === 'draw' || command.type === 'pass') setSelection(null)
+    if (guiding && guideSteps[guideStep]?.done?.includes(command.type)) nextGuideStep()
+  }
+
+  /** Where a seat's reactions rise from: its fan on the felt, its badge, or your own corner of the hand. */
+  const reactionAnchor: ReactionAnchor = (player) => {
+    if (player === null) return table.current?.locate('centre') ?? null
+    if (player === viewer && !watching) {
+      const you = boxOf(arena.current?.querySelector('.pr-you .pr-avatar')) ?? boxOf(handElement.current)
+      return you && { x: you.x + you.width / 2, y: you.y }
+    }
+    const area = arena.current?.getBoundingClientRect(),
+      fan = table.current?.locate(player)
+    const onScreen =
+      fan &&
+      area &&
+      fan.x > area.left + 48 &&
+      fan.x < area.right - 48 &&
+      fan.y > area.top + 48 &&
+      fan.y < area.bottom - 48
+    if (onScreen) return fan
+    // A phone shows the side seats' badges but not their fans.
+    const badge = boxOf(arena.current?.querySelector(`.pr-opponent[data-player="${player}"] .pr-avatar`))
+    return badge ? { x: badge.x + badge.width / 2, y: badge.y } : (fan ?? null)
+  }
+  const reactorName = (player: number | null) =>
+    player === null
+      ? 'Someone watching'
+      : player === viewer && !watching
+        ? 'You'
+        : (game.players[player]?.name ?? '')
 
   /** How the table reaches the page: what it shows, where the hand's cards are, and its moments. */
   const host: TableHost = {
@@ -322,7 +443,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
           <HeaderAuth readOnly={Boolean(online)} />
         </nav>
       </header>
-      <main className="pr-arena" aria-busy={shown.busy || undefined}>
+      <main className="pr-arena" ref={arena} aria-busy={shown.busy || undefined}>
         <div className="pr-scene-wrap">
           <TableScene
             ref={table}
@@ -387,6 +508,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                   <div
                     className={`pr-opponent pr-opponent-${position} ${current ? 'pr-current' : ''} ${penalty ? `pr-hit-${penalty.key % 2}` : ''}`}
                     key={p.id}
+                    data-player={p.id}
                     aria-label={`${p.name}, ${count} cards${current ? ', current turn' : ''}`}
                   >
                     <span className="pr-avatar" style={{ '--token': TOKEN_COLORS[p.id] } as CSSProperties}>
@@ -530,6 +652,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                         <button
                           key={card.id}
                           data-card={card.id}
+                          data-action={typeof card.value === 'number' ? undefined : card.value}
                           className={`pr-card ${playable ? 'pr-playable' : 'pr-unplayable'} ${card.id === selected ? 'pr-selected' : ''} ${card.id === game.drawnCardId ? 'pr-just-drawn' : ''} ${pending ? 'pr-pending' : ''}`}
                           style={
                             {
@@ -605,15 +728,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                     <span>{me.called || game.preCalled === viewer ? 'Called!' : 'Call Prism!'}</span>
                   </button>
                 </div>
-                <span className="pr-hand-tip">
-                  {selectedCard && enabled ? (
-                    cardName(selectedCard)
-                  ) : (
-                    <>
-                      <i /> {enabled ? 'You’re up' : 'Enjoy the table'}
-                    </>
-                  )}
-                </span>
+                {online && <ReactionControl onReact={online.send.react} watching={watching} />}
               </div>
             </section>
             {game.callWindow !== null &&
@@ -633,6 +748,17 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                 <span>{game.players[game.callWindow].name}: one card left. Call Prism!</span>
                 <button onClick={() => send({ type: 'call', player: game.callWindow! })}>Prism!</button>
               </div>
+            )}
+            {online && (
+              <SeatReactions
+                reactions={reactions}
+                anchor={reactionAnchor}
+                nameOf={reactorName}
+                muted={muted}
+              />
+            )}
+            {guiding && (
+              <Guide steps={guideSteps} step={guideStep} onNext={nextGuideStep} onClose={closeGuide} />
             )}
             {awayBlocking && (
               <AbandonmentNotice
@@ -655,7 +781,22 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
         </span>
       </footer>
 
-      {dialog === 'rules' && <Rules onClose={() => setDialog(null)} />}
+      {dialog === 'rules' && (
+        <Rules
+          onClose={() => setDialog(null)}
+          onGuide={
+            watching
+              ? undefined
+              : () => {
+                  // At a table it starts now; from the menu, at the next one.
+                  rememberGuide(false)
+                  setGuideStep(0)
+                  setGuideWanted(true)
+                  setDialog(null)
+                }
+          }
+        />
+      )}
       {dialog === 'settings' && (
         <Dialog title="Table settings" onClose={() => setDialog(null)}>
           <p className="pr-eyebrow">MAKE YOURSELF AT HOME</p>

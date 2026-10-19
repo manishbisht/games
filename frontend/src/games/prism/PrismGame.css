@@ -1121,20 +1121,212 @@
 .pr-call-ready:hover {
   background: #f0dcb7;
 }
-.pr-hand-tip {
-  width: 210px;
-  text-align: right;
-  font-size: 9px;
-  color: light-dark(var(--theme-muted), #9dae92);
+.pr-react {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 210px;
 }
-.pr-hand-tip i {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  background: #c6bc87;
+.pr-react-toggle {
+  display: none;
+}
+.pr-react .pr-react-bar {
+  box-shadow: none;
+}
+/* Someone watching has no hand to show, but can still cheer. */
+.pr-hand-hidden .pr-react {
+  visibility: visible;
+}
+
+/* A reaction, rising from the seat that sent it. */
+.pr-reactions {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+.pr-reaction {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  translate: -50% -100%;
+  animation: pr-reaction-rise 2400ms var(--ease-out) both;
+}
+.pr-reaction-emoji {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
-  vertical-align: middle;
-  margin-right: 5px;
+  background: light-dark(var(--theme-surface), #213a2d);
+  border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 30%, transparent), #d7c08c55);
+  box-shadow: 0 8px 22px #0b1d1640;
+  font-size: 27px;
+  line-height: 1;
+  animation: pr-reaction-spring var(--motion-slow) var(--ease-spring) both;
+}
+/* The bubble's tail, pointing back down at the seat. */
+.pr-reaction-emoji::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  translate: -50% 0;
+  rotate: 45deg;
+  background: inherit;
+  border: inherit;
+  border-top: 0;
+  border-left: 0;
+}
+.pr-reaction-name {
+  max-width: 110px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #142a20d9;
+  color: #f3ead2;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pr-reaction-watching .pr-reaction-emoji {
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  opacity: 0.9;
+}
+@keyframes pr-reaction-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  10% {
+    opacity: 1;
+  }
+  40% {
+    transform: translateY(-30px);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-62px);
+  }
+}
+@keyframes pr-reaction-spring {
+  from {
+    scale: 0.3;
+    rotate: -12deg;
+  }
+}
+/* Reduced motion: no rise and no spring, just there and gone, softly. */
+:root[data-motion='reduced'] .pr-reaction {
+  animation: pr-reaction-fade 2400ms linear both !important;
+}
+:root[data-motion='reduced'] .pr-reaction-emoji {
+  animation: none !important;
+}
+@keyframes pr-reaction-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+}
+
+/* The first-table guide: a ring round the real thing, and a card beside it. */
+.pr-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+}
+.pr-guide-ring {
+  position: absolute;
+  border-radius: 14px;
+  border: 2px solid #e6cca0;
+  box-shadow:
+    0 0 0 4px #e6cca033,
+    0 0 0 100vmax #0b1a1430;
+  transition:
+    left var(--motion-slow) var(--ease-out),
+    top var(--motion-slow) var(--ease-out),
+    width var(--motion-slow) var(--ease-out),
+    height var(--motion-slow) var(--ease-out);
+}
+.pr-guide-card {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: min(320px, calc(100% - 24px));
+  padding: 16px 16px 12px;
+  border-radius: 12px;
+  background: light-dark(var(--theme-surface), #1c3328);
+  border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 30%, transparent), #d7c08c4d);
+  box-shadow: 0 14px 36px #06140f55;
+  pointer-events: auto;
+  transition:
+    left var(--motion-slow) var(--ease-out),
+    top var(--motion-slow) var(--ease-out);
+}
+.pr-guide-step {
+  display: grid;
+  gap: 6px;
+}
+.pr-guide-step strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.pr-guide-step p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: light-dark(var(--theme-muted), #c3cbb5);
+}
+.pr-guide-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.pr-guide-dots {
+  display: flex;
+  gap: 4px;
+  margin-right: auto;
+}
+.pr-guide-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: light-dark(var(--theme-inset), #48604f);
+  transition:
+    width var(--motion-base) var(--ease-out),
+    background var(--motion-base) var(--ease-out);
+}
+.pr-guide-dots i.pr-guide-dot-on {
+  width: 16px;
+  border-radius: 3px;
+  background: #e6cca0;
+}
+.pr-guide-actions .pr-text-button {
+  margin: 0;
+  min-height: 40px;
+}
+.pr-guide-actions .pr-primary {
+  min-height: 40px;
+  padding: 8px 14px;
 }
 .pr-call-notice,
 .pr-catch {
@@ -1847,7 +2039,6 @@
   .pr-camera-controls {
     right: 25px;
   }
-  .pr-hand-tip,
   .pr-you {
     width: 140px;
   }
@@ -1987,8 +2178,30 @@
     height: 141px;
     margin-left: -16px;
   }
-  .pr-hand-tip {
+  /* Too narrow for the whole row: the reactions fold behind one button. */
+  .pr-react {
+    min-width: 0;
+    margin-left: 8px;
+  }
+  .pr-react-toggle {
+    display: inline-flex;
+    width: 42px;
+    height: 42px;
+  }
+  .pr-react-open .pr-react-toggle {
+    background: light-dark(var(--theme-inset), #304a3b);
+  }
+  .pr-react .pr-react-bar {
     display: none;
+  }
+  .pr-react-open .pr-react-bar {
+    display: inline-flex;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    z-index: 6;
+    box-shadow: 0 10px 28px #06140f40;
+    animation: motion-enter var(--motion-slow) var(--ease-spring) both;
   }
   .pr-play-controls {
     flex: 1;

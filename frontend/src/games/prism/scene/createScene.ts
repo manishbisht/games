@@ -77,8 +77,16 @@ export interface TableHost {
   cue(cue: Cue): void
 }
 
+/** Something on the felt the page can point at: a seat's fan, the pile, or the middle of the table. */
+export type TableSpot = number | 'pile' | 'centre'
+
 export interface TableApi {
   update: (state: TableState) => void
+  /**
+   * Where `spot` is on screen, in client pixels — for the page to float things
+   * from a seat or point at the pile. `null` before the table has a size.
+   */
+  locate: (spot: TableSpot) => { x: number; y: number } | null
   zoom: (amount: number) => void
   dispose: () => void
 }
@@ -183,6 +191,8 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
 
   // Scratch values for the per-frame paths; nothing there allocates.
   const ndc = new THREE.Vector3(),
+    spot = new THREE.Vector3(),
+    screen = new THREE.Vector2(),
     turn = new THREE.Quaternion(),
     twist = new THREE.Quaternion(),
     scratch = pose()
@@ -1161,6 +1171,19 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
       emit()
       // A backlog this long is a page that fell behind: show where things stand.
       if (queue.backlog > 4) catchUp()
+    },
+    locate(at) {
+      const rect = stage.canvas.getBoundingClientRect()
+      if (!rect.width || !rect.height) return null
+      if (at === 'pile') spot.set(PILE.x, FELT_Y, PILE.z)
+      else if (at === 'centre') spot.set(0, FELT_Y, 0)
+      else {
+        // The middle of the fan, where it rests — a lean toward the pile is a breath, not a move.
+        const { x, y, z } = seat(at)
+        spot.set(x, y, z)
+      }
+      stage.toScreen(spot, screen)
+      return { x: rect.left + screen.x, y: rect.top + screen.y }
     },
     zoom(amount) {
       zoom = THREE.MathUtils.clamp(zoom + amount, 0.85, 1.25)
