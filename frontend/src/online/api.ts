@@ -1,4 +1,10 @@
-import type { GameId, PublicRoomSummary, RoomVisibility } from '@games/shared/protocol'
+import type {
+  GameId,
+  MyProfile,
+  PublicProfile,
+  PublicRoomSummary,
+  RoomVisibility,
+} from '@games/shared/protocol'
 
 // `||`, not `??`: CI passes unset repo variables through as empty strings.
 export const API_URL: string = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8787'
@@ -77,4 +83,60 @@ export async function presenceBeat(clientId: string, tabId: string, game?: strin
   })
   if (!res.ok) throw new Error('Could not report presence.')
   return (await res.json()) as PresenceCounts
+}
+
+/**
+ * Who a plain request speaks for, as headers rather than a query string — a
+ * guest id is the credential a guest plays as, and URLs end up in logs. The
+ * same two things a room socket's join carries.
+ */
+function authHeaders(credentials: IdentityCredentials): Record<string, string> {
+  if (credentials.clerkToken) return { Authorization: `Bearer ${credentials.clerkToken}` }
+  return credentials.guestId ? { 'X-Guest-Id': credentials.guestId } : {}
+}
+
+/** This player's own record: stats, rating, history with room codes, and the tables they are at. */
+export async function fetchMe(credentials: IdentityCredentials, signal?: AbortSignal): Promise<MyProfile> {
+  const res = await fetch(`${API_URL}/api/me`, { headers: authHeaders(credentials), signal })
+  if (!res.ok) throw new Error('Could not load your games.')
+  return (await res.json()) as MyProfile
+}
+
+/** Anyone's public profile by handle, or null when nobody has played under it. */
+export async function fetchPlayer(handle: string, signal?: AbortSignal): Promise<PublicProfile | null> {
+  const res = await fetch(`${API_URL}/api/players/${encodeURIComponent(handle)}`, { signal })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error('Could not load this player.')
+  return (await res.json()) as PublicProfile
+}
+
+/** The server's Web Push key, or null when it has none configured (and so will never send). */
+export async function fetchPushKey(): Promise<string | null> {
+  const res = await fetch(`${API_URL}/api/push/key`)
+  if (!res.ok) return null
+  return ((await res.json()) as { key: string | null }).key
+}
+
+export async function savePushSubscription(
+  credentials: IdentityCredentials,
+  subscription: PushSubscriptionJSON,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/push/subscription`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders(credentials) },
+    body: JSON.stringify({ subscription }),
+  })
+  if (!res.ok) throw new Error('Could not turn on notifications.')
+}
+
+export async function deletePushSubscription(
+  credentials: IdentityCredentials,
+  endpoint: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/push/subscription`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json', ...authHeaders(credentials) },
+    body: JSON.stringify({ endpoint }),
+  })
+  if (!res.ok) throw new Error('Could not turn off notifications.')
 }

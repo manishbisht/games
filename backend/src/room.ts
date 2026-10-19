@@ -1,7 +1,13 @@
 import { DurableObject } from 'cloudflare:workers'
 import { getAdapter } from '@games/shared/online'
 import type { Ctx, GameAdapter } from '@games/shared/online/adapter'
-import { CLAIM_WIN_AFTER_MS, CLOSE_CODES, PROTOCOL_VERSION } from '@games/shared/protocol'
+import {
+  CLAIM_WIN_AFTER_MS,
+  CLOSE_CODES,
+  isReaction,
+  PROTOCOL_VERSION,
+  REACTION_LIMITS,
+} from '@games/shared/protocol'
 import type {
   ClientMessage,
   ErrorCode,
@@ -14,8 +20,16 @@ import type {
   SeatInfo,
   ServerMessage,
 } from '@games/shared/protocol'
+import type { ActiveTable } from '@games/shared/protocol'
 import { cleanName, resolveIdentity } from './auth'
 import type { Env } from './env'
+import { durationBucket, track } from './analytics'
+import { isPerson, playerHandle } from './handles'
+import { freshLedger, joinedMessage, turnAlerts, turnMessage } from './ledger'
+import type { Ledger } from './ledger'
+import { outcomeOf } from './outcome'
+import type { NotifyKind, PlayerSelf } from './player'
+import type { PushMessage } from './push'
 
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 /** Safety valve so one alarm cannot spin forever on an adapter that never settles. */
@@ -112,11 +126,39 @@ export interface RoomRecord {
   options: unknown
   seats: Partial<Record<SeatId, StoredSeat>>
   gameState: unknown
+  /**
+   * Seats the room ended the current game against — a granted claim, or an
+   * absence nobody could stand in for — when the game itself named no winner.
+   * Cleared when the next game starts.
+   */
+  forfeited?: SeatId[]
+  /** What the room has already told players' records, analytics and push (see ledger.ts). */
+  ledger?: Ledger
 }
 
 interface Attachment {
   player: PlayerInfo
+  /** Joined saying it understands `reaction` frames (see `ClientFeature`). */
+  reactions?: boolean
 }
+
+/** One finished game, captured as it ended, for the players' records. */
+interface FinishedGame {
+  game: GameId
+  code: string
+  round: number
+  seatIds: SeatId[]
+  seats: Partial<Record<SeatId, StoredSeat>>
+  gameState: unknown
+  forfeited: SeatId[]
+  at: number
+}
+
+const selfOf = (player: PlayerInfo): PlayerSelf => ({
+  name: player.name,
+  ...(player.avatar ? { avatar: player.avatar } : {}),
+  isGuest: player.isGuest,
+})
 
 export class RoomDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -155,6 +197,12 @@ export class RoomDO extends DurableObject<Env> {
    * Weak, so a socket that is gone for good costs nothing to remember.
    */
   private departed = new WeakSet<WebSocket>()
+  /**
+   * Each socket's reaction allowance (see `REACTION_LIMITS`). In memory only:
+   * an evicted room forgets it, which hands everyone a full bucket — harmless.
+   */
+  private reactionBuckets = new WeakMap<WebSocket, { tokens: number; at: number }>()
+  private reactionSeq = 0
 
   /** The sockets still in the room: everything workerd lists, less the ones leaving it. */
   private sockets(): WebSocket[] {
@@ -184,9 +232,191 @@ export class RoomDO extends DurableObject<Env> {
   private async save(record: RoomRecord): Promise<void> {
     this.cached = record
     record.expiresAt = Date.now() + ROOM_TTL_MS
+    // Settled before the write, so what has been told is stored with what it
+    // was told about; sent after it, so nothing is told about a save that failed.
+    const effects = this.account(record)
     await this.ctx.storage.put('room', record)
     await this.armAlarm(record)
     this.pushBotPresence(record)
+    for (const effect of effects) this.ctx.waitUntil(effect().catch(() => undefined))
+  }
+
+  /** A person's record, by their private id. */
+  private async playerStub(playerId: string) {
+    return this.env.PLAYER.getByName(await playerHandle(playerId))
+  }
+
+  /**
+   * What this save means to the world outside the room, worked out against the
+   * ledger of what it has already been told: a game starting or finishing, each
+   * person's view of the table, and a turn arriving for somebody who is not
+   * here. Returns the calls to make; the caller makes them once the save lands.
+   *
+   * Hung off `save()` for the same reason the bot count is: it is the one door
+   * every change goes through, so nothing — a rematch, a stand-in's move, a
+   * forfeit — can change the table without the ledger seeing it.
+   */
+  private account(record: RoomRecord): (() => Promise<unknown>)[] {
+    const effects: (() => Promise<unknown>)[] = []
+    const ledger = (record.ledger ??= freshLedger(record.status))
+    const now = Date.now()
+    const bots = record.seatIds.filter((seat) => record.seats[seat]?.bot).length
+
+    if (record.status === 'playing' && ledger.status !== 'playing') {
+      ledger.round++
+      ledger.startedAt = now
+      record.forfeited = undefined
+      track(this.env, 'game_started', {
+        game: record.game,
+        detail: ledger.round > 1 ? 'rematch' : 'fresh',
+        count: record.seatIds.length,
+        value: bots,
+      })
+    }
+    if (record.status === 'finished' && ledger.status === 'playing') {
+      const finished: FinishedGame = {
+        game: record.game,
+        code: record.code,
+        round: ledger.round,
+        seatIds: [...record.seatIds],
+        seats: structuredClone(record.seats),
+        gameState: record.gameState,
+        forfeited: record.forfeited ?? [],
+        at: now,
+      }
+      effects.push(() => this.recordFinish(finished))
+      track(this.env, 'game_finished', {
+        game: record.game,
+        detail: 'finished',
+        count: durationBucket(now - (ledger.startedAt ?? now)),
+        value: record.seatIds.length,
+      })
+    }
+    ledger.status = record.status
+
+    const live = record.status === 'open' || record.status === 'playing'
+    const waiting =
+      record.status === 'playing' && record.gameState !== null
+        ? this.adapter(record).waitingOn(record.gameState, record.seatIds)
+        : []
+    const person = (seat: SeatId) => {
+      const stored = record.seats[seat]
+      return Boolean(stored && !stored.bot && isPerson(stored.player.id))
+    }
+
+    // Each person's view of the table, sent only when it has changed.
+    const tables: Record<string, string> = {}
+    if (live)
+      for (const seat of record.seatIds) {
+        if (!person(seat)) continue
+        const { player } = record.seats[seat]!
+        const table: ActiveTable = {
+          code: record.code,
+          game: record.game,
+          status: record.status as ActiveTable['status'],
+          seats: record.status === 'open' ? record.seatsTotal : record.seatIds.length,
+          opponents: record.seatIds
+            .filter((other) => other !== seat && record.seats[other])
+            .map((other) => record.seats[other]!.player.name),
+          yourTurn: waiting.includes(seat),
+          updatedAt: now,
+        }
+        const signature = JSON.stringify([
+          table.status,
+          table.seats,
+          table.opponents,
+          table.yourTurn,
+          player.name,
+        ])
+        tables[player.id] = signature
+        if (ledger.tables[player.id] === signature) continue
+        const version = ++ledger.version,
+          self = selfOf(player)
+        effects.push(async () => (await this.playerStub(player.id)).setTable(table, version, self))
+      }
+    for (const id of Object.keys(ledger.tables))
+      if (!(id in tables)) {
+        const version = ++ledger.version
+        effects.push(async () => (await this.playerStub(id)).dropTable(record.code, version))
+      }
+    ledger.tables = tables
+
+    // A turn that has come round to somebody who is not here.
+    if (record.status === 'playing') {
+      const connected = this.connectedIds()
+      for (const seat of turnAlerts(ledger.waiting, waiting, person, (s) =>
+        connected.has(record.seats[s]!.player.id),
+      )) {
+        const others = record.seatIds
+          .filter((other) => other !== seat && record.seats[other])
+          .map((other) => record.seats[other]!.player.name)
+        effects.push(() =>
+          this.notify(record.seats[seat]!.player.id, 'turn', turnMessage(record.game, record.code, others)),
+        )
+      }
+    }
+    ledger.waiting = waiting
+    return effects
+  }
+
+  private async notify(playerId: string, kind: NotifyKind, message: PushMessage): Promise<unknown> {
+    // No keys, no notifications: skip the hop to the player's record entirely.
+    if (!this.env.VAPID_PUBLIC_KEY || !this.env.VAPID_PRIVATE_KEY) return
+    const code = this.cached?.code ?? ''
+    return (await this.playerStub(playerId)).notify(kind, code, message)
+  }
+
+  /**
+   * Hand a finished game to every person who played it. Chess between two
+   * people is rated, once both have moved — a game abandoned before it began is
+   * recorded but leaves both numbers alone; each record moves its own rating
+   * against the other's as it stood going in.
+   */
+  private async recordFinish(finished: FinishedGame): Promise<void> {
+    const outcome = outcomeOf(finished.game, finished.gameState, finished.seatIds, finished.forfeited)
+    const people = finished.seatIds.filter((seat) => {
+      const stored = finished.seats[seat]
+      return stored && !stored.bot && isPerson(stored.player.id)
+    })
+    if (!people.length) return
+    const handles = new Map<SeatId, string>()
+    for (const seat of people) handles.set(seat, await playerHandle(finished.seats[seat]!.player.id))
+    const history = (finished.gameState as { history?: unknown[] } | null)?.history
+    const rated =
+      finished.game === 'chess' &&
+      people.length === 2 &&
+      finished.seatIds.length === 2 &&
+      Array.isArray(history) &&
+      history.length >= 2
+    const ratings = new Map<SeatId, number>()
+    if (rated)
+      for (const seat of people)
+        ratings.set(seat, (await this.env.PLAYER.getByName(handles.get(seat)!).chessRating()).rating)
+    await Promise.all(
+      people.map((seat) => {
+        const opponent = people.find((other) => other !== seat)
+        return this.env.PLAYER.getByName(handles.get(seat)!).record({
+          self: selfOf(finished.seats[seat]!.player),
+          game: finished.game,
+          code: finished.code,
+          round: finished.round,
+          result: outcome[seat].result,
+          ...(outcome[seat].place ? { place: outcome[seat].place } : {}),
+          seats: finished.seatIds.length,
+          opponents: finished.seatIds
+            .filter((other) => other !== seat && finished.seats[other])
+            .map((other) => {
+              const stored = finished.seats[other]!
+              const handle = handles.get(other)
+              return stored.bot
+                ? { name: stored.player.name, bot: true }
+                : { name: stored.player.name, ...(handle ? { handle } : {}) }
+            }),
+          at: finished.at,
+          ...(rated && opponent ? { rated: { opponent: ratings.get(opponent)! } } : {}),
+        })
+      }),
+    )
   }
 
   /**
@@ -529,6 +759,8 @@ export class RoomDO extends DurableObject<Env> {
         return this.handleAddBot(ws, record, attachment.player, message.seat, message.skill)
       case 'removeBot':
         return this.handleRemoveBot(ws, record, attachment.player, message.seat)
+      case 'react':
+        return this.handleReact(ws, record, attachment.player, message.reaction)
       default:
         return this.fail(ws, 'BAD_MESSAGE', 'Unknown message type.')
     }
@@ -553,8 +785,11 @@ export class RoomDO extends DurableObject<Env> {
       ws.close(CLOSE_CODES.full, 'ROOM_FULL')
       return
     }
-    ws.serializeAttachment({ player } satisfies Attachment)
+    const reactions = Array.isArray(message.features) && message.features.includes('reactions')
+    ws.serializeAttachment({ player, ...(reactions ? { reactions: true } : {}) } satisfies Attachment)
     if (seat) {
+      if (record.status === 'playing' && record.seats[seat]!.disconnectedAt)
+        track(this.env, 'player_back', { game: record.game, detail: 'mid-game' })
       record.seats[seat] = {
         ...record.seats[seat]!,
         player,
@@ -595,6 +830,18 @@ export class RoomDO extends DurableObject<Env> {
     await this.save(record)
     this.pushLobby(record)
     this.broadcast(record)
+    // Somebody sat down at a table its host has stepped away from.
+    if (
+      !previous &&
+      player.id !== record.hostId &&
+      isPerson(record.hostId) &&
+      !this.connectedIds().has(record.hostId)
+    )
+      this.ctx.waitUntil(
+        this.notify(record.hostId, 'joined', joinedMessage(record.game, record.code, player.name)).catch(
+          () => undefined,
+        ),
+      )
   }
 
   private async handleLeaveSeat(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
@@ -675,6 +922,38 @@ export class RoomDO extends DurableObject<Env> {
     await this.save(record)
     this.pushLobby(record)
     this.broadcast(record)
+  }
+
+  /**
+   * A quick reaction, passed straight round the room and forgotten: it is not
+   * saved, not in any snapshot, and costs the room nothing but the sends.
+   * Anyone in the room may react — spectators on a smaller allowance — and a
+   * reaction over the allowance is dropped without a word, since the bar that
+   * sent it keeps to the same allowance and only a script would overrun it.
+   */
+  private handleReact(ws: WebSocket, record: RoomRecord, player: PlayerInfo, reaction: unknown): void {
+    if (!isReaction(reaction)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown reaction.')
+    const seat = this.seatOf(record, player.id)
+    const limit = seat ? REACTION_LIMITS.seated : REACTION_LIMITS.watching
+    const now = Date.now()
+    const bucket = this.reactionBuckets.get(ws) ?? { tokens: limit.burst, at: now }
+    bucket.tokens = Math.min(limit.burst, bucket.tokens + (now - bucket.at) / limit.refillMs)
+    bucket.at = now
+    this.reactionBuckets.set(ws, bucket)
+    if (bucket.tokens < 1) return
+    bucket.tokens -= 1
+    const frame = JSON.stringify({
+      type: 'reaction',
+      seat,
+      reaction,
+      id: `${now.toString(36)}-${(++this.reactionSeq).toString(36)}`,
+      at: now,
+    } satisfies ServerMessage)
+    for (const socket of this.sockets()) {
+      const attachment = socket.deserializeAttachment() as Attachment | null
+      if (attachment?.reactions) socket.send(frame)
+    }
+    track(this.env, 'reaction', { game: record.game, detail: reaction, value: seat ? 0 : 1 })
   }
 
   private async handleStart(ws: WebSocket, record: RoomRecord, player: PlayerInfo): Promise<void> {
@@ -828,7 +1107,10 @@ export class RoomDO extends DurableObject<Env> {
     }
     // Settle the status before the state, so a game forfeited mid-phase does not
     // leave an auto-advance deadline behind on a record nobody will play again.
-    if (forfeited) record.status = 'finished'
+    if (forfeited) {
+      record.status = 'finished'
+      record.forfeited = targets
+    }
     // A claim aimed at a seat with nothing outstanding — mid-beat, or already
     // being played by the room — grants the abandonment and no more. Putting the
     // unchanged state back through `setGameState` would restamp the deadline of
@@ -851,6 +1133,8 @@ export class RoomDO extends DurableObject<Env> {
       if (stored && !stored.bot && !connected.has(stored.player.id) && !stored.disconnectedAt) {
         stored.disconnectedAt = Date.now()
         changed = true
+        if (record.status === 'playing')
+          track(this.env, 'player_left', { game: record.game, detail: 'mid-game' })
       }
     }
     if (changed) await this.save(record)
@@ -917,7 +1201,10 @@ export class RoomDO extends DurableObject<Env> {
       : adapter.resolveAbsent(before, next.seat, record.seatIds, this.gameCtx())
     // `null`: nobody stands in at this game, so it ends where the absence left it.
     // Only `resolveAbsent` may say so — a bot's game is never ended by its bot.
-    if (settled === null) record.status = 'finished'
+    if (settled === null) {
+      record.status = 'finished'
+      record.forfeited = [next.seat]
+    }
     this.setGameState(record, settled ?? before)
     // A stand-in that settles nothing leaves the room facing the same state, so
     // the deadline `setGameState` just stamped would wake it on it again. Keep
@@ -938,6 +1225,20 @@ export class RoomDO extends DurableObject<Env> {
     // against bots is exactly the kind of room that was counting. The TTL
     // would forget it anyway, so this is promptness, not correctness.
     if (record) await this.env.PRESENCE.getByName('global').reportBots(record.code, record.game, 0)
+    if (record?.status === 'playing')
+      track(this.env, 'game_finished', {
+        game: record.game,
+        detail: 'abandoned',
+        count: durationBucket(Date.now() - (record.ledger?.startedAt ?? Date.now())),
+        value: record.seatIds.length,
+      })
+    // Nobody is at this table any more, whatever it was in the middle of.
+    if (record?.ledger)
+      await Promise.all(
+        Object.keys(record.ledger.tables).map(async (id) =>
+          (await this.playerStub(id)).forgetTable(record.code).catch(() => undefined),
+        ),
+      )
     this.cached = null
     await this.ctx.storage.deleteAll()
     await this.ctx.storage.deleteAlarm()

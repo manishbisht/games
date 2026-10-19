@@ -21,9 +21,32 @@ export function cleanName(value: unknown): string | null {
 }
 
 /**
- * The verified Clerk `sub` (or the guest UUID) is the trusted identity; the
- * display name is cosmetic and always taken from the client. Avatars are only
- * accepted from Clerk's image host so clients cannot inject arbitrary URLs.
+ * Who a set of credentials belongs to, without anything cosmetic: the verified
+ * Clerk `sub`, or the guest UUID. This is the trusted identity — the key a
+ * room seats people by and a player's record is kept under.
+ */
+export async function resolvePlayerId(
+  cred: Credentials,
+  env: Env,
+  verify: Verifier = verifyToken as unknown as Verifier,
+): Promise<{ id: string; isGuest: boolean } | null> {
+  if (typeof cred.clerkToken === 'string' && cred.clerkToken) {
+    if (!env.CLERK_SECRET_KEY) return null
+    try {
+      const payload = await verify(cred.clerkToken, { secretKey: env.CLERK_SECRET_KEY })
+      return payload.sub ? { id: `clerk:${payload.sub}`, isGuest: false } : null
+    } catch {
+      return null
+    }
+  }
+  if (typeof cred.guestId === 'string' && GUEST_ID.test(cred.guestId))
+    return { id: `guest:${cred.guestId.toLowerCase()}`, isGuest: true }
+  return null
+}
+
+/**
+ * The display name is cosmetic and always taken from the client. Avatars are
+ * only accepted from Clerk's image host so clients cannot inject arbitrary URLs.
  */
 export async function resolveIdentity(
   cred: Credentials,
@@ -32,19 +55,25 @@ export async function resolveIdentity(
 ): Promise<PlayerInfo | null> {
   const name = cleanName(cred.name)
   if (!name) return null
-  if (typeof cred.clerkToken === 'string' && cred.clerkToken) {
-    if (!env.CLERK_SECRET_KEY) return null
-    try {
-      const payload = await verify(cred.clerkToken, { secretKey: env.CLERK_SECRET_KEY })
-      if (!payload.sub) return null
-      const avatar =
-        typeof cred.avatar === 'string' && cred.avatar.startsWith(CLERK_AVATAR_HOST) ? cred.avatar : undefined
-      return { id: `clerk:${payload.sub}`, name, ...(avatar ? { avatar } : {}), isGuest: false }
-    } catch {
-      return null
-    }
-  }
-  if (typeof cred.guestId === 'string' && GUEST_ID.test(cred.guestId))
-    return { id: `guest:${cred.guestId.toLowerCase()}`, name, isGuest: true }
-  return null
+  const who = await resolvePlayerId(cred, env, verify)
+  if (!who) return null
+  if (who.isGuest) return { id: who.id, name, isGuest: true }
+  const avatar = cleanAvatar(cred.avatar)
+  return { id: who.id, name, ...(avatar ? { avatar } : {}), isGuest: false }
+}
+
+export const cleanAvatar = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.startsWith(CLERK_AVATAR_HOST) ? value : undefined
+
+/**
+ * Credentials for a plain HTTP request. Never the query string — a guest id is
+ * a bearer credential and URLs end up in logs — so a signed-in player sends
+ * `Authorization: Bearer <Clerk session token>` and a guest `X-Guest-Id`, the
+ * same two things a room socket's join carries.
+ */
+export function requestCredentials(request: Request): Credentials {
+  const bearer = request.headers.get('Authorization')?.match(/^Bearer\s+(\S+)$/i)?.[1]
+  if (bearer) return { clerkToken: bearer }
+  const guestId = request.headers.get('X-Guest-Id')
+  return guestId ? { guestId } : {}
 }

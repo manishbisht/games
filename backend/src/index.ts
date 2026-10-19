@@ -1,7 +1,10 @@
 import { getAdapter, resolveGame } from '@games/shared/online'
 import { generateRoomCode, normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { Env } from './env'
-import { resolveIdentity } from './auth'
+import { requestCredentials, resolveIdentity, resolvePlayerId } from './auth'
+import { playerHandle, validHandle } from './handles'
+import { validSubscription } from './push'
+import { track } from './analytics'
 import { secureRandom } from './room'
 import { allowedOrigin, corsHeaders } from './cors'
 import { resolvePresenceGame, validPresenceId } from './presence'
@@ -11,6 +14,7 @@ import { logReport, MAX_REPORT_BYTES, parseReport } from './clientErrors'
 export { RoomDO } from './room'
 export { LobbyDO } from './lobby'
 export { PresenceDO } from './presence'
+export { PlayerDO } from './player'
 
 function json(data: unknown, status: number, origin: string | null): Response {
   const headers = new Headers({ 'content-type': 'application/json' })
@@ -38,6 +42,22 @@ async function readObject(request: Request): Promise<Record<string, unknown> | n
   } catch {
     return null
   }
+}
+
+/** A player's own reads: never cached anywhere between them and the browser. */
+function personal(response: Response): Response {
+  response.headers.set('Cache-Control', 'no-store')
+  return response
+}
+
+/**
+ * The player a request speaks for, from its headers (see `requestCredentials`),
+ * and the handle their record lives under. Null when the credentials are
+ * missing or do not verify.
+ */
+async function requestPlayer(request: Request, env: Env) {
+  const who = await resolvePlayerId(requestCredentials(request), env)
+  return who ? { ...who, handle: await playerHandle(who.id) } : null
 }
 
 export default {
@@ -97,7 +117,10 @@ export default {
           bots,
           autoStart,
         })
-        if (created) return json({ code }, 201, origin)
+        if (created) {
+          track(env, 'room_created', { game, detail: visibility, count: seats, value: bots.length })
+          return json({ code }, 201, origin)
+        }
       }
       return json({ error: 'could not allocate a room code' }, 500, origin)
     }
@@ -132,6 +155,53 @@ export default {
       const report = parseReport(await request.text())
       if (!report) return json({ error: 'invalid report' }, 400, origin)
       logReport(report, request)
+      return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} })
+    }
+
+    if (url.pathname === '/api/me' && request.method === 'GET') {
+      if (await overLimit(env.PROFILES_LIMITER, request)) return tooMany(origin)
+      const me = await requestPlayer(request, env)
+      if (!me) return personal(json({ error: 'unauthorized' }, 401, origin))
+      const profile = await env.PLAYER.getByName(me.handle).profile(me.handle, true)
+      return personal(json(profile, 200, origin))
+    }
+
+    const playerMatch = url.pathname.match(/^\/api\/players\/([^/]+)$/)
+    if (playerMatch && request.method === 'GET') {
+      if (await overLimit(env.PROFILES_LIMITER, request)) return tooMany(origin)
+      const handle = playerMatch[1]
+      if (!validHandle(handle)) return json({ error: 'not found' }, 404, origin)
+      const profile = await env.PLAYER.getByName(handle).profile(handle, false)
+      if (!profile) return json({ error: 'not found' }, 404, origin)
+      const response = json(profile, 200, origin)
+      // Public and slow to change: a minute at the edge is plenty fresh.
+      response.headers.set('Cache-Control', 'public, max-age=60')
+      return response
+    }
+
+    if (url.pathname === '/api/push/key' && request.method === 'GET') {
+      // Both halves, or the browser would subscribe to a sender that can never send.
+      const key = env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY ? env.VAPID_PUBLIC_KEY : null
+      return json({ key }, 200, origin)
+    }
+
+    if (
+      url.pathname === '/api/push/subscription' &&
+      (request.method === 'POST' || request.method === 'DELETE')
+    ) {
+      if (await overLimit(env.PROFILES_LIMITER, request)) return tooMany(origin)
+      const me = await requestPlayer(request, env)
+      if (!me) return json({ error: 'unauthorized' }, 401, origin)
+      const body = await readObject(request)
+      const player = env.PLAYER.getByName(me.handle)
+      if (request.method === 'DELETE') {
+        if (typeof body?.endpoint !== 'string') return json({ error: 'invalid subscription' }, 400, origin)
+        await player.unsubscribe(body.endpoint)
+        return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} })
+      }
+      const subscription = validSubscription(body?.subscription)
+      if (!subscription) return json({ error: 'invalid subscription' }, 400, origin)
+      await player.subscribe(subscription)
       return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} })
     }
 

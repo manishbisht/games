@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { getAdapter } from '@games/shared/online'
+import { GAME_ROUTES } from '@games/shared/protocol'
 import type { GameId } from '@games/shared/protocol'
 import { games } from '../games/catalog'
 import { onlineGame } from './games'
@@ -54,5 +55,13 @@ describe('bot skills the room will actually accept', () => {
       const first = onlineGame(game.id)!.botSkills?.[0]?.id
       if (adapter?.bots) expect(first).toBe(adapter.bots.skills[0])
     }
+  })
+})
+
+describe('what the server calls each game', () => {
+  it('names and links every game the way the catalog does', () => {
+    // A turn notification is worded and linked from GAME_ROUTES, on the server.
+    for (const game of games.filter((entry) => entry.online))
+      expect(GAME_ROUTES[game.id as GameId]).toEqual({ name: game.name, path: game.path })
   })
 })

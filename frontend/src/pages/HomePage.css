@@ -831,3 +831,35 @@
     width: 100%;
   }
 }
+
+/* The way to your own games and stats, kept beside the display controls. */
+.collection-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.collection-me {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: var(--theme-surface);
+  color: var(--theme-muted);
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+.collection-me:hover {
+  color: var(--theme-text);
+  border-color: color-mix(in oklab, var(--theme-border), var(--theme-text) 25%);
+}
+@media (max-width: 700px) {
+  /* The controls' row on a phone sits to the right, as it did before the link joined it. */
+  .collection-controls {
+    margin-left: auto;
+  }
+}

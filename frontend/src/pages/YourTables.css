@@ -1,0 +1,164 @@
+/* "Your tables": the rooms a player is still sitting at, each a way back in. */
+.tables {
+  margin-bottom: 44px;
+}
+.tables-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.tables-heading h2 {
+  margin: 0;
+  font:
+    400 22px Georgia,
+    'Times New Roman',
+    serif;
+  letter-spacing: -0.5px;
+}
+.tables-heading > span {
+  font-size: 10px;
+  color: var(--theme-muted);
+}
+.tables-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tables-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid var(--theme-border);
+  border-radius: 14px;
+  background: var(--theme-surface);
+  animation: tables-in var(--motion-slow) var(--ease-spring) calc(var(--i) * 70ms) backwards;
+  transition:
+    translate var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out);
+}
+@keyframes tables-in {
+  from {
+    opacity: 0;
+    translate: 0 16px;
+    scale: 0.97;
+  }
+}
+.tables-card-turn {
+  border-color: color-mix(in oklab, var(--theme-accent) 55%, var(--theme-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--theme-accent) 14%, transparent);
+}
+.tables-card > img {
+  flex-shrink: 0;
+  border-radius: 10px;
+}
+.tables-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.tables-card-body h3 {
+  margin: 2px 0 3px;
+  font:
+    400 19px Georgia,
+    'Times New Roman',
+    serif;
+  letter-spacing: -0.4px;
+}
+.tables-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--theme-muted);
+}
+.tables-card-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--theme-border);
+}
+.tables-card-turn .tables-card-status {
+  color: var(--theme-accent);
+}
+.tables-card-turn .tables-card-status i {
+  background: var(--theme-accent);
+  animation: tables-pulse 1.8s var(--ease-in-out) infinite;
+}
+.tables-card-waiting .tables-card-status i {
+  background: #9aa58c;
+}
+@keyframes tables-pulse {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--theme-accent) 22%, transparent);
+  }
+}
+.tables-card-who {
+  margin: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--theme-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tables-card-rejoin {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: #465c43;
+  color: #fffdf5;
+  font-size: 12px;
+  font-weight: 550;
+  text-decoration: none;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.tables-card-rejoin:hover {
+  background: #344b33;
+}
+.tables-card-rejoin svg {
+  transition: translate var(--motion-base) var(--ease-spring);
+}
+/* The whole card is the way back in. */
+.tables-card-rejoin::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+}
+.tables-card-rejoin:focus-visible {
+  outline: none;
+}
+.tables-card:has(.tables-card-rejoin:focus-visible) {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 3px;
+}
+@media (hover: hover) {
+  .tables-card:hover {
+    translate: 0 -2px;
+  }
+  .tables-card:hover .tables-card-rejoin svg {
+    translate: 3px 0;
+  }
+}
+@media (max-width: 700px) {
+  .tables {
+    margin-bottom: 34px;
+  }
+  .tables-heading {
+    flex-direction: column;
+    gap: 4px;
+  }
+}

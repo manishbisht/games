@@ -8,11 +8,13 @@
       { "name": "ROOM", "class_name": "RoomDO" },
       { "name": "LOBBY", "class_name": "LobbyDO" },
       { "name": "PRESENCE", "class_name": "PresenceDO" },
+      { "name": "PLAYER", "class_name": "PlayerDO" },
     ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["RoomDO", "LobbyDO"] },
     { "tag": "v2", "new_sqlite_classes": ["PresenceDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["PlayerDO"] },
   ],
   // Per client address, per Cloudflare location (see src/limits.ts, which also
   // exempts loopback so local dev, tests and CI never count). `namespace_id` is
@@ -24,7 +26,17 @@
     { "name": "SOCKETS_LIMITER", "namespace_id": "41002", "simple": { "limit": 120, "period": 60 } },
     // Error reports: the page caps itself at ten a session; this is for anything that does not.
     { "name": "ERRORS_LIMITER", "namespace_id": "41003", "simple": { "limit": 30, "period": 60 } },
+    // Profile reads and push opt-ins: a page load makes one or two.
+    { "name": "PROFILES_LIMITER", "namespace_id": "41004", "simple": { "limit": 60, "period": 60 } },
   ],
+  // Anonymous product events (src/analytics.ts lists them, with an example query).
+  "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "games_events" }],
+  "vars": {
+    // Web Push application server key (public half). The private half is the
+    // VAPID_PRIVATE_KEY secret — `wrangler secret put`, or .dev.vars locally.
+    "VAPID_PUBLIC_KEY": "BEovtARAZu9QeWabeOTouTANMC5n3VbWi7fgnepXA7IPPm5xK3GcOLkH-B93Xe22KEunsEX5zuOdrLEUmCLMyUc",
+    "VAPID_SUBJECT": "https://games.manishbisht.me",
+  },
   // Workers Logs: every `console.*` line, including the structured
   // `client_error` reports POST /api/errors writes, is kept and searchable in
   // the dashboard (Workers & Pages → games-api → Logs).

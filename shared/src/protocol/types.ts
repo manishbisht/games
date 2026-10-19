@@ -1,3 +1,8 @@
+import type { ReactionId } from './reactions'
+
+export * from './reactions'
+export * from './profiles'
+
 export const PROTOCOL_VERSION = 3
 
 export type GameId = 'chess' | 'hearth' | 'estate' | 'prism' | 'wildrise'
@@ -105,8 +110,15 @@ export interface JoinCredentials {
   avatar?: string
 }
 
+/**
+ * What a client says it understands, on its join. Additive server messages are
+ * only sent to sockets that asked for them, so a tab still running an older
+ * build never receives a frame it would misread — no protocol bump needed.
+ */
+export type ClientFeature = 'reactions'
+
 export type ClientMessage =
-  | ({ type: 'join'; protocol: number } & JoinCredentials)
+  | ({ type: 'join'; protocol: number; features?: ClientFeature[] } & JoinCredentials)
   | { type: 'sit'; seat: SeatId }
   | { type: 'leaveSeat' }
   | { type: 'start' }
@@ -115,6 +127,8 @@ export type ClientMessage =
   | { type: 'claim' }
   | { type: 'addBot'; seat: SeatId; skill?: string }
   | { type: 'removeBot'; seat: SeatId }
+  /** A quick reaction to the table (see `REACTIONS`); rate-limited per socket. */
+  | { type: 'react'; reaction: ReactionId }
 
 export type ErrorCode =
   | 'BAD_MESSAGE'
@@ -139,6 +153,13 @@ export type ErrorCode =
 export type ServerMessage<S = unknown> =
   | { type: 'room'; snapshot: RoomSnapshot<S>; you: YouInfo }
   | { type: 'error'; code: ErrorCode; message: string }
+  /**
+   * Somebody reacted. Ephemeral: never stored, never part of a snapshot, so a
+   * browser that was not connected at the moment simply never sees it. `seat`
+   * is null for a spectator. `id` is unique within the room's life, `at` is the
+   * server clock. Only sent to sockets that joined with the `reactions` feature.
+   */
+  | { type: 'reaction'; seat: SeatId | null; reaction: ReactionId; id: string; at: number }
 
 /** WebSocket close codes the server uses for terminal conditions. */
 export const CLOSE_CODES = { notFound: 4404, full: 4403, expired: 4408 } as const

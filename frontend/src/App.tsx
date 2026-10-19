@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { games } from './games/catalog'
 import { homeScrollPosition, roomPage, screenOf } from './navigation'
@@ -9,6 +9,8 @@ import RouteSkeleton from './RouteSkeleton'
 import { useTheme } from './theme/ThemeProvider'
 
 const RoomPage = roomPage.Component
+/** Profiles are a page most visits never open, so they stay out of the entry chunk. */
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 const DESCRIPTION = `Play ${new Intl.ListFormat('en', { type: 'conjunction' }).format(
   games.map((game) => game.name),
 )}: free tabletop games for your browser. Meet friends in online rooms or challenge the computer. No downloads or accounts needed.`
@@ -17,16 +19,21 @@ export default function App() {
   const { theme } = useTheme()
   const { pathname } = useLocation()
   const { game, room } = screenOf(pathname)
+  const profile = pathname === '/me' ? 'Your games' : pathname.startsWith('/player/') ? 'Player' : null
 
   useEffect(() => {
-    document.title = game ? `${game.name} — Games` : 'Games — A little play goes a long way.'
+    document.title = game
+      ? `${game.name} — Games`
+      : profile
+        ? `${profile} — Games`
+        : 'Games — A little play goes a long way.'
     document
       .querySelector('meta[name="description"]')
       ?.setAttribute('content', game?.description ?? DESCRIPTION)
     document
       .querySelector('link[rel="icon"]')
       ?.setAttribute('href', `${import.meta.env.BASE_URL}${game?.icon ?? 'games.svg'}`)
-  }, [game])
+  }, [game, profile])
 
   // A layout effect, so it lands inside the route transition's commit: the
   // collection comes back where it was left, with the card the game folds
@@ -47,6 +54,8 @@ export default function App() {
         <Suspense fallback={<RouteSkeleton game={game} room={room} />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/me" element={<ProfilePage />} />
+            <Route path="/player/:handle" element={<ProfilePage />} />
             {games.map(({ path, Component }) => (
               <Route key={path} path={path} element={<Component />} />
             ))}

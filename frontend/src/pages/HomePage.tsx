@@ -1,12 +1,14 @@
 import ThemeControl from '../theme/ThemeControl'
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Bot, Dices, Globe2, Heart, House, Monitor, Users } from 'lucide-react'
+import { ArrowRight, Bot, Dices, Globe2, Heart, House, Monitor, Trophy, Users } from 'lucide-react'
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
 import type { GameEntry } from '../games/catalog'
 import { HeaderAuth } from '../online/identity'
 import { PlayersOnlineBadge } from '../online/playersOnline'
+import { useMe } from '../online/useMe'
+import YourTables from './YourTables'
 import './HomePage.css'
 import './ChessPreview.css'
 import './PrismPreview.css'
@@ -107,6 +109,7 @@ let introPlayed = false
 
 export default function HomePage() {
   const [intro] = useState(() => !introPlayed)
+  const { profile } = useMe()
   useEffect(() => {
     introPlayed = true
   }, [])
@@ -124,7 +127,17 @@ export default function HomePage() {
           <i /> Free to play. Always.
         </span>
         <PlayersOnlineBadge className="collection-online" />
-        <ThemeControl />
+        <div className="collection-controls">
+          <Link
+            to="/me"
+            className="collection-me"
+            aria-label="Your games and stats"
+            title="Your games and stats"
+          >
+            <Trophy size={18} strokeWidth={1.7} />
+          </Link>
+          <ThemeControl />
+        </div>
         <HeaderAuth />
       </header>
 
@@ -156,6 +169,8 @@ export default function HomePage() {
             </span>
           </div>
         </section>
+
+        <YourTables tables={profile?.active ?? []} />
 
         <section aria-labelledby="collection-games-title">
           <div className="collection-section-heading">
