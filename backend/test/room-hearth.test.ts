@@ -6,18 +6,28 @@ import type { ServerMessage } from '@games/shared/protocol'
 import type { GameState } from '@games/shared/hearth/types'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
-import { connect, WAIT } from './helpers'
+import { connect, fire, WAIT } from './helpers'
 import type { Client } from './helpers'
 
 const testEnv = env as unknown as Env
 type RoomMessage = Extract<ServerMessage, { type: 'room' }>
 
 const board = (message: RoomMessage) => message.snapshot.gameState as GameState
-/** Observe the table: only ever through a broadcast, never off live room state. */
-const seeTable = (client: Client, predicate: (state: GameState) => boolean) =>
-  client.waitRoom((m) => predicate(board(m as unknown as RoomMessage)))
-const seePhase = (client: Client, phase: GameState['phase']) =>
-  seeTable(client, (state) => state.phase === phase)
+/**
+ * Observe the table: only ever through a broadcast, never off live room state —
+ * and, for anything the table passes through more than once, only from `from`
+ * on. Every turn goes `roll` → `rolling` → `pass`, so a search of the whole log
+ * finds the last turn's `rolling` before the server has started this one.
+ */
+const seeTable = (client: Client, predicate: (state: GameState) => boolean, from = 0) =>
+  client.waitRoom((m) => predicate(board(m as unknown as RoomMessage)), from)
+const seePhase = (client: Client, phase: GameState['phase'], from = 0) =>
+  seeTable(client, (state) => state.phase === phase, from)
+/** `fire`'s guard: only run the beat while the room is still sitting in one of these phases. */
+const inPhase =
+  (...phases: GameState['phase'][]) =>
+  (record: RoomRecord) =>
+    phases.includes((record.gameState as GameState).phase)
 
 /**
  * Watch only what arrives from `from` onwards. `waitRoom` searches the whole log,
@@ -34,35 +44,6 @@ const seeNext = (client: Client, from: number, predicate: (m: RoomMessage) => bo
     return room!
   }, WAIT)
 
-/**
- * Run the beat the room is holding. The return value is deliberately not
- * asserted: workerd delivers due alarms itself, so whether this fire or that one
- * moved the table is a race — the broadcast that follows is not.
- *
- * Firing happens immediately rather than waiting out the real deadline, so
- * this backdates `autoAt` first: `alarm()` refuses to resolve a phase before
- * `autoAt` is due (a guard against a DO alarm retry or race, see
- * `AUTO_AT_TOLERANCE_MS` in src/room.ts), and a legitimately-fired alarm's
- * deadline has always already passed. Inlined as one `runInDurableObject`
- * round trip (mirroring `runDurableObjectAlarm`'s own get/delete/call
- * sequence) rather than a separate patch-then-fire — real workerd alarms can
- * also land for these rooms in the background, so the shorter this takes,
- * the less that race gets to decide the outcome instead of the test.
- */
-const fire = (code: string) =>
-  runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
-    if ((await state.storage.getAlarm()) === null) return false
-    const record = await state.storage.get<RoomRecord>('room')
-    if (record?.autoAt !== undefined && record.autoAt > Date.now()) {
-      record.autoAt = Date.now()
-      await state.storage.put('room', record)
-      // Keep the in-memory cache coherent with storage (same-object contract).
-      ;(instance as unknown as { cached: RoomRecord }).cached = record
-    }
-    await state.storage.deleteAlarm()
-    await instance.alarm()
-    return true
-  })
 const alarmIn = (code: string) =>
   runInDurableObject(
     testEnv.ROOM.getByName(code),
@@ -73,12 +54,18 @@ const readRecord = (code: string) =>
     state.storage.get<RoomRecord>('room'),
   )
 
-/** Rewrite part of the stored record, keeping the instance's cache coherent. */
+/**
+ * Rewrite part of the stored record, keeping the instance's cache coherent —
+ * and its alarm, the way `armAlarm` would. A patch that ends the game mid-beat
+ * otherwise left that beat's alarm armed, and when it came due with nothing
+ * pending the room took it for its expiry and deleted itself under the test.
+ */
 async function patchRecord(code: string, patch: (record: RoomRecord) => void) {
   await runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
     const record = (await state.storage.get<RoomRecord>('room'))!
     patch(record)
     await state.storage.put('room', record)
+    await state.storage.setAlarm(Math.min(record.autoAt ?? Infinity, record.expiresAt))
     // Keep the in-memory cache coherent with storage (same-object contract).
     ;(instance as unknown as { cached: RoomRecord }).cached = record
   })
@@ -147,16 +134,18 @@ async function startedTable(names: string[]) {
  */
 async function playTurn(code: string, client: Client, die: number) {
   useDie(die)
+  const from = client.mark()
   client.send({ type: 'action', action: { kind: 'roll' } })
-  await seePhase(client, 'rolling')
-  await fire(code)
-  const settled = await seeTable(client, (state) => state.phase === 'choose' || state.phase === 'pass')
+  await seePhase(client, 'rolling', from)
+  await fire(code, inPhase('rolling'))
+  const settled = await seeTable(client, (state) => state.phase === 'choose' || state.phase === 'pass', from)
   if (board(settled).phase === 'choose') {
+    const moved = client.mark()
     client.send({ type: 'action', action: { kind: 'move', pieceId: board(settled).legalMoves[0].pieceId } })
-    await seePhase(client, 'moving')
+    await seePhase(client, 'moving', moved)
   }
-  await fire(code)
-  return seePhase(client, 'roll')
+  await fire(code, inPhase('moving', 'pass'))
+  return seePhase(client, 'roll', from)
 }
 
 describe('a hearth room', () => {
@@ -174,14 +163,15 @@ describe('a hearth room', () => {
     const [ann, ben] = clients
     useDie(6)
 
+    const from = ann.mark()
     ann.send({ type: 'action', action: { kind: 'roll' } })
     // The die is in the air. Nobody has a number — not even the seat that threw it.
-    const rolling = await seePhase(ann, 'rolling')
+    const rolling = await seePhase(ann, 'rolling', from)
     expect(board(rolling).dice).toBeNull()
     // The beat, not the room's day, owns the alarm slot.
     expect(await alarmIn(code)).toBeLessThanOrEqual(phasePause('rolling', false))
 
-    await fire(code)
+    await fire(code, inPhase('rolling'))
     const landed = await seePhase(ann, 'choose')
     expect(board(landed).dice).toBe(6)
     // One die, one number, one moment: the whole table is shown the same roll.
@@ -193,8 +183,9 @@ describe('a hearth room', () => {
     const moving = await seePhase(ann, 'moving')
     expect(board(moving).motion?.pieceId).toBe(move.pieceId)
 
-    await fire(code)
-    const next = await seePhase(ann, 'roll')
+    await fire(code, inPhase('moving'))
+    // From the throw on: the table opened on a `roll` of its own.
+    const next = await seePhase(ann, 'roll', from)
     expect(board(next).pieces.find((p) => p.id === move.pieceId)?.progress).toBe(0)
     // A six earns another roll, so the turn stays where it was.
     expect(board(next).currentPlayer).toBe(0)
@@ -205,16 +196,17 @@ describe('a hearth room', () => {
     const [ann] = clients
     useDie(3)
 
+    const from = ann.mark()
     ann.send({ type: 'action', action: { kind: 'roll' } })
-    await seePhase(ann, 'rolling')
-    await fire(code)
+    await seePhase(ann, 'rolling', from)
+    await fire(code, inPhase('rolling'))
     // Every piece is still in the nest and only a six lets one out.
-    const held = await seePhase(ann, 'pass')
+    const held = await seePhase(ann, 'pass', from)
     expect(board(held).legalMoves).toEqual([])
     expect(await alarmIn(code)).toBeLessThanOrEqual(phasePause('pass', false))
 
-    await fire(code)
-    const passed = await seePhase(ann, 'roll')
+    await fire(code, inPhase('pass'))
+    const passed = await seePhase(ann, 'roll', from)
     expect(board(passed).currentPlayer).toBe(1)
   })
 
@@ -239,19 +231,20 @@ describe('a hearth room', () => {
     })
 
     useDie(2)
+    const from = ann.mark()
     ann.send({ type: 'claim' })
     // A race has no win-by-default: the claim hands Ben's seat to the room, which
     // begins by taking the roll he was sitting on.
-    await seePhase(ann, 'rolling')
+    await seePhase(ann, 'rolling', from)
     const claimed = (await readRecord(code))!
     expect(claimed.status).toBe('playing')
     expect(claimed.seats.p1?.abandoned).toBe(true)
 
-    await fire(code)
-    await seePhase(ann, 'pass')
-    await fire(code)
+    await fire(code, inPhase('rolling'))
+    await seePhase(ann, 'pass', from)
+    await fire(code, inPhase('pass'))
     // Ben's turn was taken for him, and the table has moved on to Cai.
-    const movedOn = await seeTable(ann, (state) => state.currentPlayer === 2)
+    const movedOn = await seeTable(ann, (state) => state.currentPlayer === 2, from)
     expect(board(movedOn).players[1].stats.rolls).toBe(1)
     expect(board(movedOn).phase).toBe('roll')
     // Cai is here, so nothing is waiting on a timer any more.
@@ -264,9 +257,10 @@ describe('a hearth room', () => {
     expect((await readRecord(code))!.seats.p1?.abandoned).toBeUndefined()
 
     // Round the table: Cai, then Ann, and the turn is Ben's again.
+    const round = back.mark()
     await playTurn(code, clients[2], 3)
     await playTurn(code, ann, 3)
-    const bensTurn = await seeTable(back, (state) => state.currentPlayer === 1)
+    const bensTurn = await seeTable(back, (state) => state.currentPlayer === 1, round)
     expect(board(bensTurn).phase).toBe('roll')
     // His turn waits for him now, rather than being played through.
     expect(await alarmIn(code)).toBeGreaterThan(23 * 60 * 60 * 1000)
@@ -284,13 +278,14 @@ describe('a hearth room', () => {
     })
 
     useDie(2)
+    const from = ann.mark()
     ann.send({ type: 'claim' })
-    await seePhase(ann, 'rolling')
-    await fire(code)
-    await seePhase(ann, 'pass')
-    await fire(code)
+    await seePhase(ann, 'rolling', from)
+    await fire(code, inPhase('rolling'))
+    await seePhase(ann, 'pass', from)
+    await fire(code, inPhase('pass'))
     // Ludo's engine has no forfeit state, so the game comes back to Ann and goes on.
-    const back = await seeTable(ann, (state) => state.currentPlayer === 0)
+    const back = await seeTable(ann, (state) => state.currentPlayer === 0, from)
     expect(board(back).phase).toBe('roll')
     expect(board(back).winner).toBeNull()
     expect((await readRecord(code))!.status).toBe('playing')
@@ -328,25 +323,35 @@ describe('a hearth room', () => {
     })
 
     useDie(2)
+    const from = ann.mark()
     ann.send({ type: 'claim' })
     // Ben's seat is now mid-roll, on a beat the whole table is watching.
-    await seePhase(ann, 'rolling')
-    const due = (await readRecord(code))!.autoAt
-    expect(due).toBeTypeOf('number')
+    await seePhase(ann, 'rolling', from)
+    // Hold the beat a minute out, so workerd's own alarm cannot land it while
+    // this test is still asking whether the claims below moved it.
+    const due = Date.now() + 60_000
+    await patchRecord(code, (record) => {
+      record.autoAt = due
+    })
 
     // Claiming again settles nothing — Ben's seat has no decision outstanding —
     // so it must leave that beat exactly where it was. Before the guard each of
     // these pushed the die another 1.1s into the future.
+    const again = ann.mark()
     ann.send({ type: 'claim' })
     ann.send({ type: 'claim' })
-    await vi.waitFor(async () => {
-      expect((await readRecord(code))!.seats.p1?.abandoned).toBe(true)
-    })
-    expect((await readRecord(code))!.autoAt).toBe(due)
+    // Each claim is answered with a broadcast; two answers, both claims settled.
+    await vi.waitFor(
+      () => expect(ann.messages.slice(again).filter((m) => m.type === 'room')).toHaveLength(2),
+      WAIT,
+    )
+    const after = (await readRecord(code))!
+    expect(after.seats.p1?.abandoned).toBe(true)
+    expect(after.autoAt).toBe(due)
 
     // And the beat still lands on the number it was always going to land on.
-    await fire(code)
-    const rolled = await seeTable(ann, (state) => state.dice === 2)
+    await fire(code, inPhase('rolling'))
+    const rolled = await seeTable(ann, (state) => state.dice === 2, from)
     expect(board(rolled).phase).toBe('pass')
   })
 

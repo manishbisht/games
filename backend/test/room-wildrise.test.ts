@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { GameState } from '@games/shared/wildrise/types'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
-import { connect } from './helpers'
+import { connect, fire } from './helpers'
 
 const testEnv = env as unknown as Env
 
@@ -18,19 +18,6 @@ const patchRecord = (code: string, patch: (record: RoomRecord) => void) =>
     patch(record)
     await state.storage.put('room', record)
     ;(instance as unknown as { cached: RoomRecord }).cached = record
-  })
-
-/** Bring the pending beat forward and run it, rather than waiting out real pacing. */
-const fire = (code: string) =>
-  runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
-    const record = await state.storage.get<RoomRecord>('room')
-    if (record?.autoAt !== undefined && record.autoAt > Date.now()) {
-      record.autoAt = Date.now()
-      await state.storage.put('room', record)
-      ;(instance as unknown as { cached: RoomRecord }).cached = record
-    }
-    await state.storage.deleteAlarm()
-    await instance.alarm()
   })
 
 const phaseOf = async (code: string) => ((await readRecord(code))!.gameState as GameState).phase

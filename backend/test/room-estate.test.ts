@@ -5,7 +5,7 @@ import type { ServerMessage } from '@games/shared/protocol'
 import type { GameState, Trade } from '@games/shared/estate/types'
 import type { Env } from '../src/env'
 import type { RoomRecord } from '../src/room'
-import { connect, WAIT } from './helpers'
+import { connect, fire, WAIT } from './helpers'
 import type { Client } from './helpers'
 
 const testEnv = env as unknown as Env
@@ -51,32 +51,6 @@ const seeError = (client: Client, from: number, code: string) =>
     return error!
   })
 
-/**
- * Firing happens immediately rather than waiting out the real deadline, so
- * this backdates `autoAt` first: `alarm()` refuses to resolve a phase before
- * `autoAt` is due (a guard against a DO alarm retry or race, see
- * `AUTO_AT_TOLERANCE_MS` in src/room.ts), and a legitimately-fired alarm's
- * deadline has always already passed. Inlined as one `runInDurableObject`
- * round trip (mirroring `runDurableObjectAlarm`'s own get/delete/call
- * sequence) rather than a separate patch-then-fire — real workerd alarms can
- * also land for these rooms in the background, so the shorter this takes,
- * the less that race gets to decide the outcome instead of the test.
- */
-const fire = (code: string) =>
-  runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
-    if ((await state.storage.getAlarm()) === null) return false
-    const record = await state.storage.get<RoomRecord>('room')
-    if (record?.autoAt !== undefined && record.autoAt > Date.now()) {
-      record.autoAt = Date.now()
-      await state.storage.put('room', record)
-      // Keep the in-memory cache coherent with storage (same-object contract).
-      ;(instance as unknown as { cached: RoomRecord }).cached = record
-    }
-    await state.storage.deleteAlarm()
-    await instance.alarm()
-    return true
-  })
-
 /** Milliseconds until the room's next alarm, whichever deadline currently owns it. */
 const alarmIn = (code: string) =>
   runInDurableObject(
@@ -89,12 +63,17 @@ const readRecord = (code: string) =>
     state.storage.get<RoomRecord>('room'),
   )
 
-/** Rewrite part of the stored record, keeping the instance's cache coherent. */
+/**
+ * Rewrite part of the stored record, keeping the instance's cache coherent —
+ * and its alarm, the way `armAlarm` would, so a patch that clears a beat cannot
+ * leave that beat's alarm to come due as the room's expiry.
+ */
 async function patchRecord(code: string, patch: (record: RoomRecord) => void) {
   await runInDurableObject(testEnv.ROOM.getByName(code), async (instance, state) => {
     const record = (await state.storage.get<RoomRecord>('room'))!
     patch(record)
     await state.storage.put('room', record)
+    await state.storage.setAlarm(Math.min(record.autoAt ?? Infinity, record.expiresAt))
     // Keep the in-memory cache coherent with storage (same-object contract).
     ;(instance as unknown as { cached: RoomRecord }).cached = record
   })
@@ -146,7 +125,9 @@ async function startedTable(names: string[], seats = names.length, options?: unk
 /**
  * Wind the room forward on its own clock until the table gets where it is going.
  * Only a *game* deadline may be fired: when nothing is pending the alarm slot
- * belongs to the room's 24h expiry, and firing that deletes the room.
+ * belongs to the room's 24h expiry, and firing that deletes the room. `fire`
+ * itself refuses one, because workerd may land the beat this loop just read
+ * before the fire arrives — in which case the next look simply sees it landed.
  */
 async function playOn(code: string, until: (state: GameState) => boolean, limit = 24) {
   for (let step = 0; step < limit; step++) {
@@ -154,7 +135,7 @@ async function playOn(code: string, until: (state: GameState) => boolean, limit 
     const state = record.gameState as GameState
     if (until(state)) return state
     expect(record.autoAt, 'the room has no game deadline left to fire').toBeDefined()
-    expect(await fire(code)).toBe(true)
+    await fire(code)
   }
   throw new Error('the table never got where it was going')
 }
@@ -191,7 +172,9 @@ describe('an estate room', () => {
     // The phase's seconds own the alarm, not the room's day.
     expect(await alarmIn(code)).toBeLessThanOrEqual(1200 + total * 215 + 330 + 300)
 
-    expect(await fire(code)).toBe(true)
+    // Whether this fire or workerd's own alarm lands the beat is a race; what
+    // lands is not.
+    await fire(code, (record) => (record.gameState as GameState).phase === 'rolling')
     // One fire, one mutation: the die is read out, the token walks its squares,
     // and the space it stopped on happens.
     const landed = await seeNext(ben, bensMark, (m) => table(m).phase !== 'rolling')
@@ -394,7 +377,9 @@ describe('an estate room', () => {
     const handedOver = await playOn(code, (state) => state.current === 0 || state.status !== 'playing')
     expect(handedOver.status).toBe('playing')
     expect(handedOver.players.every((p) => !p.bankrupt)).toBe(true)
-    expect(handedOver.players[1].position).toBeGreaterThan(0)
+    // Proof he was played for — not his position: a Chance card can send him
+    // straight back to GO, and the dice are the room's own.
+    expect(handedOver.events.some((event) => event.text.startsWith('Ben rolled'))).toBe(true)
     // Ann's own turn waits for her rather than being played through.
     expect((await readRecord(code))!.autoAt).toBeUndefined()
 
