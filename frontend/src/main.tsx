@@ -9,6 +9,7 @@ import App from './App.tsx'
 import { installErrorReporting } from './errorReports'
 import { createAppHistory } from './navigation'
 import { AuthProvider } from './online/identity'
+import { installServiceWorker } from './online/serviceWorker'
 import { ThemeProvider } from './theme/ThemeProvider'
 
 /**
@@ -18,6 +19,7 @@ import { ThemeProvider } from './theme/ThemeProvider'
  * the honest answer, so don't loop.
  */
 installErrorReporting()
+installServiceWorker()
 
 const RELOADED_AT = 'games-chunk-reload'
 window.addEventListener('vite:preloadError', () => {

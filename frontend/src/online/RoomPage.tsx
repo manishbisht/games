@@ -9,6 +9,9 @@ import { useRoom } from './useRoom'
 import { onlineGame } from './games'
 import type { BotSkill, OnlineGame } from './games'
 import { presenceEvents } from './roomState'
+import NotifyToggle from './NotifyToggle'
+import ReactionBar from './ReactionBar'
+import ReactionOverlay from './ReactionOverlay'
 import { ArrowLeft, Bot, Check, Copy, Eye, Link2, UserMinus, X } from 'lucide-react'
 import ChessShell from '../games/chess/ChessShell'
 import { chessGame, games } from '../games/catalog'
@@ -236,6 +239,8 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
       {room.phase === 'reconnecting' && <div className="ch-room-toast">Reconnecting…</div>}
     </div>
   )
+  // Reactions float up over whatever the room is showing, lobby or table.
+  const overlay = <ReactionOverlay key="reactions" reactions={room.reactions} snapshot={snapshot} />
 
   if (room.phase === 'notfound')
     return <Fatal config={config} title="This room doesn't exist (or has expired)." />
@@ -271,11 +276,13 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
             snapshot={snapshot}
             receivedAt={room.receivedAt ?? 0}
             recent={room.recent}
+            reactions={room.reactions}
             you={you}
             api={api}
             leave={leave}
           />
         </Suspense>
+        {overlay}
         {toastStack}
       </>
     )
@@ -398,6 +405,12 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
           {isChess && <p className="ch-room-seat-label">CHOOSE YOUR SIDE</p>}
           <div className="ch-room-seats">{snapshot.seatIds.map(seatSlot)}</div>
           {you && <Audience snapshot={snapshot} you={you} />}
+          {you && (
+            <div className="ch-room-extras">
+              <ReactionBar onReact={api.react} watching={you.seat === null} />
+              {you.seat !== null && <NotifyToggle className="ch-room-notify" />}
+            </div>
+          )}
           {isHost ? (
             <button className="ch-room-start" disabled={!ready} onClick={api.start}>
               {!ready ? 'Waiting for players…' : startLabel(people, bots, taken === snapshot.seatIds.length)}
@@ -416,6 +429,7 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
           </Link>
         </main>
       </RoomFrame>
+      {overlay}
       {toastStack}
     </>
   )

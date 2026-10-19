@@ -1,0 +1,124 @@
+/* The turn-notification opt-in: one switch, in the site's shared colours. */
+.notify-toggle {
+  display: grid;
+  gap: 8px;
+  color: var(--theme-text);
+  font-family: 'DM Sans', sans-serif;
+}
+.notify-toggle button.notify-switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1px solid var(--theme-border);
+  border-radius: 12px;
+  background: var(--theme-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-base) var(--ease-out);
+}
+.notify-toggle button.notify-switch:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--theme-border), var(--theme-text) 25%);
+}
+.notify-switch:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 3px;
+}
+.notify-toggle button.notify-switch:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.notify-switch-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--theme-inset);
+  color: var(--theme-muted);
+  animation: notify-icon-swap var(--motion-slow) var(--ease-spring) both;
+}
+.notify-switch[aria-checked='true'] .notify-switch-icon {
+  color: var(--theme-accent);
+}
+@keyframes notify-icon-swap {
+  from {
+    opacity: 0;
+    scale: 0.5;
+    rotate: -25deg;
+  }
+}
+.notify-switch-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 550;
+}
+.notify-switch-label small {
+  display: block;
+  margin-top: 2px;
+  color: var(--theme-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.notify-switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--theme-inset);
+  box-shadow: inset 0 0 0 1px var(--theme-border);
+  transition: background var(--motion-base) var(--ease-out);
+}
+.notify-switch-track i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--theme-surface);
+  box-shadow: 0 1px 3px #0003;
+  transition: translate var(--motion-slow) var(--ease-spring);
+}
+.notify-switch[aria-checked='true'] .notify-switch-track {
+  background: var(--theme-accent);
+  box-shadow: none;
+}
+.notify-switch[aria-checked='true'] .notify-switch-track i {
+  translate: 16px 0;
+}
+.notify-toggle-note {
+  margin: 0;
+  color: var(--theme-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.notify-toggle-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--theme-border);
+  border-radius: 12px;
+  color: var(--theme-muted);
+}
+.notify-toggle-hint > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.notify-toggle-hint p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.notify-toggle-hint strong {
+  color: var(--theme-text);
+  font-weight: 600;
+}

@@ -415,3 +415,18 @@ button.ch-room-toast-error > svg {
 .room-audience-floating strong {
   color: #fff;
 }
+
+/* Reactions and the turn-notification switch, between the seats and the start button. */
+.ch-room-extras {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+}
+.ch-room-extras .reaction-bar {
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.ch-room-notify {
+  width: 100%;
+}

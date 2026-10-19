@@ -1,0 +1,31 @@
+{
+  "name": "Games — A little play goes a long way",
+  "short_name": "Games",
+  "description": "Free tabletop games for your browser: Hearth & Home, Estate, Gambit, Prism and Wildrise. Play friends online or challenge the computer.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#faf9f5",
+  "theme_color": "#faf9f5",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "games.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Gambit",
+      "url": "./#/chess",
+      "icons": [{ "src": "chess.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Your games",
+      "url": "./#/me",
+      "icons": [{ "src": "games.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}
