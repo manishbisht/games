@@ -12,13 +12,13 @@ export interface HeldTiming extends BeatTiming {
   at: number
 }
 
-const received = new WeakMap<BeatTiming, number>()
-/** Stamped the first time a snapshot's timing is read, which is as it arrives. */
-export function hold(timing: BeatTiming | undefined): HeldTiming | undefined {
-  if (!timing) return undefined
-  let at = received.get(timing)
-  if (at === undefined) received.set(timing, (at = performance.now()))
-  return { ...timing, at }
+/**
+ * Holds a snapshot's timing from `receivedAt`, when the socket delivered it —
+ * not from whenever React got round to rendering it, which a busy tab can
+ * leave a frame or more behind.
+ */
+export function hold(timing: BeatTiming | undefined, receivedAt: number): HeldTiming | undefined {
+  return timing && { ...timing, at: receivedAt }
 }
 
 /** The server's clock now, as best this tab can tell; null without a snapshot to tell from. */

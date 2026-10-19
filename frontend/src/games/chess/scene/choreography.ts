@@ -78,11 +78,17 @@ export type Story = { kind: 'moves'; records: MoveRecord[] } | { kind: 'reset' }
 /**
  * What changed between the position on the board and a fresh snapshot: some
  * moves played on from it, or a different game altogether (a rematch, or a
- * history that no longer agrees with what was shown).
+ * history that no longer agrees with what was shown). A finished game never
+ * resumes, so one that is playing again is a rematch even when its history
+ * reads the same — one resigned before or after the same first move.
  */
 export function story(shown: GameState, next: GameState): Story {
   if (shown === next) return { kind: 'none' }
-  if (next.initialFen !== shown.initialFen || next.history.length < shown.history.length)
+  if (
+    next.initialFen !== shown.initialFen ||
+    next.history.length < shown.history.length ||
+    (shown.status !== 'playing' && next.status === 'playing')
+  )
     return { kind: 'reset' }
   const last = shown.history.length - 1
   if (last >= 0 && next.history[last].after !== shown.history[last].after) return { kind: 'reset' }

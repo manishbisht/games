@@ -29,10 +29,9 @@ describe('remaining', () => {
 
   it('runs the side to move by the server clock carried forward, not the wall clock', () => {
     const game = opened()
-    vi.spyOn(performance, 'now').mockReturnValue(500)
-    const timing = hold({ now: 3_000 + 4_000, since: 3_000 })
+    const timing = hold({ now: 3_000 + 4_000, since: 3_000 }, 500)
     vi.spyOn(performance, 'now').mockReturnValue(1_500)
-    // Four seconds old when it arrived, held one more: five seconds off White.
+    // Four seconds old when it arrived, held one more since it arrived: five seconds off White.
     expect(remaining(game, 'w', timing)).toBe(game.clocks.w - 5_000)
     expect(remaining(game, 'b', timing)).toBe(game.clocks.b)
     vi.restoreAllMocks()
@@ -40,6 +39,6 @@ describe('remaining', () => {
 
   it('holds both clocks still until both sides have moved', () => {
     const game = createGame({ mode: 'online', clock: 3 }, undefined, 1_000)
-    expect(remaining(game, 'w', hold({ now: 90_000, since: 1_000 }))).toBe(180_000)
+    expect(remaining(game, 'w', hold({ now: 90_000, since: 1_000 }, 0))).toBe(180_000)
   })
 })

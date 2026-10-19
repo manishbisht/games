@@ -29,7 +29,7 @@ import ChessBoard from './scene/ChessBoard'
 import type { BoardControls } from './scene/ChessBoard'
 import type { Impact } from './scene/createScene'
 import ChessClock from './components/ChessClock'
-import { controlName, serverNow } from './components/clock'
+import { controlName } from './components/clock'
 import type { HeldTiming } from './components/clock'
 import Modal from './components/Modal'
 import PromotionGallery from './components/PromotionGallery'
@@ -272,15 +272,21 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
       preferences: { theme: preferences.theme, highContrast: preferences.highContrast },
       pending,
       seat,
+      recent: online.recent,
     }),
-    [game, selected, destinations, enabled, preferences.theme, preferences.highContrast, pending, seat],
+    [
+      game,
+      selected,
+      destinations,
+      enabled,
+      preferences.theme,
+      preferences.highContrast,
+      pending,
+      seat,
+      online.recent,
+    ],
   )
   const isOver = game.status !== 'playing'
-  /** How far into its state the game already was when this board opened; see `SceneOptions.since`. */
-  const [since] = useState(() => {
-    const now = serverNow(online.timing)
-    return now === null || !online.timing ? undefined : now - online.timing.since
-  })
   const control = TIME_CONTROLS.find(
     (c) => c.minutes === game.options.clock && c.increment === (game.options.increment ?? 0),
   )
@@ -448,7 +454,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                 onImpact={onImpact}
                 onPresenting={setPresenting}
                 onGraves={setGraves}
-                since={since}
+                timing={online.timing}
               />
               <div className="ch-table-controls">
                 <div className="ch-view-controls">

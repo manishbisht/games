@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import type { KeyboardEvent } from 'react'
 import type { Color, Square } from '@games/shared/chess/types'
 import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
+import type { HeldTiming } from '../components/clock'
 import type { SoundDetail } from '../game/audio'
 import { createScene } from './createScene'
 import type { Impact, SceneApi, SceneState } from './createScene'
@@ -16,16 +17,16 @@ interface BoardProps {
   onGraves?: (counts: Record<Color, number> | null) => void
   /** The lobby's preview: turns slowly while on screen. */
   showcase?: boolean
-  /** Read once, on mount: how long ago the opening state began; see `SceneOptions.since`. */
-  since?: number
+  /** Read once, on mount: the opening snapshot's timing; see `SceneOptions.timing`. */
+  timing?: HeldTiming
 }
 const ChessBoard = forwardRef<BoardControls, BoardProps>(function ChessBoard(
-  { state, black, onSelect, onImpact, onPresenting, onGraves, showcase = false, since },
+  { state, black, onSelect, onImpact, onPresenting, onGraves, showcase = false, timing },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null),
     api = useRef<SceneApi | null>(null),
-    initial = useRef({ state, black, showcase, since }),
+    initial = useRef({ state, black, showcase, timing }),
     handlers = useRef({ onSelect, onImpact, onPresenting, onGraves })
   const [failed, setFailed] = useState(false),
     [focused, setFocused] = useState<Square | null>(null),
@@ -56,7 +57,7 @@ const ChessBoard = forwardRef<BoardControls, BoardProps>(function ChessBoard(
       api.current = createScene(
         container.current,
         start.state,
-        { black: start.black, showcase: start.showcase, since: start.since },
+        { black: start.black, showcase: start.showcase, timing: start.timing },
         {
           select: (square) => handlers.current.onSelect(square),
           impact: (kind, detail) => handlers.current.onImpact?.(kind, detail),

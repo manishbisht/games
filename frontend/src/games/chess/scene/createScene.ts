@@ -13,10 +13,12 @@ import type {
 import { createCameraRig } from '../../../motion/camera'
 import type { Orbit } from '../../../motion/camera'
 import { dampFactor, lerp, outCubic } from '../../../motion/ease'
-import { createParticles } from '../../../motion/particles'
+import { createParticles, qualityDensity } from '../../../motion/particles'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
 import { createStage, disposeTree } from '../../../motion/stage'
 import { createQueue, createTweens } from '../../../motion/tween'
+import { serverNow } from '../components/clock'
+import type { HeldTiming } from '../components/clock'
 import type { ChessSound, SoundDetail } from '../game/audio'
 import { BOARD_Y, createCast } from './actors'
 import type { Actor } from './actors'
@@ -46,6 +48,8 @@ export interface SceneState {
   pending?: { from: Square; to: Square } | null
   /** The seat at this browser; the winner's confetti falls for them (and for spectators). */
   seat?: Color | null
+  /** The room's recent states, newest last (`game`); see `OnlineChessSession.recent`. */
+  recent?: { seq: number; state: GameState }[]
 }
 export type Impact = Exclude<ChessSound, 'lift' | 'tick' | 'flag'>
 export interface SceneEvents {
@@ -62,12 +66,12 @@ export interface SceneOptions {
   /** The lobby's preview: a slow orbit while it is on screen, and nothing to play. */
   showcase?: boolean
   /**
-   * How long ago, by the server's clock, the game reached the state the board
-   * opens on. A board that opens moments after a move — a join or a reload
-   * mid-move — plays that move from where it has got to rather than setting it
-   * down already finished.
+   * The opening snapshot's timing, held from when it arrived: how long ago, by
+   * the server's clock, the game reached the state the board opens on. A board
+   * that opens moments after a move — a join or a reload mid-move — plays that
+   * move from where it has got to rather than setting it down already finished.
    */
-  since?: number
+  timing?: HeldTiming
 }
 export interface SceneApi {
   update: (state: SceneState) => void
@@ -89,7 +93,7 @@ const VIEW = { polar: 0.88, azimuth: (black: boolean) => (black ? Math.PI + 0.24
 const TARGET = new THREE.Vector3(0, 0.2, 0)
 const RADIUS = 22
 const DRAG_LIFT = 0.5
-/** A move younger than this when the board opens is still playing; see `SceneOptions.since`. */
+/** A move younger than this when the board opens is still playing; see `SceneOptions.timing`. */
 const LIVE_MOVE_MS = 1200
 
 /** The position one move back: what the board looked like before the last move began. */
@@ -362,8 +366,8 @@ export function createScene(
         if (!animate) return
         impact('fall', king.actor.pos)
         if (!mate) impact('end')
-        if (!reducedMotion() && stage.quality > 0) {
-          rig.shake(mate ? 0.07 : 0.03, 300)
+        if (!reducedMotion()) {
+          if (stage.quality > 0) rig.shake(mate ? 0.07 : 0.03, 300)
           particles.burst({
             origin: new THREE.Vector3(at.x + away.x * 0.4, BOARD_Y + 0.05, at.z + away.z * 0.4),
             kind: 'dust',
@@ -388,8 +392,6 @@ export function createScene(
   }
 
   function confetti(amount: number) {
-    // A slow device keeps the moment, with less paper in the air.
-    amount *= [0.35, 0.65, 1][stage.quality]
     const colors = ['#f6c453', '#fff4dc', '#7f935e', '#c9a86a', '#e9706a']
     for (const [i, x] of [-3.4, 3.4, 0].entries())
       later(i * 220, () =>
@@ -546,6 +548,25 @@ export function createScene(
     presenting()
   }
 
+  /** The newest of the room's states this board has told; see `unseen`. */
+  let presented = initial.recent?.at(-1)?.seq ?? 0,
+    /** The move the board opened on is still playing; see the frame loop. */
+    syncing = false
+  /**
+   * The states a new render brings, oldest first. A burst of snapshots renders
+   * once; moves would chain anyway, but a rematch and the move straight after
+   * it would otherwise be told as one fresh game already under way. A gap
+   * bigger than `recent` holds is told by its newest state, as a reconnect is.
+   */
+  function unseen({ game, recent = [] }: SceneState) {
+    const told = presented,
+      fresh = recent.filter((entry) => entry.seq > told)
+    presented = recent.at(-1)?.seq ?? told
+    return fresh[0]?.seq === told + 1 && fresh.at(-1)!.state === game
+      ? fresh.map((entry) => entry.state)
+      : [game]
+  }
+
   let wasBusy = false
   function presenting() {
     const busy = queue.busy
@@ -554,6 +575,7 @@ export function createScene(
     events.presenting?.(busy)
   }
   const stopIdle = queue.onIdle(() => {
+    syncing = false
     reconcile()
     presenting()
   })
@@ -930,7 +952,9 @@ export function createScene(
     : null
   visibility?.observe(container)
   const removeFrame = stage.onFrame((dt, now) => {
-    const ms = dt * 1000
+    // Opened mid-move, the board keeps time with the room: what the stage's capped frames skipped
+    // (shaders compiling as it starts) is made up, so the move lands when it does for everyone else.
+    const ms = dt * 1000 + (syncing ? stage.takeDrift() : 0)
     tweens.speed = queue.speed
     let moving = queue.step(ms)
     if (tweens.step(ms)) moving = true
@@ -993,19 +1017,22 @@ export function createScene(
   }
   fitQuality(stage.quality)
   const stopQuality = stage.onQuality(fitQuality)
+  // A slow device keeps every moment, with less paper and dust in the air.
+  particles.density = qualityDensity(stage.quality)
+  const stopDensity = stage.onQuality((tier) => void (particles.density = qualityDensity(tier)))
 
+  // Read now, as the board is about to start, by the server's clock carried on from the snapshot's arrival.
+  const since = options.timing && serverNow(options.timing)! - options.timing.since
   const live =
-    !options.showcase &&
-    options.since !== undefined &&
-    options.since < LIVE_MOVE_MS &&
-    initial.game.history.length > 0
+    !options.showcase && since !== undefined && since < LIVE_MOVE_MS && initial.game.history.length > 0
   build(live ? beforeLast(initial.game) : initial.game)
   if (live) {
     // Opened mid-move: the move starts over from where the server's clock says it has got to.
     queued = beforeLast(initial.game)
+    syncing = true
     tell(initial.game)
-    queue.step(options.since!)
-    tweens.step(options.since!)
+    queue.step(since)
+    tweens.step(since)
   }
   lifts()
   paint()
@@ -1025,7 +1052,7 @@ export function createScene(
         // Each piece keeps its pose and whatever it was doing; only its turned wood changes.
         cast.retheme()
       }
-      if (next.game !== previous.game) tell(next.game)
+      if (next.game !== previous.game) for (const game of unseen(next)) tell(game)
       if (held && (!next.pending || next.pending.from !== held.from)) {
         const { actor, from } = held
         held = null
@@ -1064,6 +1091,7 @@ export function createScene(
     dispose() {
       removeFrame()
       stopQuality()
+      stopDensity()
       stopMotion()
       visibility?.disconnect()
       container.removeEventListener('pointerdown', down, { capture: true })

@@ -5,6 +5,13 @@ export interface OnlineChessSession {
   state: GameState
   /** When the snapshot's state began and was sent, by the server's clock; what the clocks count from. */
   timing?: HeldTiming
+  /**
+   * The room's recent states in arrival order, newest last (`state` itself),
+   * numbered by `seq`. A burst of snapshots renders once; the board reads the
+   * ones it has not presented so a rematch and the move straight after it are
+   * both told, not just where they ended up.
+   */
+  recent?: { seq: number; state: GameState }[]
   myColor: Color | null
   players: Partial<
     Record<

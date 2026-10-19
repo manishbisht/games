@@ -13,7 +13,7 @@ const player = (seat?: SeatInfo) =>
     : undefined
 
 /** Chess's half of a room: the room's snapshot becomes the board's session. */
-export default function ChessRoomView({ snapshot, you, api, leave }: RoomViewProps) {
+export default function ChessRoomView({ snapshot, receivedAt, recent, you, api, leave }: RoomViewProps) {
   const session = useMemo<OnlineChessSession>(() => {
     // Safe by construction: this view only mounts for a chess room, and the
     // server sent us the seat we are sitting in.
@@ -22,7 +22,10 @@ export default function ChessRoomView({ snapshot, you, api, leave }: RoomViewPro
     const send = (action: ChessAction) => api.action(action)
     return {
       state,
-      timing: hold(snapshot.timing),
+      timing: hold(snapshot.timing, receivedAt),
+      recent: recent.flatMap(({ seq, snapshot }) =>
+        snapshot.gameState ? [{ seq, state: snapshot.gameState as GameState }] : [],
+      ),
       myColor: mySeat,
       players: { w: player(snapshot.seats.w), b: player(snapshot.seats.b) },
       rematch: {
@@ -38,7 +41,7 @@ export default function ChessRoomView({ snapshot, you, api, leave }: RoomViewPro
       leave,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, you, api])
+  }, [snapshot, receivedAt, recent, you, api])
 
   return <ChessGame online={session} />
 }

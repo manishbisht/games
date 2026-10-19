@@ -89,6 +89,11 @@ describe('story', () => {
     expect(story(three, createGame()).kind).toBe('reset')
     expect(story(one, play(start, ['d2', 'd4'])).kind).toBe('reset')
   })
+  it('calls a finished game playing again a fresh game, whatever its history', () => {
+    expect(story({ ...start, status: 'resigned' }, start).kind).toBe('reset')
+    expect(story({ ...one, status: 'resigned' }, one).kind).toBe('reset')
+    expect(story({ ...start, status: 'resigned' }, one).kind).toBe('reset')
+  })
   it('has nothing to tell for a snapshot that adds no move', () => {
     expect(story(one, { ...one, status: 'resigned' }).kind).toBe('none')
   })
