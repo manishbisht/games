@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { guestId, guestName, saveGuestName } from './guest'
+import { guestId, guestName, presenceId, saveGuestName } from './guest'
 
 describe('guest identity', () => {
   let records: Map<string, string>
@@ -16,6 +16,13 @@ describe('guest identity', () => {
     const id = guestId()
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
     expect(guestId()).toBe(id)
+  })
+
+  it('counts presence under an id of its own, never the guest credential', () => {
+    const id = presenceId()
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(presenceId()).toBe(id)
+    expect(id).not.toBe(guestId())
   })
 
   it('stores and trims the display name', () => {

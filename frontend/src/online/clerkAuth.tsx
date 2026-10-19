@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { ClerkProvider, SignInButton, UserButton, useAuth, useUser } from '@clerk/react'
 import { IdentityContext, useGuestIdentity } from './identity'
 import type { Identity } from './identity'
 import AccountStatus, { GoogleMark } from './AccountStatus'
+import { setReportNames } from '../errorReports'
 
 // Everything that touches @clerk/react lives here so the SDK lands in its own
 // lazily-loaded chunk: visitors with no publishable key never download it.
@@ -32,6 +33,12 @@ function ClerkIdentity({ children }: { children: ReactNode }) {
   // report "not ready" rather than handing out a guest id we'd have to replace
   // a moment later.
   const pending = useClerkPending()
+  // Error reports scrub these names; an account's are often a real person's.
+  const signedIn = Boolean(isSignedIn && user)
+  const { fullName, firstName, lastName, username } = user ?? {}
+  useEffect(() => {
+    setReportNames(signedIn ? [fullName, firstName, lastName, username] : [])
+  }, [signedIn, fullName, firstName, lastName, username])
   const identity = useMemo<Identity>(() => {
     if (pending) return { ...guest, isReady: false }
     if (!isSignedIn || !user) return guest

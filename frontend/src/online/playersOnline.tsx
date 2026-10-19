@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useCountUp } from '../motion/hooks'
 import { presenceBeat, type PresenceCounts } from './api'
-import { guestId } from './guest'
+import { presenceId } from './guest'
 
 const BEAT_MS = 30_000
 
@@ -26,7 +26,7 @@ export function PlayersOnlineProvider({ game, children }: { game?: string; child
     let timer: ReturnType<typeof setTimeout> | undefined
     const beat = async () => {
       try {
-        const next = await presenceBeat(guestId(), TAB_ID, game)
+        const next = await presenceBeat(presenceId(), TAB_ID, game)
         if (active) setCounts(next)
       } catch {
         // Decorative: keep the last honest number and try again next round.

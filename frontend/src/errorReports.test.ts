@@ -12,13 +12,21 @@ describe('what an error report may say', () => {
   it('scrubs ids, addresses, the player and the room out of the text', () => {
     const text = scrubText(
       'Seat for Margaret (4f1c2b9e-3a1d-4c5e-9f00-1234567890ab, maggie@example.com) in ABC234 at https://games.manishbisht.me/#/chess/room/ABC234 failed',
-      { name: 'Margaret', code: 'ABC234' },
+      { names: ['Margaret'], code: 'ABC234' },
     )
     expect(text).toBe('Seat for <name> (<id>, <email>) in <room> at https://games.manishbisht.me/ failed')
   })
 
+  it('scrubs a full name whole, and its parts on their own', () => {
+    expect(
+      scrubText('No seat for Margaret Hale; Margaret left; hale.m joined', {
+        names: ['Margaret', 'Hale', 'Margaret Hale', 'hale.m'],
+      }),
+    ).toBe('No seat for <name>; <name> left; <name> joined')
+  })
+
   it('leaves a short name alone rather than every word that contains it', () => {
-    expect(scrubText('Cannot read properties of undefined', { name: 'Al' })).toBe(
+    expect(scrubText('Cannot read properties of undefined', { names: ['Al'] })).toBe(
       'Cannot read properties of undefined',
     )
   })
@@ -62,6 +70,19 @@ describe('sending reports', () => {
       route: '/chess/room/:code',
     })
     expect(beacons[1].body).toMatchObject({ kind: 'rejection', message: 'socket closed' })
+  })
+
+  it("scrubs a signed-in player's account names as well as a guest's", async () => {
+    store.set('games-guest-name', 'Robin')
+    const { reportError, setReportNames } = await import('./errorReports')
+    setReportNames(['Margaret Hale', 'Margaret', null, 'mhale'])
+    reportError('boundary', new Error('Seat label "Margaret Hale (mhale)" for Robin is stale'))
+    setReportNames([])
+    reportError('boundary', new Error('Margaret Hale again'))
+    expect(beacons.map((b) => (b.body as { message: string }).message)).toEqual([
+      'Error: Seat label "<name> (<name>)" for <name> is stale',
+      'Error: Margaret Hale again',
+    ])
   })
 
   it('says no more than ten things a session, across reloads', async () => {

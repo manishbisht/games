@@ -7,8 +7,9 @@ import { API_URL } from './online/api'
  * written to the Worker's log (see backend/src/clientErrors.ts).
  *
  * What leaves the browser is the error and where in the site it happened —
- * never who: the player's name and guest id are scrubbed from the text, and a
- * room's code (its invite secret) is taken out of the route.
+ * never who: the player's name (a guest's chosen one, or a signed-in account's
+ * real one) and guest id are scrubbed from the text, and a room's code (its
+ * invite secret) is taken out of the route.
  */
 
 export type ErrorKind = 'error' | 'rejection' | 'boundary' | 'webgl'
@@ -61,31 +62,49 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Error text with anything that could name a person or open a room taken out:
- * ids (guest ids are UUIDs), email addresses, the player's chosen name, the
- * code of the room they are in, and the query or fragment of any URL — which
- * is where this site keeps its routes, room codes included.
+ * ids (guest ids are UUIDs), email addresses, the player's names, the code of
+ * the room they are in, and the query or fragment of any URL — which is where
+ * this site keeps its routes, room codes included.
  */
-export function scrubText(text: string, { name, code }: { name?: string; code?: string } = {}): string {
+export function scrubText(
+  text: string,
+  { names = [], code }: { names?: readonly (string | null | undefined)[]; code?: string } = {},
+): string {
   let out = text
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
     .replace(/[^\s@"'<>]+@[^\s@"'<>]+\.[a-z]{2,}/gi, '<email>')
     .replace(/(https?:\/\/[^\s?#"')]+)[?#][^\s"')]*/g, '$1')
   if (code) out = out.replace(new RegExp(escape(code), 'g'), '<room>')
   // Short names ("Al") would scrub ordinary words out of every stack, so only
-  // a name long enough to be distinctive is looked for.
-  if (name && name.trim().length >= 3) out = out.replace(new RegExp(escape(name.trim()), 'gi'), '<name>')
+  // a name long enough to be distinctive is looked for. Longest first, so a
+  // full name goes as one rather than leaving "<name> Smith".
+  const distinct = names.map((name) => name?.trim() ?? '').filter((name) => name.length >= 3)
+  for (const name of distinct.sort((a, b) => b.length - a.length))
+    out = out.replace(new RegExp(escape(name), 'gi'), '<name>')
   return out
 }
 
+let accountNames: string[] = []
+
+/**
+ * The signed-in account's names, for scrubbing. Clerk's display name is often
+ * a person's full real name, and it reaches error text the same ways a guest's
+ * does (a seat label quoted in a render error); the account provider sets it
+ * here on sign-in and clears it on sign-out.
+ */
+export function setReportNames(names: readonly (string | null | undefined)[]): void {
+  accountNames = names.filter((name): name is string => Boolean(name))
+}
+
 function context() {
-  let name: string | undefined
+  let guest: string | undefined
   try {
-    name = localStorage.getItem('games-guest-name') ?? undefined
+    guest = localStorage.getItem('games-guest-name') ?? undefined
   } catch {
-    name = undefined
+    guest = undefined
   }
   const code = /\/room\/([^/?#]+)/i.exec(location.hash)?.[1]
-  return { name, code }
+  return { names: [guest, ...accountNames], code }
 }
 
 /** Report one error, unless this session has already said it, is sampled out, or has said enough. */
