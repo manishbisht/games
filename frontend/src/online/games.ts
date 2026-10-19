@@ -179,6 +179,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     ...roomView(() => import('../games/hearth/online/HearthRoomView')),
   },
   prism: {
+    anchorsReactions: true,
     minSeats: 2,
     // Seats are numbered, not dealt: which hand a seat gets is the shuffle's to
     // decide, once the room knows who turned up.
