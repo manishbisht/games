@@ -14,6 +14,11 @@ import type { Page } from '@playwright/test'
  * the server for, and a turn taken elsewhere arriving here.
  */
 
+// The first-game guide has its own spec (estate-guide); every table here has been played before.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('games-guide-estate', 'done'))
+})
+
 /** Set a table up and let the server deal it. */
 async function startBotGame(page: Page, players = 2, name = 'Alex') {
   await page.goto('/#/estate')

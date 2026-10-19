@@ -20,6 +20,8 @@ const settle = (page: Page) =>
 
 async function newPlayer(browser: Browser, errors: string[]) {
   const context = await browser.newContext()
+  // The first-game guide has its own spec (estate-guide).
+  await context.addInitScript(() => localStorage.setItem('games-guide-estate', 'done'))
   const page = await context.newPage()
   page.on('pageerror', (error) => errors.push(error.message))
   await page.emulateMedia({ reducedMotion: 'reduce' })

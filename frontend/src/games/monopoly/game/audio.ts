@@ -8,7 +8,7 @@ import { haptic, noise, sounds, tone } from '../../../motion/audio'
  * sound where it happened on the board, -1 left … 1 right.
  */
 export type Sound =
-  'roll' | 'purchase' | 'money' | 'coin' | 'tap' | 'step' | 'build' | 'card' | 'go' | 'jail' | 'win'
+  'roll' | 'purchase' | 'money' | 'coin' | 'tap' | 'step' | 'build' | 'card' | 'go' | 'jail' | 'win' | 'react'
 
 /** Two inharmonic partials that die fast: brass on brass. */
 function clink(at: number, pitch: number, volume: number, pan: number) {
@@ -102,6 +102,8 @@ const VOICES: Record<Sound, (strength: number, pan: number) => void> = {
     tone({ freq: 737, type: 'sine', duration: 0.4, volume: 0.008 * s, at: 0.03, pan, room: 0.5 })
   },
   win: (s) => sounds.fanfare(s),
+  // Someone across the table reacting: a small bubble of air, quieter than any move.
+  react: (s, pan) => sounds.pop(1.5, 0.55 * s, pan),
 }
 
 export function playSound(type: Sound, strength = 1, pan = 0) {

@@ -13,6 +13,7 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
+  Compass,
   Dice5,
   Expand,
   Flag,
@@ -36,15 +37,17 @@ import {
 import { Link } from 'react-router'
 import { estateGame } from '../catalog'
 import { useBotRoom } from '../../online/useBotRoom'
+import ReactionBar from '../../online/ReactionBar'
 import { BOARD, money } from '@games/shared/estate/board'
 import { createGame, debtCapacity, netWorth, ownedSpaces } from '@games/shared/estate'
-import { CLAIM_WIN_AFTER_MS, beatElapsed } from '@games/shared/protocol'
+import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { feel, playSound } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
 import { useCountUp, useHeld } from '../../motion/hooks'
 import { useMotionPreference, useReducedMotion } from '../../motion/preference'
+import { useSound } from '../../motion/sound'
 import { cardKeyOf, claimTarget, onlineDispatch, tradeKeyOf } from './online/session'
-import type { OnlineEstateSession } from './online/session'
+import type { OnlineEstateSession, TableReaction } from './online/session'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls, SceneCue } from './scene/BoardScene'
 import TokenIcon from './components/TokenIcon'
@@ -54,6 +57,11 @@ import { PortfolioDialog, PropertyDetail, PropertySummary, TradeButton } from '.
 import TradeDialog from './components/TradeDialog'
 import CountedMoney from './components/Money'
 import { useCoinFlights, useFlip } from './components/useTableMotion'
+import TableReactions from './components/Reactions'
+import type { ScreenPoint } from './components/Reactions'
+import Guide from './components/Guide'
+import { useGuide } from './components/useGuide'
+import type { GuideStep, ScreenBox } from './components/useGuide'
 import './styles/hud.css'
 import './styles/players.css'
 import './styles/activity.css'
@@ -189,6 +197,20 @@ interface GoBonus {
   at: number
 }
 
+/** An element's box on screen, or `null` when it is not laid out. */
+function boxOf(element: Element | null | undefined): ScreenBox | null {
+  if (!element) return null
+  const { left, top, width, height } = element.getBoundingClientRect()
+  return width || height ? { left, top, width, height } : null
+}
+
+const onScreen = ({ x, y }: ScreenPoint, within?: DOMRect) =>
+  x >= 0 &&
+  y >= 0 &&
+  x <= innerWidth &&
+  y <= innerHeight &&
+  (!within || (x >= within.left && x <= within.right && y >= within.top && y <= within.bottom))
+
 function WinnerStats({ cash, properties, worth }: { cash: number; properties: number; worth: number }) {
   // Counted up from nothing once the dialog is open, which is the point of a final tally.
   const shownCash = useCountUp(cash, 1300, { from: 0 }),
@@ -212,7 +234,14 @@ function WinnerStats({ cash, properties, worth }: { cash: number; properties: nu
   )
 }
 
-function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
+function MonopolyGame({
+  online,
+  reactions = [],
+}: {
+  online?: OnlineEstateSession
+  /** Online: recent reactions, oldest first, each by the player who sent it. */
+  reactions?: readonly TableReaction[]
+}) {
   // Online the room is the only source of truth, and the table is already
   // under way by the time this component mounts.
   // The board behind the setup dialog. It is never played: choosing a table
@@ -234,8 +263,10 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   const dispatch = useMemo(() => (online ? onlineDispatch(online) : () => {}), [online])
   const [modal, setModal] = useState<Modal>(() => (live.trade ? 'trade' : null)),
     [selected, setSelected] = useState<number | null>(null)
-  const [portfolioPlayer, setPortfolioPlayer] = useState<number | undefined>(),
-    [muted, setMuted] = useState(false)
+  const [portfolioPlayer, setPortfolioPlayer] = useState<number | undefined>()
+  // Remembered per game, so muting on the setup screen still holds once the table opens.
+  const [soundOn, setSoundOn] = useSound('estate', true),
+    muted = !soundOn
   const [winnerDismissed, setWinnerDismissed] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   /** The roll whose dice have come to rest on the board — not yet, if this page arrived mid-throw. */
@@ -441,6 +472,86 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   }
   const showWinner = useHeld(isFinished && !winnerDismissed && modal !== 'setup', 2800)
   const winner = state.winner !== null ? state.players[state.winner] : null
+  const cardOpen =
+      state.phase === 'card' &&
+      Boolean(state.card) &&
+      cardDismissed !== cardKey &&
+      !modal &&
+      selected === null,
+    debtOpen = state.phase === 'debt' && Boolean(state.debt) && humanTurn && !modal && selected === null
+  const dialogOpen =
+    modal !== null || selected !== null || cardOpen || debtOpen || Boolean(showWinner && winner)
+
+  /**
+   * Where a player's reaction rises from: their token, if it is on the board
+   * and the board is on screen; else their card at the table; else — for
+   * someone watching, or a phone scrolled down past both — the board's middle.
+   */
+  function reactionAnchor(player: number | null): ScreenPoint {
+    const view = gameArea.current?.querySelector('.board-viewport')?.getBoundingClientRect()
+    if (player !== null) {
+      const token = board.current?.tokenAt(player)
+      if (token && view && onScreen(token, view)) return token
+      const card = boxOf(shell.current?.querySelector(`.player-card[data-player="${player}"] .player-token`))
+      if (card && onScreen({ x: card.left + card.width / 2, y: card.top }))
+        return { x: card.left + card.width / 2, y: card.top + 6 }
+    }
+    const middle = view && { x: view.left + view.width / 2, y: view.top + view.height * 0.62 }
+    return middle && onScreen(middle) ? middle : { x: innerWidth / 2, y: innerHeight - 110 }
+  }
+
+  /**
+   * The first-game guide, for a seat at a live table — never for someone only
+   * watching. Each step points at the real thing, and the ones with a real
+   * action behind them finish when it is taken.
+   */
+  const mine = online?.mySeat ?? null,
+    myMove = mine !== null && state.current === mine && !isFinished
+  const guideSteps: GuideStep[] = [
+    {
+      title: 'Roll the dice',
+      text: humanTurn
+        ? 'It’s your turn. Roll the dice to set off round the city.'
+        : 'When it’s your turn, roll the dice here to set off round the city.',
+      target: () => boxOf(gameArea.current?.querySelector('.roll-button')),
+      armed: humanTurn && state.phase === 'ready',
+      done: myMove && busy,
+    },
+    {
+      title: 'Your token walks',
+      text: 'Your token walks the total on the dice, square by square. See where it lands.',
+      target: () => {
+        const at = mine === null ? null : board.current?.tokenAt(mine)
+        const size = Math.max(30, at?.height ?? 0)
+        return at ? { left: at.x - size / 2, top: at.y - 4, width: size, height: size + 8 } : null
+      },
+      armed: myMove && busy,
+      done: !busy,
+    },
+    {
+      title: 'Buy it, or pass',
+      text: 'Land on a deed nobody owns and it’s yours to buy, or pass and leave it on the market.',
+      target: () => boxOf(gameArea.current?.querySelector('.turn-actions')),
+      armed: humanTurn && state.phase === 'purchase',
+      done: state.phase !== 'purchase',
+    },
+    {
+      title: 'Rent pays itself',
+      text: 'Land on someone else’s deed and the rent is paid for you. Watch the coins fly between the cards.',
+      target: () => boxOf(shell.current?.querySelector(`.player-card[data-player="${mine}"]`)),
+    },
+    {
+      title: 'Build on a full set',
+      text: 'Own every deed of one colour and you can build houses on them from My properties.',
+      target: () => boxOf(shell.current?.querySelector('.utility-actions > .utility-action:first-child')),
+    },
+    {
+      title: 'Make a deal',
+      text: 'Offer cash and deeds to another player from Make a trade. Nothing changes hands until both of you agree.',
+      target: () => boxOf(shell.current?.querySelector('.utility-actions > .utility-action:last-child')),
+    },
+  ]
+  const guide = useGuide('estate', mine !== null && state.status === 'playing', guideSteps)
   const actionText = isSetup
     ? 'Start game'
     : isFinished
@@ -528,7 +639,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           <span className="local-label">
             <i /> {online ? 'ONLINE TABLE' : 'PLAY VS BOTS'}
           </span>
-          <button className="header-help" onClick={() => setModal('rules')}>
+          <button className="header-help" aria-label="How to play" onClick={() => setModal('rules')}>
             <CircleHelp size={17} />
             <span>How to play</span>
           </button>
@@ -537,7 +648,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
             className="icon-button"
             aria-label={muted ? 'Turn sound on' : 'Mute sound'}
             onClick={() => {
-              setMuted((v) => !v)
+              setSoundOn(muted)
             }}
           >
             {muted ? <VolumeX size={19} /> : <Volume2 size={19} />}
@@ -584,6 +695,13 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                     {isSetup ? 'YOUR CITY AWAITS' : isFinished ? 'A CITY WELL PLAYED' : 'THE CITY IS YOURS'}
                   </span>
                 </div>
+                {online && (
+                  <ReactionBar
+                    className="board-reactions"
+                    onReact={online.send.react}
+                    watching={online.mySeat === null}
+                  />
+                )}
                 <button
                   className="board-expand icon-button"
                   aria-label="Toggle fullscreen board"
@@ -595,8 +713,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
               <BoardScene
                 ref={board}
                 state={live}
-                sync={online && { elapsed: beatElapsed(online.timing), at: online.receivedAt }}
-                recent={online?.recent}
+                beats={online?.beats}
                 selected={selected}
                 onSelect={setSelected}
                 onCue={onCue}
@@ -892,6 +1009,22 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           </button>
         </div>
       )}
+      {online && (
+        <TableReactions
+          reactions={reactions}
+          nameOf={(player) =>
+            player === null ? 'Someone watching' : (state.players[player]?.name ?? 'A player')
+          }
+          colorOf={(player) => (player === null ? undefined : state.players[player]?.color)}
+          anchor={reactionAnchor}
+          onArrive={({ x }) => {
+            if (!muted) playSound('react', 1, ((x / innerWidth) * 2 - 1) * 0.5)
+          }}
+        />
+      )}
+      {guide.open && !dialogOpen && (
+        <Guide steps={guideSteps} step={guide.step} onNext={guide.next} onClose={guide.close} />
+      )}
       {modal === 'setup' && (
         <SetupDialog onClose={() => setModal(null)} onStart={startGame} disabled={room.disabled} />
       )}
@@ -972,6 +1105,17 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           <button className="primary-button full-width" onClick={() => setModal(null)}>
             Got it. Let’s play. <ArrowRight size={17} />
           </button>
+          <button
+            className="text-button guide-again"
+            onClick={() => {
+              guide.restart()
+              setModal(null)
+              if (mine === null || state.status !== 'playing')
+                setToast('The guide will show at your next table.')
+            }}
+          >
+            <Compass size={15} /> Show the guide again
+          </button>
         </Dialog>
       )}
       {modal === 'settings' && (
@@ -993,7 +1137,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
               aria-checked={!muted}
               aria-label="Game sounds"
               onClick={() => {
-                setMuted((v) => !v)
+                setSoundOn(muted)
               }}
             >
               <span />
@@ -1035,7 +1179,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           )}
         </Dialog>
       )}
-      {state.phase === 'card' && state.card && cardDismissed !== cardKey && !modal && selected === null && (
+      {cardOpen && state.card && (
         <Dialog
           title={state.card.title}
           eyebrow={state.card.deck === 'chance' ? 'A LITTLE CHANCE' : 'FROM YOUR COMMUNITY'}
@@ -1064,7 +1208,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           </button>
         </Dialog>
       )}
-      {state.phase === 'debt' && state.debt && humanTurn && !modal && selected === null && (
+      {debtOpen && state.debt && (
         <Dialog title="Time to make a plan." eyebrow="A PAYMENT IS DUE" onClose={() => openPortfolio()}>
           <div className="debt-amount">
             {money(state.debt.amount)}

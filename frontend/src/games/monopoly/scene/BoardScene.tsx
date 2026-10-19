@@ -1,13 +1,24 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createScene } from './createScene'
-import type { BeatSync, SceneApi, SceneCue } from './createScene'
+import type { SceneApi, SceneCue } from './createScene'
 import type { GameState } from '@games/shared/estate/types'
-import { beatElapsed } from '@games/shared/protocol'
-import type { EstateArrival } from '../online/session'
+import { usePresentBeats } from '../../../online/session'
+import type { RoomBeat } from '../../../online/session'
 import './BoardScene.css'
 
-export type BoardControls = Pick<SceneApi, 'reset' | 'zoom' | 'topView' | 'shake'>
+export type BoardControls = Pick<SceneApi, 'reset' | 'zoom' | 'topView' | 'shake' | 'tokenAt'>
 export type { SceneCue }
+
+const NO_BEATS: RoomBeat<GameState>[] = []
+
+/** No board to walk on: each state is shown as it comes — a lap of GO is still worth announcing. */
+function tell(next: GameState, passed: { current: number }, cue: (cue: SceneCue) => void) {
+  for (const event of [...next.events].reverse())
+    if (event.id > passed.current && event.text.includes('passed GO') && event.player !== undefined)
+      cue({ type: 'go', player: event.player })
+  passed.current = next.eventId
+  cue({ type: 'present', state: next })
+}
 
 /**
  * The 3D board. It is handed the server's state and tells the page, through
@@ -18,27 +29,24 @@ const BoardScene = forwardRef<
   BoardControls,
   {
     state: GameState
-    /** Online: how far into the room's current beat `state` already was. */
-    sync?: BeatSync
-    /** Online: every recent state in arrival order, newest last (`state`) — each is played in turn. */
-    recent?: readonly EstateArrival[]
+    /** Online: every recent state, oldest first, ending with `state` — each is played in turn. */
+    beats?: RoomBeat<GameState>[]
     selected: number | null
     onSelect: (id: number) => void
     onCue: (cue: SceneCue) => void
   }
->(function BoardScene({ state, sync, recent, selected, onSelect, onCue }, ref) {
+>(function BoardScene({ state, beats, selected, onSelect, onCue }, ref) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
   const initial = useRef(state),
-    syncRef = useRef(sync),
+    initialSince = useRef(beats?.at(-1)?.since),
     selectRef = useRef(onSelect),
     cueRef = useRef(onCue)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     selectRef.current = onSelect
     cueRef.current = onCue
-    syncRef.current = sync
-  }, [onSelect, onCue, sync])
+  }, [onSelect, onCue])
   useImperativeHandle(
     ref,
     () => ({
@@ -46,6 +54,7 @@ const BoardScene = forwardRef<
       zoom: (d) => scene.current?.zoom(d),
       topView: () => scene.current?.topView(),
       shake: () => scene.current?.shake(),
+      tokenAt: (player) => scene.current?.tokenAt(player) ?? null,
     }),
     [],
   )
@@ -55,7 +64,7 @@ const BoardScene = forwardRef<
       scene.current = createScene(container.current, initial.current, {
         onSelect: (id) => selectRef.current(id),
         onCue: (cue) => cueRef.current(cue),
-        sync: syncRef.current,
+        since: initialSince.current,
       })
     } catch (error) {
       console.error('Unable to initialize the 3D board', error)
@@ -66,33 +75,21 @@ const BoardScene = forwardRef<
       scene.current = null
     }
   }, [])
-  const passed = useRef(state.eventId),
-    playedSeq = useRef(recent?.at(-1)?.seq ?? 0)
-  useEffect(() => {
+  const passed = useRef(state.eventId)
+  // Online: every state the board has not played yet, in order, each timed from
+  // when the room entered it. The first look is the state the board was built
+  // on, which it has already played.
+  usePresentBeats(beats ?? NO_BEATS, (beat, catchUp) => {
     const board = scene.current
-    if (board && recent) {
-      // React renders a burst of snapshots once: play each state the board has
-      // not seen, in order, each timed from when it arrived. One older than
-      // `recent` keeps is a gap too wide to tell — land the newest instead.
-      const unseen = recent.filter((entry) => entry.seq > playedSeq.current)
-      if (unseen[0]?.seq === playedSeq.current + 1)
-        for (const entry of unseen)
-          board.update(entry.state, { elapsed: beatElapsed(entry.timing), at: entry.receivedAt })
-      else if (unseen.length) board.update(state, syncRef.current)
-      playedSeq.current = recent.at(-1)?.seq ?? playedSeq.current
-      return
-    }
-    if (board) {
-      board.update(state, syncRef.current)
-      return
-    }
-    // No board to walk on: a lap of GO is still worth announcing.
-    for (const event of [...state.events].reverse())
-      if (event.id > passed.current && event.text.includes('passed GO') && event.player !== undefined)
-        cueRef.current({ type: 'go', player: event.player })
-    passed.current = state.eventId
-    cueRef.current({ type: 'present', state })
-  }, [state, recent, failed])
+    if (!board) tell(beat.state, passed, cueRef.current)
+    else if (!(catchUp && beat.state === initial.current)) board.update(beat.state, beat.since)
+  })
+  // The setup preview is not a room's: it is played as it is handed over.
+  useEffect(() => {
+    if (beats) return
+    if (scene.current) scene.current.update(state)
+    else tell(state, passed, cueRef.current)
+  }, [state, beats, failed])
   useEffect(() => {
     scene.current?.select(selected)
   }, [selected])

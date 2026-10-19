@@ -140,6 +140,8 @@ async function open(page: Page) {
     localStorage.setItem('games-test-clock', 'on')
     localStorage.setItem('games-motion', 'full')
     localStorage.setItem('games-guest-name', 'Robin')
+    // The first-game guide has its own spec (estate-guide); here it would only sit over the frames.
+    localStorage.setItem('games-guide-estate', 'done')
   })
   const room = await fakeRoom(page)
   await page.goto(`/#/estate/room/${CODE}`)

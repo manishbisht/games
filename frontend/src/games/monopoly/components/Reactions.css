@@ -1,0 +1,125 @@
+/* Reactions at the table: the bar on the board, and each one rising from whoever sent it. */
+@scope (.estate-app) {
+  .board-reactions {
+    margin-left: auto;
+    margin-right: 6px;
+  }
+
+  /* On a phone the board's caption gives way to the reactions, and the dice chip sits under them. */
+  @media (max-width: 600px) {
+    .board-topline:has(.board-reactions) .board-label {
+      display: none;
+    }
+    .board-reactions {
+      margin-right: 2px;
+    }
+    .board-viewport:has(.board-reactions) .dice-result {
+      top: 68px;
+    }
+  }
+
+  .table-reactions {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  /* Pinned at the sender's anchor; the bubble sits just above it and rises from there. */
+  .table-reaction {
+    position: absolute;
+    left: 50%;
+    bottom: 96px;
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    translate: -50% -100%;
+    animation: estate-reaction-rise 2400ms var(--ease-out) both;
+  }
+
+  .table-reaction-emoji {
+    font-size: 34px;
+    line-height: 1;
+    filter: drop-shadow(0 5px 8px #0003);
+    animation: estate-reaction-spring var(--motion-slow) var(--ease-spring) both;
+  }
+
+  .table-reaction-name {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 128px;
+    padding: 3px 9px 3px 6px;
+    border: 1px solid light-dark(var(--theme-border), #3a4453);
+    border-radius: 999px;
+    background: light-dark(color-mix(in srgb, var(--theme-surface) 94%, transparent), #1a2330f0);
+    box-shadow: 0 6px 16px light-dark(#3040361f, #0006);
+    color: light-dark(var(--text), #e7ecf2);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .table-reaction-name i {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--player-color, light-dark(var(--theme-muted), #8792a3));
+  }
+
+  .table-reaction.watching .table-reaction-name {
+    font-weight: 500;
+    color: light-dark(var(--theme-muted), #aab4c2);
+  }
+}
+
+/* Rises with a little sway, holds, then fades as it drifts on up. */
+@keyframes estate-reaction-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 10px);
+  }
+  10% {
+    opacity: 1;
+  }
+  40% {
+    transform: translate(calc(var(--jitter) * 18px), -46px);
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--jitter) * -10px), -92px);
+  }
+}
+
+@keyframes estate-reaction-spring {
+  from {
+    scale: 0.25;
+    rotate: calc(var(--jitter) * 50deg);
+  }
+}
+
+/* Reduced motion: no rise, just there and gone, softly. */
+:root[data-motion='reduced'] .estate-app .table-reaction {
+  animation: estate-reaction-fade 2400ms linear both !important;
+}
+:root[data-motion='reduced'] .estate-app .table-reaction-emoji {
+  animation: none !important;
+}
+
+@keyframes estate-reaction-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  8%,
+  78% {
+    opacity: 1;
+  }
+}

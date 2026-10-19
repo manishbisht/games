@@ -25,6 +25,7 @@ const api = (): RoomApi => ({
   claim: vi.fn(),
   addBot: vi.fn(),
   removeBot: vi.fn(),
+  react: vi.fn(),
   dismissError: vi.fn(),
 })
 
@@ -241,7 +242,7 @@ describe('the estate session', () => {
     expect(room(all).rematch).toEqual({ mine: true, theirs: true })
   })
 
-  it('times the table from when each snapshot arrived, and keeps every state of a burst in order', () => {
+  it('plays every state of a burst, in order, each timed from when the room entered it', () => {
     const rolled = table(['Ann', 'Ben', 'Cai']),
       walked = { ...rolled, eventId: rolled.eventId + 1 },
       timing = { now: 5_400, since: 5_000 }
@@ -268,14 +269,13 @@ describe('the estate session', () => {
         { seq: 9, snapshot: walk, receivedAt: 2_500 },
       ],
     })
-    expect(session.receivedAt).toBe(2_500)
-    expect(session.timing).toEqual(timing)
-    // The lobby before the game is not a state of it.
-    expect(session.recent.map((e) => [e.seq, e.state, e.receivedAt])).toEqual([
-      [8, rolled, 2_400],
-      [9, walked, 2_500],
+    // The lobby before the game is not a state of it; each beat began 400ms
+    // before it arrived, by the room's clock.
+    expect(session.beats.map((beat) => [beat.seq, beat.state, beat.since])).toEqual([
+      [8, rolled, 2_000],
+      [9, walked, 2_100],
     ])
-    expect(session.recent.at(-1)!.state).toBe(session.state)
+    expect(session.beats.at(-1)!.state).toBe(session.state)
   })
 
   it('forwards the room’s own messages untouched', () => {
@@ -295,10 +295,12 @@ describe('the estate session', () => {
     session.send.action({ type: 'ROLL' })
     session.send.rematch()
     session.send.claim()
+    session.send.react?.('wow')
     session.leave()
     expect(wire.action).toHaveBeenCalledWith({ type: 'ROLL' })
     expect(wire.rematch).toHaveBeenCalled()
     expect(wire.claim).toHaveBeenCalled()
+    expect(wire.react).toHaveBeenCalledWith('wow')
     expect(leave).toHaveBeenCalled()
   })
 })

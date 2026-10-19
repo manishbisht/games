@@ -1,18 +1,15 @@
 import type { EstateOnlineAction } from '@games/shared/estate/online'
 import type { GameAction, GameState } from '@games/shared/estate/types'
-import type { BeatTiming, SeatId } from '@games/shared/protocol'
+import type { ReactionId, SeatId } from '@games/shared/protocol'
 import type { RoomViewProps } from '../../../online/games'
-
-export interface EstateSeatPlayer {
-  name: string
-  connected: boolean
-  /** Server timestamp of when they dropped; absent while they are here. */
-  awaySince?: number
-  /** The room is already playing this seat — there is nothing left to claim. */
-  abandoned?: boolean
-  /** Nobody is behind this seat: the room plays it, and the table should say so. */
-  bot?: { skill: string }
-}
+import type { ReactionEntry } from '../../../online/roomState'
+import {
+  claimTarget as sharedClaimTarget,
+  rematchState,
+  roomBeats,
+  seatPlayers,
+} from '../../../online/session'
+import type { RoomBeat, SeatPlayer } from '../../../online/session'
 
 /**
  * One online table, in the terms the board already thinks in. The room speaks
@@ -24,32 +21,23 @@ export interface OnlineEstateSession {
   /** The player this browser plays, by index, or `null` for someone watching. */
   mySeat: number | null
   /** Keyed by player index, so it lines up with `state.players`. */
-  players: Partial<Record<number, EstateSeatPlayer>>
+  players: Partial<Record<number, SeatPlayer>>
   rematch: { mine: boolean; theirs: boolean }
-  /** The room's clock for the beat `state` is in, so a page that joins mid-roll can join it there. */
-  timing?: BeatTiming
-  /** When this browser received the snapshot, on its `performance.now()` clock. */
-  receivedAt: number
   /**
-   * Every recent state the room sent, in arrival order, newest last (`state`).
-   * A burst of messages renders once; the board plays each state it has not
-   * seen yet, so a roll and the walk after it are both told.
+   * Every recent state the room sent, oldest first, ending with `state`, each
+   * timed from when the room entered it. A burst of messages renders once; the
+   * board plays each state it has not seen yet, so a roll and the walk after it
+   * are both told — and a page that joins mid-roll joins it where the room is.
    */
-  recent: EstateArrival[]
+  beats: RoomBeat<GameState>[]
   send: {
     action: (action: EstateOnlineAction) => void
     rematch: () => void
     claim: () => void
+    /** A quick reaction to the table; absent on a room double written before there were any. */
+    react?: (reaction: ReactionId) => void
   }
   leave: () => void
-}
-
-/** One state as it arrived: `seq` counts up in arrival order, `receivedAt` is `performance.now()`. */
-export interface EstateArrival {
-  seq: number
-  state: GameState
-  timing?: BeatTiming
-  receivedAt: number
 }
 
 /**
@@ -130,21 +118,38 @@ export const cardKeyOf = (state: GameState): string =>
   state.phase === 'card' && state.card ? `${state.eventId}-${state.card.title}` : ''
 
 /**
- * The player a claim can be made against right now, or `null`. Three things have
- * to hold at once: the table is genuinely stuck on someone who has gone — the
- * player on turn, or the one an offer is waiting on — this browser holds a seat
- * of its own to claim with (a spectator has no standing, and the server would
- * only answer NOT_SEATED), and no claim has been granted yet, because after one
- * the room plays that seat and there is nothing left to ask for.
+ * The player a claim can be made against right now, or `null` (see the shared
+ * `claimTarget`). The table is stuck on whoever an offer is waiting on, if one
+ * stands, and on the player on turn otherwise.
  */
-export function claimTarget(session: OnlineEstateSession): EstateSeatPlayer | null {
-  const { state, mySeat, players } = session
-  if (mySeat === null || state.status !== 'playing') return null
+export function claimTarget({ state, mySeat, players }: OnlineEstateSession): SeatPlayer | null {
   const blocked = state.trade ? state.trade.to : state.current
-  if (blocked === mySeat) return null
-  const blocker = players[blocked]
-  return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
+  // The shared rule keys seats by name; ours are indexes, which name them just as well.
+  return sharedClaimTarget<string>(
+    players,
+    String(blocked),
+    mySeat === null ? null : String(mySeat),
+    state.status !== 'playing',
+  )
 }
+
+/** A reaction in the table's terms: who sent it by player index, or `null` for someone watching. */
+export interface TableReaction {
+  id: string
+  player: number | null
+  reaction: ReactionId
+  /** `performance.now()` when it arrived. */
+  receivedAt: number
+}
+
+export const tableReactions = (
+  seatIds: readonly SeatId[],
+  reactions: readonly ReactionEntry[],
+): TableReaction[] =>
+  reactions.map(({ id, seat, reaction, receivedAt }) => {
+    const index = seat === null ? -1 : seatIds.indexOf(seat)
+    return { id, player: index >= 0 ? index : null, reaction, receivedAt }
+  })
 
 export function estateSession({
   snapshot,
@@ -154,50 +159,19 @@ export function estateSession({
   api,
   leave,
 }: RoomViewProps): OnlineEstateSession {
-  // Safe by construction: this only runs for an estate room with a live game.
-  const state = snapshot.gameState as GameState
-  const indexOf = (seat: SeatId) => snapshot.seatIds.indexOf(seat)
-
-  const players: Partial<Record<number, EstateSeatPlayer>> = {}
-  for (const seat of snapshot.seatIds) {
-    const info = snapshot.seats[seat]
-    const index = indexOf(seat)
-    if (info && index >= 0)
-      players[index] = {
-        name: info.player.name,
-        connected: info.connected,
-        awaySince: info.awaySince,
-        abandoned: info.abandoned,
-        bot: info.bot,
-      }
-  }
-
-  const mine = you.seat === null ? -1 : indexOf(you.seat)
-  // Bots are left out: one never asks for a rematch and the server never waits
-  // for one either, so counting them would leave the table saying "waiting" for
-  // a game that has already restarted.
-  const others = snapshot.seatIds.filter(
-    (seat) => seat !== you.seat && snapshot.seats[seat] && !snapshot.seats[seat]!.bot,
-  )
+  const mine = you.seat === null ? -1 : snapshot.seatIds.indexOf(you.seat)
   return {
-    state,
+    // Safe by construction: this only runs for an estate room with a live game.
+    state: snapshot.gameState as GameState,
     mySeat: mine >= 0 ? mine : null,
-    players,
-    rematch: {
-      mine: you.seat ? (snapshot.seats[you.seat]?.wantsRematch ?? false) : false,
-      // Two to four at the table, so "them" is everyone else — and a rematch
-      // only starts once the whole table has asked for it.
-      theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
-    },
-    timing: snapshot.timing,
-    receivedAt,
-    recent: recent.flatMap(({ seq, snapshot: { gameState, timing }, receivedAt }) =>
-      gameState ? [{ seq, state: gameState as GameState, timing, receivedAt }] : [],
-    ),
+    players: seatPlayers(snapshot, (_seat, index) => String(index)),
+    rematch: rematchState(snapshot, you),
+    beats: roomBeats<GameState>({ snapshot, receivedAt, recent }),
     send: {
       action: (action) => api.action(action),
       rematch: api.rematch,
       claim: api.claim,
+      react: api.react,
     },
     leave,
   }

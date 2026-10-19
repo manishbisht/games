@@ -1,0 +1,160 @@
+/* The first-game guide: a ring round the real thing, and a small card beside it. Never in the way. */
+@scope (.estate-app) {
+  .guide-ring {
+    position: fixed;
+    z-index: 45;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow:
+      0 0 0 2px light-dark(var(--theme-accent), #f3d1a9),
+      0 0 0 7px light-dark(color-mix(in srgb, var(--theme-accent) 22%, transparent), #f3d1a933),
+      0 0 0 100vmax light-dark(#2a30380f, #0000002e);
+    animation: estate-guide-breathe 2.4s var(--ease-in-out) infinite;
+  }
+
+  .guide-ring[hidden] {
+    display: none;
+  }
+
+  /* Placed by the guide every frame, beside whatever the step points at. */
+  .guide-card {
+    position: fixed;
+    z-index: 46;
+    left: 0;
+    top: 0;
+    width: min(320px, calc(100vw - 24px));
+    outline: none;
+  }
+
+  .guide-card-inner {
+    padding: 15px 16px 14px;
+    border: 1px solid light-dark(var(--theme-border), #3a4453);
+    border-radius: 14px;
+    background: light-dark(var(--theme-surface), #1a2330);
+    box-shadow: 0 18px 50px light-dark(#3040362e, #000a);
+  }
+
+  .guide-card:focus-visible .guide-card-inner {
+    outline: 2px solid light-dark(var(--theme-accent), #f3d1a9);
+    outline-offset: 2px;
+  }
+
+  .guide-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .guide-count {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: light-dark(var(--theme-accent), #f3d1a9);
+  }
+
+  .guide-close {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin: -6px -6px 0 0;
+    border-radius: 8px;
+    background: transparent;
+    color: light-dark(var(--theme-muted), #8792a3);
+  }
+
+  .guide-close:hover {
+    background: light-dark(var(--theme-inset), #ffffff0d);
+  }
+
+  .guide-card h2 {
+    margin: 4px 0 4px;
+    font-family: 'Manrope', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+
+  .guide-card p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: light-dark(var(--theme-muted), #aab4c2);
+  }
+
+  .guide-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .guide-dots {
+    display: flex;
+    gap: 4px;
+    margin-right: auto;
+  }
+
+  .guide-dots i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: light-dark(var(--theme-border), #3a4453);
+    transition:
+      width var(--motion-base) var(--ease-spring),
+      background var(--motion-base) var(--ease-out);
+  }
+
+  .guide-dots i.on {
+    width: 14px;
+    border-radius: 3px;
+    background: light-dark(var(--theme-accent), #f3d1a9);
+  }
+
+  .guide-skip,
+  .guide-next {
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .guide-skip {
+    background: transparent;
+    color: light-dark(var(--theme-muted), #aab4c2);
+  }
+
+  .guide-skip:hover {
+    background: light-dark(var(--theme-inset), #ffffff0d);
+  }
+
+  .guide-next {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: light-dark(var(--theme-accent), #e7a65d);
+    color: light-dark(#fff, #1a2330);
+  }
+
+  .guide-close:focus-visible,
+  .guide-skip:focus-visible,
+  .guide-next:focus-visible {
+    outline: 2px solid light-dark(var(--theme-accent), #f3d1a9);
+    outline-offset: 2px;
+  }
+
+  .guide-again {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 4px auto 0;
+  }
+}
+
+@keyframes estate-guide-breathe {
+  50% {
+    scale: 1.012;
+  }
+}

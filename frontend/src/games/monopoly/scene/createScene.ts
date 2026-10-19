@@ -59,20 +59,22 @@ export type SceneCue =
   | { type: 'dice'; rollId: number }
   | { type: 'sound'; sound: Sound; strength?: number; pan?: number }
 
-/**
- * How far into its current beat the room already was: `elapsed` ms when the
- * snapshot was received, at `at` on this page's `performance.now()` clock.
- */
-export interface BeatSync {
-  elapsed: number
-  at: number
-}
-
 export interface SceneApi {
-  update: (state: GameState, sync?: BeatSync) => void
+  /**
+   * Play `state` out. `since` is when the room entered it, on this page's
+   * `performance.now()` clock — a page that learns of a beat late joins it
+   * where the room already is.
+   */
+  update: (state: GameState, since?: number) => void
   select: (id: number | null) => void
   /** Rattle the dice in the hand while the roll is on its way to the server. */
   shake: () => void
+  /**
+   * Where the top of `player`'s token is on screen, in viewport pixels, and how
+   * tall it stands there — or null when it is off the board (bankrupt, or there
+   * is no such player).
+   */
+  tokenAt: (player: number) => { x: number; y: number; height: number } | null
   reset: () => void
   zoom: (direction: number) => void
   topView: () => void
@@ -107,8 +109,8 @@ export function createScene(
   {
     onSelect,
     onCue,
-    sync,
-  }: { onSelect: (id: number) => void; onCue: (cue: SceneCue) => void; sync?: BeatSync },
+    since,
+  }: { onSelect: (id: number) => void; onCue: (cue: SceneCue) => void; since?: number },
 ): SceneApi {
   let state = initial,
     disposed = false
@@ -145,7 +147,8 @@ export function createScene(
   // quality tier: a slow device keeps the moment, with less in the air.
   particles.density = qualityDensity(stage.quality)
   stage.onQuality((tier) => (particles.density = qualityDensity(tier)))
-  const screen = new THREE.Vector2()
+  const screen = new THREE.Vector2(),
+    overhead = new THREE.Vector3()
   /** Where on the board, left to right, a sound happened. */
   const panOf = (at: THREE.Vector3) =>
     stage.size.width
@@ -1209,10 +1212,10 @@ export function createScene(
     stage.invalidate()
   }
 
-  function update(next: GameState, sync?: BeatSync) {
+  function update(next: GameState, since?: number) {
     if (disposed) return
     /** How far into this state's beat the room already is — a join or a reconnect lands mid-roll. */
-    const late = sync ? sync.elapsed + (performance.now() - sync.at) : 0
+    const late = since === undefined ? 0 : performance.now() - since
     const prev = state
     state = next
     const fresh =
@@ -1423,7 +1426,7 @@ export function createScene(
     coins.dispose()
     tooltip.remove()
   })
-  update(initial, sync)
+  update(initial, since)
   stage.start()
 
   return {
@@ -1439,6 +1442,15 @@ export function createScene(
       shakeUntil = stage.now + 3000
       throws.forEach((t) => t.shake())
       stage.invalidate()
+    },
+    tokenAt(player) {
+      const token = tokens[player]
+      if (!token?.group.visible || !stage.size.width) return null
+      const frame = stage.canvas.getBoundingClientRect(),
+        { x, y, z } = token.group.position
+      const base = stage.toScreen(overhead.set(x, y, z), screen).y,
+        top = stage.toScreen(overhead.set(x, y + 0.8, z), screen)
+      return { x: frame.left + top.x, y: frame.top + top.y, height: Math.max(0, base - top.y) }
     },
     reset() {
       rig.to({ position: HOME, target: ORIGIN, zoom: 1 }, 4)
