@@ -12,6 +12,7 @@ import {
   Bot,
   Check,
   CircleHelp,
+  Clapperboard,
   Dices,
   Flag,
   Leaf,
@@ -27,6 +28,7 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import { useBotRoom } from '../../online/useBotRoom'
+import { replayUrl } from '../../online/games'
 import { wildriseGame } from '../catalog'
 import Setup from './components/Setup'
 import type { SetupOptions } from './components/Setup'
@@ -883,6 +885,9 @@ function Table({
               <button className="wr-secondary" onClick={online.leave}>
                 Leave room <ArrowRight size={16} />
               </button>
+              <Link className="wr-replay-link" to={replayUrl('wildrise', online.code)}>
+                <Clapperboard size={14} /> Watch the replay
+              </Link>
             </>
           )}
         </Dialog>

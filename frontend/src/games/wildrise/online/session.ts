@@ -22,6 +22,8 @@ export interface TableReaction {
  * seats at the start the two line up index for index.
  */
 export interface OnlineWildriseSession {
+  /** The room's code: where its finished game plays back (`replayUrl`). */
+  code: string
   state: GameState
   /**
    * The room's recent states, oldest first and `state` last, each with when its
@@ -67,6 +69,7 @@ export function wildriseSession(
     (seat && PLAYER_IDS[snapshot.seatIds.indexOf(seat)]) || null
   const send = (action: WildriseOnlineAction) => api.action(action)
   return {
+    code: snapshot.code,
     state,
     beats: roomBeats<GameState>({ snapshot, receivedAt, recent }),
     mySeat: colourOf(you.seat),

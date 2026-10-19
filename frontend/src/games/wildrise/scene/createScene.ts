@@ -37,6 +37,7 @@ import {
   makeSnake,
   makeToken,
   material,
+  Parts,
   slither,
 } from './models'
 import type { Ladder, Snake } from './models'
@@ -56,6 +57,13 @@ export interface SceneApi {
    * (`performance.now()`); absent for a table that isn't the room's.
    */
   update: (state: GameState, since?: number) => void
+  /**
+   * Puts the board straight on `state` — no hops, no sounds, no camera — for a
+   * replay that was scrubbed or stepped rather than played into it.
+   */
+  land: (state: GameState) => void
+  /** Plays every beat this many times faster: a replay's speed. */
+  setRate: (rate: number) => void
   /**
    * Where `what` is on screen right now, in CSS pixels from the canvas's corner
    * — a token (over its head, at camp too) or a square — or `null` when it is
@@ -201,16 +209,15 @@ export function createScene(
   const table = box(80, 0.4, 80, '#e7decc', 0.05)
   table.position.y = -0.75
   scene.add(table)
-  const seamGeometry = new THREE.BoxGeometry(0.012, 0.001, 80),
-    seamMaterial = material('#cfc3ad')
-  for (let i = -4; i <= 4; i++) {
-    const seam = new THREE.Mesh(seamGeometry, seamMaterial)
-    seam.position.set(i * 6.5, -0.548, 0)
-    scene.add(seam)
-  }
+  const seams = new Parts()
+  for (let i = -4; i <= 4; i++)
+    seams.add(new THREE.BoxGeometry(0.012, 0.001, 80), '#cfc3ad', (part) =>
+      part.position.set(i * 6.5, -0.548, 0),
+    )
+  scene.add(seams.mesh(0.48, 0, false))
   const board = makeBoard(initial)
   scene.add(board.group)
-  const finish = board.tiles[99].material
+  const finish = board.finish.material
   finish.emissive.set('#f2c25a')
   const snakes = new Map<number, Snake>(),
     ladders = new Map<number, Ladder>()
@@ -303,6 +310,10 @@ export function createScene(
     transparent: true,
     opacity: 0.85,
     side: THREE.DoubleSide,
+    // Flat on the board, so one pass will do: a transparent double-sided
+    // material is otherwise drawn twice a frame, back then front, and its
+    // program looked up afresh for each side.
+    forceSinglePass: true,
     depthWrite: false,
   })
   const halo = new THREE.Mesh(new THREE.RingGeometry(0.29, 0.34, 48), haloMaterial)
@@ -340,6 +351,7 @@ export function createScene(
     story: Squares = {},
     reduced = reducedMotion(),
     boost = 1,
+    rate = 1,
     active: PlayerId = initial.players[initial.currentPlayer].id,
     winner: PlayerId | null = null,
     lastAmbient = -1e9,
@@ -442,7 +454,7 @@ export function createScene(
     return focus.copy(homeTarget).lerp(token.group.position, focusOn.share).setY(0)
   }
   function follow(token: Token, zoom: number, share = 0.55) {
-    if (reduced) return
+    if (reduced || silent) return
     if (!followFrom) {
       followFrom = { target: controls.target.clone(), zoom: camera.zoom }
       touched = false
@@ -992,13 +1004,23 @@ export function createScene(
     silent = false
   }
 
-  function update(next: GameState, since?: number) {
+  function update(next: GameState, since?: number, instant = false) {
     const story_ = plan(previous, story, next, reduced)
     previous = next
     state = next
     story = story_.squares
     if (!story_.beats.length) return
     if (next.phase !== 'won') winner = null
+    if (instant) {
+      // Everything already queued, then this state's own beats, each landed on
+      // its last frame: `past` beats hold for nothing, so the push runs them all.
+      flush()
+      silent = true
+      queue.push(...story_.beats.map((beat) => ({ run: () => run(beat, 'past'), label: beat.kind })))
+      silent = false
+      flush()
+      return
+    }
     const { live, playing } = story_
     // Joining or reconnecting mid-turn, the room says how far into its beat it
     // already is: what came before lands at once, and this beat starts at that
@@ -1175,7 +1197,7 @@ export function createScene(
       shakingUntil = 0
       dieThrow.settle(dieValue)
     }
-    let moving = dieThrow.step(dt * boost * queue.speed)
+    let moving = dieThrow.step(dt * boost * rate * queue.speed)
     const glowGoal = canRoll ? (hovered ? 0.4 : 0.1) : 0
     if (Math.abs(dieGlow - glowGoal) > 1e-3) {
       dieGlow = damp(dieGlow, glowGoal, 10, dt)
@@ -1221,7 +1243,7 @@ export function createScene(
     if (disposed) return false
     const drift = stage.takeDrift()
     if (pickedUp && drift > 0) skip(drift)
-    const ms = dt * 1000 * boost
+    const ms = dt * 1000 * boost * rate
     queue.step(ms)
     tweens.speed = queue.speed
     let moving = tweens.step(ms)
@@ -1234,7 +1256,7 @@ export function createScene(
     if (moving || idle) {
       lastAmbient = now
       poseSnakes(now)
-      for (let s = 1; s <= 100; s++) board.tiles[s - 1].position.y = 0.187 - press[s]
+      board.press(press)
       const near = state.players.some((p) => (shown[p.id] ?? 0) >= 94) && !winner
       finish.emissiveIntensity = near ? (reduced ? 0.3 : 0.28 + Math.sin(now / 260) * 0.2) : 0
       diePulse = canRoll && !hovered && !reduced && tier > 0 ? Math.sin(now / 380) * 0.06 : 0
@@ -1262,6 +1284,10 @@ export function createScene(
     onScreen = new THREE.Vector2()
   return {
     update,
+    land: (next) => update(next, undefined, true),
+    setRate(next) {
+      rate = next
+    },
     locate(what, out) {
       if ('token' in what) {
         const token = tokens.get(what.token)
@@ -1322,6 +1348,8 @@ export function createScene(
       controls.dispose()
       particles.dispose()
       ambient.dispose()
+      board.dispose()
+      for (const snake of snakes.values()) snake.dispose()
       stage.dispose()
     },
   }

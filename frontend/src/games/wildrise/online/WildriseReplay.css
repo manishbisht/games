@@ -1,0 +1,77 @@
+/*
+ * Wildrise's replay: the board fills the page's stage, with the positions and
+ * the latest happening laid over its foot. Site tokens only, so it reads in
+ * either appearance inside the replay page's frame.
+ */
+.wr-replay {
+  position: relative;
+  min-height: clamp(300px, 60svh, 680px);
+  background: light-dark(#ece7d8, var(--theme-inset));
+  overflow: hidden;
+}
+.wr-replay-canvas {
+  position: absolute;
+  inset: 0 0 64px;
+}
+.wr-replay-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.wr-replay-fallback {
+  position: absolute;
+  inset: 40% 16px auto;
+  margin: 0;
+  text-align: center;
+  color: var(--theme-text);
+}
+.wr-replay-players {
+  position: absolute;
+  inset: auto 12px 34px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+.wr-replay-players li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--theme-surface) 92%, transparent);
+  color: var(--theme-text);
+  font-size: 12px;
+  transition: border-color var(--motion-fast, 0.15s) ease;
+}
+.wr-replay-players li[data-active] {
+  border-color: var(--player-color);
+  box-shadow: inset 0 0 0 1px var(--player-color);
+}
+.wr-replay-players i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--player-color);
+}
+.wr-replay-players strong {
+  min-width: 2.2em;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wr-replay-caption {
+  position: absolute;
+  inset: auto 12px 8px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--theme-muted);
+  font-size: 12px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
