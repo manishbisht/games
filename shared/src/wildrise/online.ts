@@ -1,3 +1,5 @@
+import { botName } from '../online/bots'
+
 /**
  * The only decision a seat makes over the wire. Everything else a turn is made
  * of — the die landing, the token walking, a snake or a ladder carrying it away,
@@ -6,3 +8,9 @@
  * why an online table can never sit deadlocked on one.
  */
 export type WildriseOnlineAction = { kind: 'roll' }
+
+/**
+ * The names the room will give the seats it plays at a solo table, so the setup
+ * can introduce the companions by the names they will actually answer to.
+ */
+export const companionNames = (count: number) => Array.from({ length: count }, (_, i) => botName(i))

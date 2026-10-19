@@ -122,9 +122,7 @@ describe('wildrise adapter pacing', () => {
   it('prices a walk by the squares it crosses, not by the turn', () => {
     const short = settle(act(start(), 'p0', { kind: 'roll' }, 0)).state // a one
     const long = settle(act(start(), 'p0', { kind: 'roll' }, 0.99)).state // a six
-    expect(wildriseAdapter.pending(long)!.afterMs).toBeGreaterThan(
-      wildriseAdapter.pending(short)!.afterMs,
-    )
+    expect(wildriseAdapter.pending(long)!.afterMs).toBeGreaterThan(wildriseAdapter.pending(short)!.afterMs)
   })
 
   it('paces a turn that never leaves its square', () => {
@@ -199,13 +197,39 @@ describe('bots', () => {
 
   it('rolls for the bot whose turn it is', () => {
     const state = wildriseAdapter.create(
-      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      [
+        { id: 'p0', name: 'Ann' },
+        { id: 'p1', name: 'Cleo' },
+      ],
       {},
       ctx,
     ) as GameState
     const ready = { ...state, phase: 'ready' as const, currentPlayer: 1 }
     const after = wildriseAdapter.bots!.decide(ready, 'p1', seats, 'casual', ctx)
     expect(after).not.toBe(ready)
+  })
+
+  it('plays a fast bot’s beats at its own pace, on the server and every board alike', () => {
+    const state = wildriseAdapter.create(
+      [
+        { id: 'p0', name: 'Ann' },
+        { id: 'p1', name: 'Cleo' },
+      ],
+      {},
+      ctx,
+    ) as GameState
+    const ready = { ...state, phase: 'ready' as const, currentPlayer: 1 }
+    const fast = wildriseAdapter.bots!.decide(ready, 'p1', seats, 'fast', ctx) as GameState
+    const casual = wildriseAdapter.bots!.decide(ready, 'p1', seats, 'casual', ctx) as GameState
+    expect(fast.players[1].control).toBe('fast')
+    expect(wildriseAdapter.pending(fast)!.afterMs).toBeLessThan(wildriseAdapter.pending(casual)!.afterMs)
+    // Only the bot is paced; the person across the table keeps theirs.
+    expect(fast.players[0].control).toBe('human')
+    // Standing in for an absent person is not a bot taking over their pace.
+    const away = { ...state, phase: 'ready' as const, currentPlayer: 0 }
+    expect((wildriseAdapter.resolveAbsent(away, 'p0', seats, ctx) as GameState).players[0].control).toBe(
+      'human',
+    )
   })
 
   it('sets its pace from the skill, because a race has no skill to have', () => {

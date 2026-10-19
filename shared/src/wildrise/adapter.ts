@@ -23,6 +23,22 @@ const rollDie = (ctx: Ctx) => Math.min(6, Math.max(1, Math.floor(ctx.random() * 
 const seatedPlayer = (state: GameState, seats: SeatId[]) => seats[state.currentPlayer]
 
 /**
+ * A bot's skill is the pace its turns play at, and the pace lives on the player:
+ * `phaseDuration` prices every beat from the control of whoever is on turn, on
+ * the server and in each browser alike. The room only tells the adapter a seat's
+ * skill when that bot rolls, so the roll is where it is written down.
+ */
+function pace(state: GameState, skill: string): GameState {
+  const control = skill === 'fast' || skill === 'fun' ? skill : 'casual'
+  const player = state.players[state.currentPlayer]
+  if (player.control === control) return state
+  return {
+    ...state,
+    players: state.players.map((p, i) => (i === state.currentPlayer ? { ...p, control } : p)),
+  }
+}
+
+/**
  * The one thing a table may decide. The board's shape — how many snakes, where
  * they start — is the board's, so it is not on offer; whether the last square
  * has to be landed on exactly is the one rule players actually argue about.
@@ -109,19 +125,22 @@ export const wildriseAdapter: GameAdapter<GameState, WildriseOnlineAction> = {
    * this ever has to settle.
    */
   resolveAbsent: (state, seat, seats, ctx) =>
-    wildriseAdapter.bots!.decide(state, seat, seats, 'casual', ctx),
+    state.phase !== 'ready' || seatedPlayer(state, seats) !== seat
+      ? state
+      : gameReducer(state, { type: 'ROLL', value: rollDie(ctx) }),
 
   /**
    * A seat the room plays. There is nothing to be good at on this board, so the
-   * three "skills" are how quickly the companion takes its turn and no more.
+   * three "skills" are how quickly the companion takes its turn — the think
+   * before the roll, and (through `pace`) the beats that follow it — and no more.
    */
   bots: {
     skills: ['casual', 'fast', 'fun'],
     name: (_seat, index) => botName(index),
     thinkMs: (skill) => (skill === 'fast' ? 450 : skill === 'fun' ? 1100 : 900),
-    decide(state, seat, seats, _skill, ctx) {
+    decide(state, seat, seats, skill, ctx) {
       if (state.phase !== 'ready' || seatedPlayer(state, seats) !== seat) return state
-      return gameReducer(state, { type: 'ROLL', value: rollDie(ctx) })
+      return gameReducer(pace(state, skill), { type: 'ROLL', value: rollDie(ctx) })
     },
   },
 
