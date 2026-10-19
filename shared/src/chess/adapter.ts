@@ -2,22 +2,56 @@ import { botName } from '../online/bots'
 import type { GameAdapter } from '../online/adapter'
 import type { SeatId } from '../protocol/types'
 import { chooseMove } from './ai'
-import { createGame, playMove, resign } from './engine'
-import type { ChessAction, Color, Difficulty, GameState, PromotionPiece } from './types'
+import { clockStarted, createGame, playMove, resign, tickClock } from './engine'
+import { TIME_CONTROLS } from './types'
+import type { ChessAction, Color, Difficulty, GameState, PromotionPiece, TimeControlId } from './types'
 
 const SEATS: SeatId[] = ['w', 'b']
 const PROMOTIONS: PromotionPiece[] = ['q', 'r', 'b', 'n']
 
 /**
  * `GameOptions` has no online-shaped variant, so an online game borrows the
- * local one: white is nominally "the human", the difficulty is inert (no AI
- * ever runs on a server game) and there is no clock. Left as-is deliberately —
- * reshaping `GameOptions` would churn every local and AI code path too.
+ * local one: white is nominally "the human" and the difficulty is inert (no AI
+ * ever runs on a server game). Left as-is deliberately — reshaping
+ * `GameOptions` would churn every local and AI code path too. The clock is the
+ * room's: whatever time control it was created with.
  */
 const ONLINE_OPTIONS = { mode: 'online', human: 'w', difficulty: 'medium', clock: 0 } as const
 
 /** Seats are `'w' | 'b'`, which the room only ever sources from `seatIds()`. */
 const color = (seat: SeatId): Color => seat as Color
+
+/** Room options as `validateOptions` left them: a known time control, or nothing (untimed). */
+interface ChessOptions {
+  timeControl?: TimeControlId
+}
+
+function fresh(options: unknown, now: number): GameState {
+  const control = TIME_CONTROLS.find((c) => c.id === (options as ChessOptions | null)?.timeControl)
+  return createGame(
+    { ...ONLINE_OPTIONS, clock: control?.minutes ?? 0, increment: control?.increment ?? 0 },
+    undefined,
+    now,
+  )
+}
+
+/**
+ * Both clocks wait for each side's first move (`clockStarted`) — and, the
+ * reason it matters here, so a bot's colour is known before a clock ever runs
+ * (see `pending`).
+ */
+const started = clockStarted
+
+/** A move by the clock's rules: free until both sides have moved, flagged if it came too late. */
+function timedMove(
+  state: GameState,
+  from: string,
+  to: string,
+  promotion: PromotionPiece | undefined,
+  now: number,
+) {
+  return playMove(started(state) ? state : { ...state, clockAt: now }, from, to, promotion, now)
+}
 
 export const chessAdapter: GameAdapter<GameState, ChessAction> = {
   id: 'chess',
@@ -25,7 +59,10 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
   maxSeats: 2,
   requireFull: true,
   seatIds: () => [...SEATS],
-  validateOptions: () => ({}),
+  validateOptions(raw): ChessOptions {
+    const id = (raw as ChessOptions | null)?.timeControl
+    return id !== 'none' && TIME_CONTROLS.some((c) => c.id === id) ? { timeControl: id } : {}
+  },
 
   validateAction(raw) {
     if (!raw || typeof raw !== 'object') return null
@@ -43,12 +80,16 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
     }
   },
 
-  create: (_seats, _options, ctx) => createGame(ONLINE_OPTIONS, undefined, ctx.now),
+  create: (_seats, options, ctx) => fresh(options, ctx.now),
 
   apply(state, seat, _seats, action, ctx) {
-    if (action.kind === 'resign') return { state: resign(state, ctx.now, color(seat)) }
+    if (action.kind === 'resign')
+      return { state: resign(started(state) ? state : { ...state, clockAt: ctx.now }, ctx.now, color(seat)) }
     if (state.turn !== color(seat)) return { error: 'NOT_YOUR_TURN', message: 'It is not your turn.' }
-    const next = playMove(state, action.from, action.to, action.promotion, ctx.now)
+    const next = timedMove(state, action.from, action.to, action.promotion, ctx.now)
+    // A move that arrives after its clock ran out is the flag falling, a beat
+    // before the room's own timer would have said so.
+    if (next.status === 'timeout') return { state: next }
     // `playMove` refuses by handing back a game with no new move on it. A
     // pending promotion is the one refusal the player can fix themselves.
     if (next.history.length === state.history.length)
@@ -58,8 +99,23 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
     return { state: next }
   },
 
-  /** Chess has no timed presentation phases: every state waits on a person. */
-  pending: () => null,
+  /**
+   * Chess has no presentation phases; the one thing it times is the clock. While
+   * a person's clock runs, the room holds a deadline at the moment it would run
+   * out, and the flag falls there unless a move stops it first.
+   *
+   * Never on a bot's turn. A pending deadline takes the room's one timer, which
+   * is also the timer that plays a bot — so a bot's turn held here would never
+   * be played, and the bot would lose on time without having moved. A bot is
+   * learned from its first move (`decide` notes its colour) and both clocks
+   * wait for both first moves, so by the time a clock runs the bot is known.
+   * Its clock still runs: it is charged for its real thinking time on the move.
+   */
+  pending(state) {
+    if (!state.options.clock || state.status !== 'playing' || !started(state)) return null
+    if (state.bots?.includes(state.turn)) return null
+    return { afterMs: state.clocks[state.turn], resolve: (s, ctx) => tickClock(s, ctx.now) }
+  },
   /** Both players see the whole board. */
   view: (state) => state,
   isFinished: (state) => state.status !== 'playing',
@@ -90,12 +146,20 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
       if (!move) return state
       // Through the engine, not `apply`: this is the room moving a piece, not a
       // seat asking whether it may.
-      return playMove(state, move.from as never, move.to as never, move.promotion as never, ctx.now)
+      const played = timedMove(
+        state,
+        move.from,
+        move.to,
+        move.promotion as PromotionPiece | undefined,
+        ctx.now,
+      )
+      const bots = state.bots ?? []
+      return bots.includes(state.turn) ? played : { ...played, bots: [...bots, state.turn] }
     },
   },
 
-  rematch: (_prev, _seats, _options, ctx) => ({
-    state: createGame(ONLINE_OPTIONS, undefined, ctx.now),
+  rematch: (_prev, _seats, options, ctx) => ({
+    state: fresh(options, ctx.now),
     seatRemap: { w: 'b', b: 'w' },
   }),
 }

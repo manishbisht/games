@@ -16,8 +16,26 @@ export interface GameOptions {
   mode: 'local' | 'ai' | 'online'
   human: Color
   difficulty: Difficulty
-  clock: 0 | 10
+  /** Minutes on each side's clock; 0 plays untimed. */
+  clock: number
+  /** Seconds added to a side's clock after each of its moves (Fischer increment). */
+  increment?: number
 }
+/**
+ * The clocks an online room can be made with, as the id the create call sends
+ * (`options.timeControl`). A short list on purpose: one untimed, two blitz,
+ * two rapid — enough to choose a pace, too few to deliberate over.
+ */
+export const TIME_CONTROLS = [
+  { id: 'none', minutes: 0, increment: 0, label: 'No clock' },
+  { id: '3+2', minutes: 3, increment: 2, label: 'Blitz' },
+  { id: '5+0', minutes: 5, increment: 0, label: 'Blitz' },
+  { id: '10+0', minutes: 10, increment: 0, label: 'Rapid' },
+  { id: '15+10', minutes: 15, increment: 10, label: 'Rapid' },
+] as const
+export type TimeControlId = (typeof TIME_CONTROLS)[number]['id']
+/** Under this much time a clock reads as running low. */
+export const LOW_TIME_MS = 20000
 export interface Piece {
   id: string
   square: Square
@@ -53,8 +71,15 @@ export interface GameState {
   threats: Square[]
   status: GameStatus
   winner: Color | null
+  /** Each side's time left as of `clockAt`; the side to move has been spending since. */
   clocks: Record<Color, number>
   clockAt: number
+  /**
+   * Online only: the colours the room plays with a bot, learned from the bot's
+   * own first move. A bot's turn is never put on the room's flag timer — see
+   * `pending` in ./adapter.
+   */
+  bots?: Color[]
 }
 /** What one seat may ask the online game to do; see `./adapter`. */
 export type ChessAction =

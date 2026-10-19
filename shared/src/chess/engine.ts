@@ -91,6 +91,24 @@ function canPossiblyMate(game: GameState, color: Color): boolean {
   return true
 }
 
+/**
+ * An online clock waits for each side's first move, as it does on any online
+ * board, so nobody loses time to finding their seat. (A local clock — the
+ * engine's own `tickClock` — runs from the first move.)
+ */
+export const clockStarted = (game: Pick<GameState, 'history'>) => game.history.length >= 2
+
+/**
+ * What `color` has left at `now`: its stored time, less what it has spent since
+ * the clock last stopped if it is the side to move. Server and browser read a
+ * clock the same way, each with its own idea of `now` (the browser's is the
+ * server's, carried forward from the last snapshot).
+ */
+export function clockLeft(game: GameState, color: Color, now: number): number {
+  const running = game.options.clock > 0 && game.status === 'playing' && game.turn === color
+  return Math.max(0, game.clocks[color] - (running ? Math.max(0, now - game.clockAt) : 0))
+}
+
 export function tickClock(game: GameState, now = Date.now()): GameState {
   if (!game.options.clock || game.status !== 'playing') return game
   const elapsed = Math.max(0, now - game.clockAt)
@@ -139,6 +157,7 @@ export function playMove(
     return { ...timed, promotion: { from: from as Square, to: to as Square, color: timed.turn } }
   }
   const move = chess.move({ from, to, promotion })
+  const bonus = timed.options.clock && timed.options.increment ? timed.options.increment * 1000 : 0
   const record: MoveRecord = {
     from: move.from,
     to: move.to,
@@ -156,6 +175,7 @@ export function playMove(
     {
       ...timed,
       promotion: null,
+      clocks: bonus ? { ...timed.clocks, [move.color]: timed.clocks[move.color] + bonus } : timed.clocks,
       clockAt: now,
       pieces: movedPieces(game.pieces, move),
       history: [...game.history, record],
