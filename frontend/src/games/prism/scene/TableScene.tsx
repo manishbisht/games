@@ -1,17 +1,35 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { createScene } from './createScene'
-import type { TableApi, TableState } from './createScene'
+import type { TableApi, TableHost, TableState } from './createScene'
 import { cardImage } from './artwork'
 
-export default forwardRef<Pick<TableApi, 'zoom'>, { state: TableState }>(function TableScene({ state }, ref) {
+/**
+ * The 3D table. Created and fed in layout effects, so the view it reports back
+ * (cards still in the air hidden from the hand, counts that wait for their
+ * card) is in place before the browser paints the snapshot that caused it.
+ */
+export default forwardRef<Pick<TableApi, 'zoom'>, { state: TableState; host: TableHost }>(function TableScene(
+  { state, host },
+  ref,
+) {
   const element = useRef<HTMLDivElement>(null),
     api = useRef<TableApi | null>(null),
-    initial = useRef(state)
+    initial = useRef(state),
+    latestHost = useRef(host)
   const [fallback, setFallback] = useState(false)
   useImperativeHandle(ref, () => ({ zoom: (n) => api.current?.zoom(n) }), [])
-  useEffect(() => {
+  useLayoutEffect(() => {
+    latestHost.current = host
+  })
+  useLayoutEffect(() => {
+    // The scene outlives renders; it always speaks to the newest host.
+    const relay: TableHost = {
+      view: (view) => latestHost.current.view(view),
+      slot: (id) => latestHost.current.slot(id),
+      cue: (cue) => latestHost.current.cue(cue),
+    }
     try {
-      api.current = createScene(element.current!, initial.current)
+      api.current = createScene(element.current!, initial.current, relay)
     } catch {
       setFallback(true)
     }
@@ -20,7 +38,7 @@ export default forwardRef<Pick<TableApi, 'zoom'>, { state: TableState }>(functio
       api.current = null
     }
   }, [])
-  useEffect(() => {
+  useLayoutEffect(() => {
     api.current?.update(state)
   }, [state])
   return (

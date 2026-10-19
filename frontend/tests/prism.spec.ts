@@ -84,14 +84,20 @@ test('mobile supports four players, hand scrolling, AI turns and touch-size cont
   await expect(page.locator('.pr-card')).toHaveCount(7)
   await page.screenshot({ path: 'test-results/prism-mobile-game.png', fullPage: true })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  const legal = page.locator('.pr-card:enabled')
+  // The deal plays out before the hand can be played; the table says when it is done.
+  await expect(page.locator('.pr-arena[aria-busy="true"]')).toHaveCount(0, { timeout: 15000 })
+  const legal = page.locator('.pr-card.pr-playable')
   if (await legal.count()) {
     await legal.first().focus()
     await page.keyboard.press('Enter')
     await page.getByRole('button', { name: 'Play card', exact: true }).click()
     if (await page.getByRole('dialog', { name: 'Choose a color' }).count())
       await page.getByRole('button', { name: 'Choose blue', exact: true }).click()
-  } else await page.getByRole('button', { name: 'Draw card', exact: true }).click()
+  } else {
+    await page.getByRole('button', { name: 'Draw card', exact: true }).click()
+    await expect(page.locator('.pr-card')).toHaveCount(8)
+    await expect(page.locator('.pr-arena[aria-busy="true"]')).toHaveCount(0)
+  }
   if (await page.getByRole('button', { name: 'Keep & pass', exact: true }).count())
     await page.getByRole('button', { name: 'Keep & pass', exact: true }).click()
   await expect(page.locator('.pr-opponent.pr-current')).toBeVisible()

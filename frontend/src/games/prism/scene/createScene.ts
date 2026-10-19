@@ -1,370 +1,1078 @@
 import * as THREE from 'three'
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import type { Card, GameState } from '@games/shared/prism/types'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import type { Card, Color, GameEvent, GameState } from '@games/shared/prism/types'
 import { COLOR_HEX } from '@games/shared/prism/types'
-import { cardArtwork } from './artwork'
+import { createStage } from '../../../motion/stage'
+import { createCameraRig } from '../../../motion/camera'
+import { createParticles } from '../../../motion/particles'
+import { createQueue, createTweens } from '../../../motion/tween'
+import type { Beat } from '../../../motion/tween'
+import { clamp01, damp, hash01, hashString, inOutCubic, lerp, outCubic, smooth } from '../../../motion/ease'
+import { reducedMotion } from '../../../motion/preference'
+import { CARD_W, copyPose, createCards, FLIP, pose } from './cards'
+import type { CardObject, Pose } from './cards'
+import { createTable, DECK, FELT_Y, PILE } from './table'
 
 export interface TableState {
   game: GameState
   viewer: number
   menu: boolean
-  reducedMotion: boolean
   /**
    * Nobody is holding the near seat: its cards belong on the felt like everyone
    * else's rather than in a hand area this viewer does not have.
    */
   watching?: boolean
 }
+
+/** Where a card of the viewer's DOM hand sits on screen: its centre in client pixels. */
+export interface HandSlot {
+  x: number
+  y: number
+  width: number
+  /** The card's own tilt in the fan, in degrees clockwise. */
+  angle: number
+}
+
+export type SoundKind = 'play' | 'draw' | 'effect' | 'call' | 'win' | 'shuffle'
+/** Moments the page around the table plays along with, at the instant the table shows them. */
+export type Cue =
+  | { kind: 'sound'; sound: SoundKind }
+  | { kind: 'skip'; player: number }
+  | { kind: 'penalty'; player: number; count: number; landed: number }
+  | { kind: 'reverse'; direction: 1 | -1 }
+  | { kind: 'wild'; color: Color }
+  | { kind: 'call'; player: number }
+
+/**
+ * What the table is showing, which lags the room on purpose: a hand's count
+ * drops when its card leaves and rises when a drawn one lands, the pile turns
+ * over when the card arrives, and `game` — whose turn it is, what the prompts
+ * say — only moves on once everything before it has been seen.
+ */
+export interface TableView {
+  game: GameState
+  sequence: number
+  counts: number[]
+  deck: number
+  top: Card | null
+  color: Color
+  direction: 1 | -1
+  /** The viewer's own cards still in the air: dealt or drawn, not yet in the hand. */
+  arriving: string[]
+  dealing: boolean
+  busy: boolean
+}
+
+export interface TableHost {
+  view(view: TableView): void
+  /** Where a card of the viewer's hand is — or was, just before it was played. */
+  slot(cardId: string): HandSlot | null
+  cue(cue: Cue): void
+}
+
 export interface TableApi {
   update: (state: TableState) => void
   zoom: (amount: number) => void
   dispose: () => void
 }
-export function createScene(container: HTMLElement, initial: TableState): TableApi {
-  const scene = new THREE.Scene()
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' })
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75))
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 0.9
-  renderer.domElement.setAttribute('aria-hidden', 'true')
-  container.appendChild(renderer.domElement)
-  const pmrem = new THREE.PMREMGenerator(renderer)
-  const room = new RoomEnvironment()
-  const environment = pmrem.fromScene(room, 0.04)
-  scene.environment = environment.texture
-  scene.environmentIntensity = 0.28
-  pmrem.dispose()
-  room.dispose()
+
+const MAX_FAN = 11,
+  MAX_PILE = 5,
+  MAX_DECK = 12
+const deckLayers = (cards: number) => Math.min(MAX_DECK, Math.ceil(cards / 6))
+const FOUR = ['#e46051', '#e9b849', '#53a886', '#548cce']
+const X = new THREE.Vector3(1, 0, 0),
+  Y = new THREE.Vector3(0, 1, 0),
+  Z = new THREE.Vector3(0, 0, 1)
+/** Turns a card lying flat to face a camera that looks along its own -z. */
+const FACE = new THREE.Quaternion().setFromAxisAngle(X, Math.PI / 2)
+/** How far in front of the camera a card in the DOM hand is placed: in front of everything on the table. */
+const HAND_DEPTH = 7
+
+function fromGame(game: GameState): TableView {
+  return {
+    game,
+    sequence: game.sequence,
+    counts: game.players.map((p) => p.hand.length),
+    deck: game.drawPile.length,
+    top: game.discardPile.at(-1) ?? null,
+    color: game.activeColor,
+    direction: game.direction,
+    arriving: [],
+    dealing: false,
+    busy: false,
+  }
+}
+
+/** The table's view of a snapshot it has fully shown. */
+export const tableView = fromGame
+
+/** A round that has only just been dealt: nothing has been played or drawn yet. */
+const freshRound = (game: GameState) =>
+  game.status === 'playing' &&
+  game.discardPile.length === 1 &&
+  !game.events.some((e) => e.kind === 'play' || e.kind === 'draw')
+
+export function createScene(container: HTMLElement, initial: TableState, host: TableHost): TableApi {
+  const stage = createStage(container, {
+    exposure: 0.9,
+    environmentIntensity: 0.28,
+    powerPreference: 'low-power',
+  })
+  const { scene, renderer } = stage
   const camera = new THREE.OrthographicCamera(-10, 10, 7, -7, 0.1, 70)
   camera.position.set(0, 13, 15)
   camera.lookAt(0, 0, 0)
-  scene.add(new THREE.HemisphereLight('#fff4df', '#153831', 1.3))
-  const key = new THREE.DirectionalLight('#fff0d9', 2)
-  key.position.set(-6, 14, 8)
-  key.castShadow = true
-  key.shadow.mapSize.set(2048, 2048)
-  Object.assign(key.shadow.camera, { left: -12, right: 12, top: 9, bottom: -9, near: 1, far: 40 })
-  key.shadow.bias = -0.0004
-  key.shadow.normalBias = 0.035
-  key.shadow.radius = 5
-  scene.add(key)
-  const rimLight = new THREE.DirectionalLight('#a8d9ce', 1.2)
-  rimLight.position.set(6, 5, -8)
-  scene.add(rimLight)
-  const materials = new Set<THREE.Material>(),
-    geometries = new Set<THREE.BufferGeometry>(),
-    textures = new Map<string, THREE.Texture>()
-  function mesh(geometry: THREE.BufferGeometry, material: THREE.Material) {
-    geometries.add(geometry)
-    materials.add(material)
-    return new THREE.Mesh(geometry, material)
-  }
-  const shadowFloor = mesh(
-    new THREE.PlaneGeometry(80, 80),
-    new THREE.ShadowMaterial({ color: '#000000', opacity: 0.27 }),
-  )
-  shadowFloor.rotation.x = -Math.PI / 2
-  shadowFloor.position.y = -0.7
-  shadowFloor.receiveShadow = true
-  scene.add(shadowFloor)
-  const noise = document.createElement('canvas')
-  noise.width = noise.height = 256
-  const ctx = noise.getContext('2d')!
-  const pixels = ctx.createImageData(256, 256)
-  let seed = 913
-  for (let i = 0; i < pixels.data.length; i += 4) {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-    const n = (seed / 4294967296) * 32
-    pixels.data[i] = 80 + n
-    pixels.data[i + 1] = 100 + n
-    pixels.data[i + 2] = 85 + n
-    pixels.data[i + 3] = 255
-  }
-  ctx.putImageData(pixels, 0, 0)
-  const felt = new THREE.CanvasTexture(noise)
-  felt.wrapS = felt.wrapT = THREE.RepeatWrapping
-  felt.repeat.set(15, 10)
-  textures.set('felt', felt)
-  function oval(
-    rx: number,
-    rz: number,
-    height: number,
-    y: number,
-    color: string,
-    roughness: number,
-    map?: THREE.Texture,
-  ) {
-    const obj = mesh(
-      new THREE.CylinderGeometry(1, 1, height, 128),
-      new THREE.MeshStandardMaterial({
-        color,
-        roughness,
-        map: map ?? null,
-        bumpMap: map ?? null,
-        bumpScale: 0.016,
-      }),
-    )
-    obj.scale.set(rx, 1, rz)
-    obj.position.y = y
-    obj.receiveShadow = true
-    obj.castShadow = true
-    scene.add(obj)
-  }
-  oval(9.25, 5.15, 0.35, -0.27, '#111e1b', 0.52)
-  oval(9.1, 5.02, 0.16, -0.05, '#344139', 0.65)
-  oval(8.79, 4.73, 0.09, 0.065, '#427262', 0.96, felt)
-  function ellipse(rx: number, rz: number, color: string, y: number, opacity: number) {
-    const points = Array.from(
-      { length: 161 },
-      (_, i) =>
-        new THREE.Vector3(Math.cos((i / 160) * Math.PI * 2) * rx, y, Math.sin((i / 160) * Math.PI * 2) * rz),
-    )
-    const geometry = new THREE.BufferGeometry().setFromPoints(points)
-    geometries.add(geometry)
-    const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity })
-    materials.add(material)
-    const line = new THREE.LineLoop(geometry, material)
-    scene.add(line)
-  }
-  ellipse(8.87, 4.81, '#d8b778', 0.122, 0.72)
-  ellipse(8.46, 4.4, '#b7c2a4', 0.117, 0.24)
-  ellipse(8.4, 4.34, '#b7c2a4', 0.117, 0.1)
-  const inkCanvas = document.createElement('canvas')
-  inkCanvas.width = 1024
-  inkCanvas.height = 256
-  const ink = inkCanvas.getContext('2d')!
-  ink.textAlign = 'center'
-  ink.fillStyle = '#b8c5a5'
-  ink.font = '500 56px Georgia, serif'
-  ink.fillText('P  R  I  S  M', 512, 100)
-  ink.font = '400 16px Arial, sans-serif'
-  ink.fillText('A   L I T T L E   C O L O R .   A   L I T T L E   C H A O S .', 512, 147)
-  const inkTexture = new THREE.CanvasTexture(inkCanvas)
-  textures.set('ink', inkTexture)
-  const logo = mesh(
-    new THREE.PlaneGeometry(4.8, 1.2),
-    new THREE.MeshBasicMaterial({ map: inkTexture, transparent: true, opacity: 0.28, depthWrite: false }),
-  )
-  logo.rotation.x = -Math.PI / 2
-  logo.position.set(0, 0.12, -1.8)
-  scene.add(logo)
-  const cards = new THREE.Group()
-  scene.add(cards)
-  const flyovers = new THREE.Group()
-  scene.add(flyovers)
-  const bodyGeometry = new RoundedBoxGeometry(1.36, 0.044, 2.04, 3, 0.065)
-  geometries.add(bodyGeometry)
-  const faceGeometry = new THREE.PlaneGeometry(1.36, 2.04)
-  geometries.add(faceGeometry)
-  const edgeMaterial = new THREE.MeshStandardMaterial({ color: '#efeadb', roughness: 0.72 })
-  materials.add(edgeMaterial)
-  const cardMaterials = new Map<string, THREE.MeshStandardMaterial>()
-  function makeCard(card?: Card) {
-    const key = card ? `${card.color}-${card.value}` : 'back'
-    let material = cardMaterials.get(key)
-    if (!material) {
-      const texture = new THREE.CanvasTexture(cardArtwork(card))
-      texture.colorSpace = THREE.SRGBColorSpace
-      texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
-      textures.set(key, texture)
-      material = new THREE.MeshStandardMaterial({
-        map: texture,
-        roughness: 0.5,
-        metalness: 0.02,
-        transparent: true,
-      })
-      cardMaterials.set(key, material)
-      materials.add(material)
-    }
-    const group = new THREE.Group()
-    const body = new THREE.Mesh(bodyGeometry, edgeMaterial)
-    body.castShadow = true
-    body.receiveShadow = true
-    const face = new THREE.Mesh(faceGeometry, material)
-    face.rotation.x = -Math.PI / 2
-    face.position.y = 0.024
-    face.receiveShadow = true
-    group.add(body, face)
-    return group
-  }
-  let state = initial,
-    sequence = initial.game.sequence,
-    currentRound = initial.game.round,
-    frame = 0,
-    targetZoom = 1,
-    needsRender = true
-  const movers: {
-    object: THREE.Group
-    from: THREE.Vector3
-    to: THREE.Vector3
-    start: number
-    duration: number
-    rotation: number
-  }[] = []
-  const deckPosition = new THREE.Vector3(-1.15, 0.37, 0.45),
-    discardPosition = new THREE.Vector3(1.05, 0.2, 0.45)
-  function seatPosition(player: number) {
-    const seat = (player - state.viewer + state.game.players.length) % state.game.players.length
-    if (seat === 0) return new THREE.Vector3(0, 0.23, 4.7)
-    if (state.game.players.length === 2 || (state.game.players.length === 4 && seat === 2))
-      return new THREE.Vector3(0, 0.22, -3)
-    return new THREE.Vector3(seat === 1 ? -6.1 : 6.1, 0.22, -0.1)
-  }
-  function fly(from: THREE.Vector3, to: THREE.Vector3, delay = 0, card?: Card) {
-    if (state.reducedMotion) return
-    const object = makeCard(card)
-    object.position.copy(from)
-    object.scale.setScalar(0.82)
-    flyovers.add(object)
-    movers.push({
-      object,
-      from: from.clone(),
-      to: to.clone(),
-      start: performance.now() + delay,
-      duration: 500,
-      rotation: 0.14,
-    })
-  }
-  function deal() {
-    for (let i = 0; i < 7; i++)
-      state.game.players.forEach((p) => fly(deckPosition, seatPosition(p.id), i * 95 + p.id * 35))
-  }
-  const colorMaterial = new THREE.MeshStandardMaterial({
-    color: COLOR_HEX[state.game.activeColor],
-    emissive: COLOR_HEX[state.game.activeColor],
-    emissiveIntensity: 0.22,
-    roughness: 0.4,
-    metalness: 0.35,
-  })
-  materials.add(colorMaterial)
-  const colorToken = mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.08, 40), colorMaterial)
-  colorToken.position.set(2.6, 0.2, 0.6)
-  colorToken.castShadow = true
-  scene.add(colorToken)
-  function sync() {
-    cards.clear()
-    for (let i = 0; i < Math.min(12, Math.ceil(state.game.drawPile.length / 6)); i++) {
-      const object = makeCard()
-      object.position.copy(deckPosition)
-      object.position.y = 0.16 + i * 0.023
-      object.rotation.y = ((i % 3) - 1) * 0.009
-      cards.add(object)
-    }
-    state.game.discardPile.slice(-4).forEach((card, i, arr) => {
-      const object = makeCard(card)
-      object.position.copy(discardPosition)
-      object.position.y = 0.16 + i * 0.03
-      object.rotation.y = i === arr.length - 1 ? -0.11 : i % 2 ? 0.14 : -0.24
-      cards.add(object)
-    })
-    state.game.players.forEach((p) => {
-      // The viewer's own hand is dealt into the DOM instead — unless there is no
-      // viewer, in which case the near seat is just another player's.
-      if (p.id === state.viewer && !state.menu && !state.watching) return
-      const center = seatPosition(p.id),
-        count = Math.min(p.hand.length, 11)
-      const rotation = center.x < -1 ? Math.PI / 2 : center.x > 1 ? -Math.PI / 2 : center.z < 0 ? Math.PI : 0
-      for (let i = 0; i < count; i++) {
-        const object = makeCard(state.menu && p.id === state.viewer ? p.hand[i] : undefined)
-        const offset = (i - (count - 1) / 2) * 0.31
-        object.position.copy(center)
-        object.position.x += Math.cos(rotation) * offset
-        object.position.z -= Math.sin(rotation) * offset
-        object.position.y += i * 0.014
-        object.rotation.y = rotation + (i - (count - 1) / 2) * -0.045
-        object.scale.setScalar(0.8)
-        cards.add(object)
-      }
-    })
-    colorMaterial.color.set(COLOR_HEX[state.game.activeColor])
-    colorMaterial.emissive.set(COLOR_HEX[state.game.activeColor])
-    needsRender = true
-  }
-  function resize() {
-    const { width, height } = container.getBoundingClientRect()
-    if (!width || !height) return
-    renderer.setSize(width, height)
-    const aspect = width / height
-    const span = width < 650 ? 6.8 : Math.max(5.8, 9.7 / aspect)
+  stage.setCamera(camera)
+  // The table has no orbit of its own; the rig only needs a target to hold.
+  const controls = new OrbitControls(camera)
+  const rig = createCameraRig(camera, controls)
+  stage.onResize((width, height) => {
+    const aspect = width / height,
+      span = width < 650 ? 6.8 : Math.max(5.8, 9.7 / aspect)
     camera.left = -span * aspect
     camera.right = span * aspect
     camera.top = span
     camera.bottom = -span
     camera.updateProjectionMatrix()
-    needsRender = true
+  })
+
+  const tweens = createTweens(),
+    queue = createQueue({ catchUpAfter: 8, catchUpSpeed: 2.6 })
+  const table = createTable(scene, tweens, initial.game.activeColor)
+  const particles = createParticles(scene, { max: 700, floor: FELT_Y + 0.02 })
+  const layer = new THREE.Group()
+  scene.add(layer)
+  const cards = createCards(renderer, layer)
+  const stopWarming = cards.warm()
+
+  let state = initial,
+    latest = initial.game,
+    restless = true,
+    clock = 0,
+    zoom = 1,
+    rosette = false,
+    thinker = -1,
+    thinkingSince = 0,
+    penalty: { player: number; count: number; landed: number } | null = null
+  const view = fromGame(latest)
+  const deck: CardObject[] = [],
+    pile: { object: CardObject; card: Card }[] = [],
+    fans: CardObject[][] = [],
+    inFlight: number[] = [],
+    lean: number[] = []
+
+  // Scratch values for the per-frame paths; nothing there allocates.
+  const ndc = new THREE.Vector3(),
+    turn = new THREE.Quaternion(),
+    twist = new THREE.Quaternion(),
+    scratch = pose()
+
+  const inDom = (player: number) => player === state.viewer && !state.menu && !state.watching
+  const faceUp = (player: number) => state.menu && player === state.viewer
+
+  function seat(player: number) {
+    const count = latest.players.length,
+      offset = (player - state.viewer + count) % count
+    if (offset === 0) return { x: 0, y: 0.23, z: 4.7, yaw: 0 }
+    if (count === 2 || (count === 4 && offset === 2)) return { x: 0, y: 0.22, z: -3, yaw: Math.PI }
+    return offset === 1
+      ? { x: -6.1, y: 0.22, z: -0.1, yaw: Math.PI / 2 }
+      : { x: 6.1, y: 0.22, z: -0.1, yaw: -Math.PI / 2 }
   }
-  const observer = new ResizeObserver(resize)
-  observer.observe(container)
-  resize()
-  sync()
-  function render(now: number) {
-    frame = requestAnimationFrame(render)
-    if (document.hidden) return
-    const cameraMoving = Math.abs(camera.zoom - targetZoom) > 0.001
-    if (cameraMoving) {
-      camera.zoom = THREE.MathUtils.lerp(camera.zoom, targetZoom, state.reducedMotion ? 1 : 0.12)
-      camera.updateProjectionMatrix()
+
+  /**
+   * A seat's fan. A player who is thinking leans in: the fan slides toward the
+   * pile, tips up a little and breathes, which fades after a few seconds so a
+   * long think does not keep the GPU awake.
+   */
+  function fanHome(player: number, i: number, count: number, out: Pose) {
+    const { x, y, z, yaw } = seat(player),
+      mid = (count - 1) / 2,
+      offset = (i - mid) * 0.31,
+      l = lean[player] ?? 0,
+      toward = l * 0.42,
+      breath =
+        player === thinker
+          ? Math.sin(clock * 0.0042 + i * 0.55) * 0.035 * l * clamp01(1 - (clock - thinkingSince) / 4000)
+          : 0
+    out.p.set(
+      x + Math.cos(yaw) * offset + Math.sin(yaw) * toward,
+      y + i * 0.014 + l * 0.1 + breath,
+      z - Math.sin(yaw) * offset - Math.cos(yaw) * toward,
+    )
+    out.q.setFromAxisAngle(Y, yaw + (i - mid) * -0.045)
+    if (l) out.q.multiply(turn.setFromAxisAngle(X, l * 0.16))
+    if (!faceUp(player)) out.q.multiply(FLIP)
+    out.s = 0.8
+    return out
+  }
+  function deckHome(i: number, out: Pose) {
+    out.p.set(DECK.x, 0.16 + i * 0.023, DECK.z)
+    out.q.setFromAxisAngle(Y, ((i % 3) - 1) * 0.009).multiply(FLIP)
+    out.s = 1
+    return out
+  }
+  /** Each card keeps its own small turn on the pile, from its id, so the pile never re-shuffles itself. */
+  function pileHome(card: Card, i: number, out: Pose) {
+    const h = hashString(card.id)
+    if (rosette) {
+      // The winning pile opens like a flower: each card turned a little further round.
+      const count = Math.max(pile.length, 1),
+        angle = count > 1 ? (i / (count - 1) - 0.5) * Math.PI * 0.85 : 0
+      out.p.set(PILE.x + Math.sin(angle) * 0.22, 0.16 + i * 0.03, PILE.z - Math.cos(angle) * 0.12)
+      out.q.setFromAxisAngle(Y, -angle)
+    } else {
+      out.p.set(PILE.x + (hash01(h) - 0.5) * 0.16, 0.16 + i * 0.03, PILE.z + (hash01(h + 1) - 0.5) * 0.12)
+      out.q.setFromAxisAngle(Y, (hash01(h + 2) - 0.5) * 0.62)
     }
-    for (let i = movers.length - 1; i >= 0; i--) {
-      const m = movers[i],
-        t = THREE.MathUtils.clamp((now - m.start) / m.duration, 0, 1),
-        ease = t * t * (3 - 2 * t)
-      m.object.visible = now >= m.start
-      m.object.position.lerpVectors(m.from, m.to, ease)
-      m.object.position.y += Math.sin(Math.PI * t) * 2
-      m.object.rotation.y = Math.sin(Math.PI * t) * m.rotation
-      m.object.rotation.z = Math.sin(Math.PI * t) * -0.22
-      if (t >= 1) {
-        flyovers.remove(m.object)
-        movers.splice(i, 1)
-      }
+    out.s = 1
+    return out
+  }
+  function nearPose(out: Pose) {
+    out.p.set(0, 1.1, 4.3)
+    out.q.identity()
+    out.s = 0.9
+    return out
+  }
+  /**
+   * The world pose that sits exactly over a card of the DOM hand: in front of
+   * the table, facing the camera, at the card's on-screen size and tilt.
+   */
+  function domPose(slot: HandSlot, out: Pose) {
+    const rect = stage.canvas.getBoundingClientRect()
+    if (!rect.width || !rect.height) return false
+    const depth = ((HAND_DEPTH - camera.near) / (camera.far - camera.near)) * 2 - 1
+    ndc.set(((slot.x - rect.left) / rect.width) * 2 - 1, -((slot.y - rect.top) / rect.height) * 2 + 1, depth)
+    out.p.copy(ndc).unproject(camera)
+    const perPixel = (camera.top - camera.bottom) / camera.zoom / rect.height
+    out.s = (slot.width * perPixel) / CARD_W
+    out.q
+      .copy(camera.quaternion)
+      .multiply(FACE)
+      .multiply(turn.setFromAxisAngle(Y, (-slot.angle * Math.PI) / 180))
+    return true
+  }
+
+  function layoutFan(player: number) {
+    const fan = fans[player]
+    if (!fan) return
+    fan.forEach((object, i) => fanHome(player, i, fan.length, object.home))
+    restless = true
+  }
+  function layoutPile() {
+    pile.forEach(({ object, card }, i) => pileHome(card, i, object.home))
+    restless = true
+  }
+  function layout() {
+    deck.forEach((object, i) => deckHome(i, object.home))
+    layoutPile()
+    fans.forEach((_, player) => layoutFan(player))
+  }
+
+  function syncDeck() {
+    const want = deckLayers(view.deck)
+    while (deck.length < want) deck.push(cards.acquire(undefined, deckHome(deck.length, scratch)))
+    while (deck.length > want) cards.release(deck.pop()!)
+  }
+  /** The top of the deck, lifted off to travel: the top layer itself when the deck gets thinner. */
+  function takeFromDeck() {
+    view.deck = Math.max(0, view.deck - 1)
+    if (deck.length > deckLayers(view.deck)) return deck.pop()!
+    return cards.acquire(undefined, deckHome(deck.length, scratch))
+  }
+  function syncFan(player: number, count = view.counts[player], game = latest) {
+    const fan = (fans[player] ??= [])
+    const want = inDom(player) ? 0 : Math.min(count, MAX_FAN),
+      hand = game.players[player]?.hand ?? []
+    while (fan.length > want) cards.release(fan.pop()!)
+    while (fan.length < want) {
+      const object = cards.acquire(faceUp(player) ? hand[fan.length] : undefined)
+      fan.push(object)
     }
-    if (needsRender || cameraMoving || movers.length) {
-      renderer.render(scene, camera)
-      needsRender = movers.length > 0
+    fan.forEach((object, i) => {
+      if (faceUp(player)) cards.face(object, hand[i])
+      fanHome(player, i, fan.length, object.home)
+    })
+    restless = true
+  }
+  function syncPile(discard: Card[]) {
+    const want = discard.slice(-MAX_PILE)
+    if (pile.length && pile.at(-1)!.card.id === want.at(-1)?.id) return
+    for (const { object } of pile.splice(0)) cards.release(object)
+    for (const card of want) pile.push({ object: cards.acquire(card), card })
+  }
+  function trimPile() {
+    while (pile.length > MAX_PILE) cards.release(pile.shift()!.object)
+  }
+  /** Everything at rest exactly where it belongs, without travelling there. */
+  function land() {
+    layout()
+    for (const object of [...deck, ...pile.map((p) => p.object), ...fans.flat()]) {
+      copyPose(object.current, object.home)
+      cards.place(object)
     }
   }
-  frame = requestAnimationFrame(render)
-  return {
-    update(next) {
-      const wasMenu = state.menu,
-        viewerChanged = state.viewer !== next.viewer
-      state = next
-      if ((wasMenu && !state.menu) || currentRound !== state.game.round) {
-        sequence = state.game.sequence
-        currentRound = state.game.round
-        deal()
-      }
-      if (!viewerChanged)
-        for (const event of state.game.events.filter((e) => e.id > sequence)) {
-          if (event.kind === 'play' && event.player !== undefined)
-            fly(seatPosition(event.player), discardPosition, 0, event.card)
-          if (event.kind === 'draw' && event.player !== undefined)
-            for (let i = 0; i < Math.min(event.count ?? 1, 10); i++)
-              fly(deckPosition, seatPosition(event.player), i * 80)
-          if (event.kind === 'shuffle') for (let i = 0; i < 5; i++) fly(discardPosition, deckPosition, i * 55)
-          if (event.kind === 'win')
-            state.game.players.forEach((p) => fly(seatPosition(p.id), discardPosition, p.id * 80))
+
+  function emit() {
+    host.view({
+      ...view,
+      counts: [...view.counts],
+      arriving: [...view.arriving],
+      busy: queue.busy || view.dealing,
+    })
+    stage.invalidate()
+  }
+  queue.onIdle(() => emit())
+
+  interface Flight {
+    flip?: boolean
+    lift?: number
+    height?: number
+    spin?: number
+    ms?: number
+    delay?: number
+    onLand?: () => void
+  }
+  /**
+   * Sends a card to `to` on a thrown arc: it peaks higher the further it goes,
+   * turns over in the air when `flip` says it changes sides, swells a little at
+   * the top, and lands exactly on the pose it will rest in — so nothing snaps
+   * when the flight hands over to the resting layout. `lift` raises it off a
+   * fan first, which is how a player is seen to pick a card.
+   */
+  function fly(object: CardObject, to: Pose, options: Flight = {}) {
+    const reduced = reducedMotion()
+    const a = copyPose(pose(), object.current),
+      b = copyPose(pose(), to)
+    const distance = a.p.distanceTo(b.p)
+    const ms = reduced ? 190 : (options.ms ?? THREE.MathUtils.clamp(330 + distance * 30, 350, 600))
+    const height = reduced ? 0.12 : (options.height ?? THREE.MathUtils.clamp(0.6 + distance * 0.2, 0.8, 2.6))
+    const lift = reduced ? 0 : (options.lift ?? 0),
+      lead = lift ? 0.2 : 0
+    const start = a.p.clone()
+    start.y += lift
+    const control = start.clone().lerp(b.p, 0.5)
+    control.y += height * 2
+    const from = options.flip ? a.q.clone().multiply(FLIP) : a.q
+    const spin = reduced ? 0 : (options.spin ?? 0),
+      out = object.current,
+      shell = object.group.children[0]
+    object.flying = true
+    // A card up by the camera would throw its shadow far across the page.
+    shell.castShadow = Math.max(a.p.y, b.p.y) < 3
+    tweens.add({
+      duration: ms,
+      delay: options.delay,
+      update: (_, raw) => {
+        if (raw < lead) {
+          const k = outCubic(raw / lead)
+          out.p.copy(a.p)
+          out.p.y += lift * k
+          out.q.copy(a.q).multiply(turn.setFromAxisAngle(X, -0.12 * k))
+          out.s = a.s * (1 + 0.05 * k)
+        } else {
+          const u = lead ? (raw - lead) / (1 - lead) : raw,
+            e = reduced ? smooth(u) : outCubic(u),
+            v = 1 - e
+          out.p.set(
+            v * v * start.x + 2 * v * e * control.x + e * e * b.p.x,
+            v * v * start.y + 2 * v * e * control.y + e * e * b.p.y,
+            v * v * start.z + 2 * v * e * control.z + e * e * b.p.z,
+          )
+          out.q.slerpQuaternions(from, b.q, smooth(clamp01((u - 0.04) / 0.8)))
+          if (options.flip)
+            out.q.multiply(turn.setFromAxisAngle(Z, Math.PI * (1 - inOutCubic(clamp01((u - 0.1) / 0.62)))))
+          if (spin) out.q.premultiply(twist.setFromAxisAngle(Y, Math.sin(Math.PI * u) * spin))
+          out.s = lerp(lift ? a.s * 1.05 : a.s, b.s, e) * (1 + (reduced ? 0 : 0.08) * Math.sin(Math.PI * u))
         }
-      sequence = state.game.sequence
-      sync()
+        cards.place(object)
+      },
+      done: () => {
+        copyPose(object.current, b)
+        copyPose(object.home, b)
+        object.flying = false
+        shell.castShadow = true
+        cards.place(object)
+        restless = true
+        options.onLand?.()
+      },
+    })
+    return ms + (options.delay ?? 0)
+  }
+
+  /** A short zoom-in and back, the camera's half of an impact. */
+  function punch(amount: number) {
+    if (rig.userControlled) return
+    rig.to({ zoom: zoom + amount }, 26)
+    tweens.add({ duration: 110, update: () => {}, done: () => rig.to({ zoom }, 6) })
+  }
+  const pileTop = () => new THREE.Vector3(PILE.x, 0.25 + pile.length * 0.03, PILE.z)
+
+  /** A card arrives on the pile: the felt ripples in its colour, the pile rattles, the token jumps. */
+  function impact(card: Card, object: CardObject) {
+    const reduced = reducedMotion(),
+      tone = card.isWild ? '#f6e7bf' : COLOR_HEX[card.color]
+    host.cue({ kind: 'sound', sound: 'play' })
+    table.ripple(PILE, tone, reduced ? { radius: 1.4, ms: 260, opacity: 0.45 } : {})
+    if (!card.isWild) table.recolor(card.color as Color, { squash: false, ms: reduced ? 160 : 380 })
+    if (reduced) return
+    table.squashToken(60)
+    object.wobble.velocity += 4
+    const under = pile.at(-2)?.object,
+      below = pile.at(-3)?.object
+    if (under) under.wobble.velocity -= 7
+    if (below) below.wobble.velocity += 3.5
+    restless = true
+    const origin = pileTop(),
+      action = typeof card.value !== 'number'
+    if (action) {
+      particles.burst({
+        origin,
+        kind: 'spark',
+        count: card.isWild ? 34 : 18,
+        colors: card.isWild ? FOUR : [tone, '#f4dda4'],
+        speed: 4.4,
+        spread: 0.95,
+        size: 0.8,
+      })
+      rig.shake(card.value === 'draw4' ? 0.1 : 0.05, 260)
+    }
+    punch(action ? 0.035 : 0.016)
+  }
+
+  /**
+   * One card to one seat, the way a deal or a draw sends it: lifted off the
+   * deck, and either into the DOM hand (turning face up on the way, so the
+   * viewer sees what they got) or onto the seat's fan, face down.
+   */
+  function deliver(player: number, id: string | undefined, { ms }: { ms?: number } = {}) {
+    const object = takeFromDeck()
+    host.cue({ kind: 'sound', sound: 'draw' })
+    if (inDom(player)) {
+      const card = id ? latest.players[player]?.hand.find((c) => c.id === id) : undefined
+      cards.face(object, card)
+      const to = pose(),
+        slot = id ? host.slot(id) : null
+      if (!(slot && domPose(slot, to))) nearPose(to)
+      emit()
+      return fly(object, to, {
+        flip: true,
+        height: 0.9,
+        ms,
+        onLand: () => {
+          if (id) view.arriving = view.arriving.filter((x) => x !== id)
+          view.counts[player] = (view.counts[player] ?? 0) + 1
+          penaltyLanded(player)
+          emit()
+          // The DOM card takes over on React's next commit; stay until it has.
+          tweens.add({ duration: 90, update: () => {}, done: () => cards.release(object) })
+        },
+      })
+    }
+    inFlight[player] = (inFlight[player] ?? 0) + 1
+    const slots = Math.min(view.counts[player] + inFlight[player], MAX_FAN)
+    emit()
+    return fly(object, fanHome(player, slots - 1, slots, pose()), {
+      ms,
+      spin: 0.25,
+      onLand: () => {
+        inFlight[player]--
+        view.counts[player]++
+        const fan = (fans[player] ??= [])
+        if (fan.length < MAX_FAN) fan.push(object)
+        else cards.release(object)
+        layoutFan(player)
+        if (penaltyLanded(player)) object.wobble.velocity += 3
+        emit()
+      },
+    })
+  }
+
+  /** Counts a penalty card home, for the "+4" that ticks up over the victim. */
+  function penaltyLanded(player: number) {
+    if (penalty?.player !== player) return false
+    penalty.landed++
+    host.cue({ kind: 'penalty', ...penalty })
+    if (penalty.landed >= penalty.count) penalty = null
+    return true
+  }
+
+  function play(player: number, card: Card, id: number) {
+    const own = inDom(player)
+    let object: CardObject
+    view.counts[player] = Math.max(0, (view.counts[player] ?? 1) - 1)
+    if (own) {
+      object = cards.acquire(card)
+      const slot = host.slot(card.id)
+      if (!(slot && domPose(slot, object.current))) nearPose(object.current)
+      copyPose(object.home, object.current)
+      cards.place(object)
+    } else {
+      const fan = (fans[player] ??= [])
+      if (fan.length > Math.min(view.counts[player], MAX_FAN)) {
+        object = fan.splice(Math.floor(hash01(id) * fan.length), 1)[0]
+      } else
+        object = cards.acquire(
+          undefined,
+          fanHome(player, Math.floor(fan.length / 2), fan.length + 1, scratch),
+        )
+      cards.face(object, card)
+      layoutFan(player)
+    }
+    const ms = fly(object, pileHome(card, pile.length, pose()), {
+      flip: !own,
+      lift: own ? 0 : 0.42,
+      height: own ? 0.45 : undefined,
+      spin: (hash01(id + 7) - 0.5) * 0.9,
+      onLand: () => {
+        pile.push({ object, card })
+        trimPile()
+        layoutPile()
+        view.top = card
+        if (!card.isWild) view.color = card.color as Color
+        impact(card, object)
+        emit()
+      },
+    })
+    emit()
+    return ms + (reducedMotion() ? 30 : 80)
+  }
+
+  function draw(player: number, count: number, ids: string[]) {
+    const reduced = reducedMotion(),
+      total = Math.min(count, 12),
+      stagger = reduced ? 45 : 115
+    let first = 0
+    for (let i = 0; i < total; i++) {
+      if (i === 0) first = deliver(player, ids[0])
+      else
+        tweens.add({ duration: 0, delay: i * stagger, update: () => {}, done: () => deliver(player, ids[i]) })
+    }
+    return (total - 1) * stagger + first + 40
+  }
+
+  /** The pile (all but its top card) folds back into the deck, face down, and the deck is riffled. */
+  function reshuffle(deckAfter: number) {
+    const reduced = reducedMotion()
+    const leaving = pile.splice(0, Math.max(0, pile.length - 1))
+    layoutPile()
+    host.cue({ kind: 'sound', sound: 'shuffle' })
+    let ms = 0
+    leaving.forEach(({ object }, i) => {
+      ms = Math.max(
+        ms,
+        fly(object, deckHome(deck.length + i, pose()), {
+          flip: true,
+          height: 1.1,
+          delay: i * 70,
+          onLand: () => cards.release(object),
+        }),
+      )
+    })
+    tweens.add({
+      duration: 0,
+      delay: ms,
+      update: () => {},
+      done: () => {
+        view.deck = deckAfter
+        syncDeck()
+        land()
+        if (!reduced) riffle()
+        emit()
+      },
+    })
+    return ms + (reduced ? 60 : 760)
+  }
+
+  /**
+   * A riffle: the deck splits into two halves that bow apart, then fall back
+   * together top card last, interleaving as they go.
+   */
+  function riffle(delay = 0) {
+    const ms = 720,
+      count = deck.length,
+      half = Math.ceil(count / 2)
+    tweens.add({
+      duration: ms,
+      delay,
+      start: () => deck.forEach((object) => (object.flying = true)),
+      update: (_, raw) => {
+        const apart = outCubic(clamp01(raw / 0.32))
+        deck.forEach((object, i) => {
+          const left = i < half,
+            j = left ? i : i - half,
+            back = inOutCubic(clamp01((raw - 0.36 - (count - i) * 0.016) / 0.36)),
+            k = apart * (1 - back)
+          deckHome(i, object.current)
+          object.current.p.x += (left ? -1 : 1) * 0.95 * k
+          object.current.p.y = lerp(object.current.p.y, 0.2 + j * 0.03, k)
+          object.current.q.multiply(turn.setFromAxisAngle(Z, (left ? 1 : -1) * 0.2 * k))
+          cards.place(object)
+        })
+      },
+      done: () =>
+        deck.forEach((object, i) => {
+          object.flying = false
+          deckHome(i, object.current)
+          deckHome(i, object.home)
+          cards.place(object)
+        }),
+    })
+    return ms + delay
+  }
+
+  function effect(event: GameEvent, rest: GameEvent[]) {
+    const reduced = reducedMotion(),
+      { text, player } = event
+    const chosen = event.color ?? (/chose (red|blue|green|yellow)/.exec(text)?.[1] as Color | undefined)
+    if (chosen) {
+      view.color = chosen
+      table.shockwave(chosen, reduced)
+      host.cue({ kind: 'wild', color: chosen })
+      host.cue({ kind: 'sound', sound: 'effect' })
+      if (!reduced) {
+        particles.burst({
+          origin: pileTop(),
+          kind: 'spark',
+          count: 26,
+          colors: [COLOR_HEX[chosen], '#fff3d0'],
+        })
+        punch(0.03)
+      }
+      emit()
+      return reduced ? 120 : 560
+    }
+    if (text.startsWith('Direction reversed')) {
+      view.direction = view.direction === 1 ? -1 : 1
+      table.reverse(view.direction, reduced)
+      host.cue({ kind: 'reverse', direction: view.direction })
+      host.cue({ kind: 'sound', sound: 'effect' })
+      emit()
+      return reduced ? 120 : 640
+    }
+    if (text.includes('was paused') && player !== undefined) {
+      host.cue({ kind: 'skip', player })
+      host.cue({ kind: 'sound', sound: 'effect' })
+      rattle(player, 6)
+      return reduced ? 150 : 600
+    }
+    const victim = text.includes('caught') ? rest.find((e) => e.kind === 'draw')?.player : player,
+      count = Number(/draws (\d+)|Take (\d+)\./.exec(text)?.slice(1).find(Boolean) ?? 0)
+    if (victim !== undefined && count) {
+      penalty = { player: victim, count, landed: 0 }
+      host.cue({ kind: 'penalty', ...penalty })
+      host.cue({ kind: 'sound', sound: 'effect' })
+      rattle(victim, 4)
+      return reduced ? 80 : 280
+    }
+    return 0
+  }
+  /** Jolts a seat's fan: the cards jump against each other. */
+  function rattle(player: number, strength: number) {
+    if (reducedMotion()) return
+    fans[player]?.forEach((object, i) => (object.wobble.velocity += (i % 2 ? -1 : 1) * strength))
+    restless = true
+  }
+
+  function call(player: number) {
+    host.cue({ kind: 'call', player })
+    host.cue({ kind: 'sound', sound: 'call' })
+    if (reducedMotion()) return 100
+    const { x, z } = inDom(player) ? { x: 0, z: 3.4 } : seat(player)
+    particles.burst({
+      origin: new THREE.Vector3(x, 0.6, z),
+      kind: 'spark',
+      count: 22,
+      colors: ['#f4dda4', '#fff6dc'],
+      speed: 3.6,
+    })
+    return 420
+  }
+
+  /**
+   * The round's last card: the pile lifts into a spiral and comes down as a
+   * rosette, and confetti goes up from the pile and the winner's seat.
+   */
+  function win(player: number) {
+    host.cue({ kind: 'sound', sound: 'win' })
+    if (reducedMotion()) return 300
+    const ms = 1400,
+      spinning = pile.map(({ object }) => object),
+      count = spinning.length,
+      starts = spinning.map((object) => copyPose(pose(), object.current))
+    rosette = true
+    const ends = pile.map(({ card }, i) => pileHome(card, i, pose()))
+    tweens.add({
+      duration: ms,
+      start: () => spinning.forEach((object) => (object.flying = true)),
+      update: (_, raw) => {
+        spinning.forEach((object, i) => {
+          const angle = (i / Math.max(count, 1)) * Math.PI * 2 + outCubic(raw) * Math.PI * 3,
+            up = Math.sin(Math.PI * clamp01(raw * 1.1)),
+            settle = smooth(clamp01((raw - 0.55) / 0.45)),
+            radius = 0.25 + up * 1.1,
+            out = object.current
+          out.p.set(
+            PILE.x + Math.cos(angle) * radius,
+            0.2 + up * (1.2 + i * 0.12),
+            PILE.z + Math.sin(angle) * radius,
+          )
+          out.p.lerp(ends[i].p, settle)
+          out.q.slerpQuaternions(starts[i].q, ends[i].q, settle)
+          if (settle < 1) out.q.multiply(turn.setFromAxisAngle(Y, (1 - settle) * angle))
+          out.s = 1 + up * 0.12
+          cards.place(object)
+        })
+      },
+      done: () =>
+        spinning.forEach((object, i) => {
+          object.flying = false
+          copyPose(object.current, ends[i])
+          copyPose(object.home, ends[i])
+          cards.place(object)
+        }),
+    })
+    const { x, z } = inDom(player) ? { x: 0, z: 3.6 } : seat(player)
+    tweens.add({
+      duration: 0,
+      delay: 380,
+      update: () => {},
+      done: () => {
+        particles.burst({
+          origin: pileTop().setY(1.2),
+          kind: 'confetti',
+          count: 150,
+          colors: FOUR,
+          speed: 7.5,
+        })
+        particles.burst({
+          origin: new THREE.Vector3(x, 0.8, z),
+          kind: 'confetti',
+          count: 70,
+          colors: FOUR,
+          speed: 6,
+        })
+        rig.shake(0.07, 320)
+        punch(0.05)
+      },
+    })
+    return ms + 120
+  }
+
+  /**
+   * The beats for a run of events, in the order they happened. Each beat holds
+   * the next back until what it shows has landed.
+   */
+  function beatsFor(events: GameEvent[], drawn: string[]): Beat[] {
+    const beats: Beat[] = []
+    events.forEach((event, index) => {
+      const { player } = event
+      if (event.kind === 'play' && player !== undefined && event.card) {
+        const card = event.card
+        beats.push({ label: 'play', run: () => play(player, card, event.id) })
+      } else if (event.kind === 'draw' && player !== undefined) {
+        const count = event.count ?? 1,
+          ids = inDom(player) ? drawn.splice(0, count) : []
+        beats.push({ label: 'draw', run: () => draw(player, count, ids) })
+      } else if (event.kind === 'shuffle') {
+        const after =
+          latest.drawPile.length +
+          events.slice(index + 1).reduce((sum, e) => sum + (e.kind === 'draw' ? (e.count ?? 1) : 0), 0)
+        beats.push({ label: 'shuffle', run: () => reshuffle(after) })
+      } else if (event.kind === 'effect') {
+        const rest = events.slice(index + 1)
+        beats.push({ label: 'effect', run: () => effect(event, rest) })
+      } else if (event.kind === 'call' && player !== undefined)
+        beats.push({ label: 'call', run: () => call(player) })
+      else if (event.kind === 'win' && player !== undefined)
+        beats.push({ label: 'win', run: () => win(player) })
+    })
+    return beats
+  }
+
+  /**
+   * The table becomes `snapshot` exactly, easing anything that drifted. Each
+   * snapshot settles to itself — a later one already waiting in the queue has
+   * cards still to throw — and the last settles to the newest word from the
+   * room, which may have changed since without anything happening at the table.
+   */
+  function reconcile(snapshot: GameState) {
+    const game = queue.length ? snapshot : latest,
+      arriving = view.arriving
+    Object.assign(view, fromGame(game))
+    // Cards still in the air keep their place in the hand empty until they land.
+    view.arriving = arriving.filter((id) => latest.players[state.viewer]?.hand.some((c) => c.id === id))
+    if (game.status === 'playing') rosette = false
+    syncDeck()
+    syncPile(game.discardPile)
+    game.players.forEach((_, player) => syncFan(player, view.counts[player], game))
+    table.recolor(view.color, { squash: false, ms: 200 })
+    table.setDirection(view.direction)
+    layout()
+    emit()
+    return 0
+  }
+
+  /** Lands everything in the newest snapshot at once: a first look, or a backlog too long to replay. */
+  function snap() {
+    queue.clear()
+    tweens.finishAll()
+    penalty = null
+    inFlight.length = 0
+    rosette = latest.status === 'won'
+    Object.assign(view, fromGame(latest))
+    for (const object of deck.splice(0)) cards.release(object)
+    for (const { object } of pile.splice(0)) cards.release(object)
+    for (const fan of fans) if (fan) for (const object of fan.splice(0)) cards.release(object)
+    syncDeck()
+    syncPile(latest.discardPile)
+    latest.players.forEach((_, player) => syncFan(player))
+    land()
+    table.setColor(view.color)
+    table.setDirection(view.direction)
+    emit()
+  }
+
+  /**
+   * A new round, start to finish: last round's cards are swept back to the
+   * deck, the deck is riffled, and seven cards go round the table one at a
+   * time before the starting card turns over onto the pile.
+   */
+  function deal(game: GameState) {
+    queue.clear()
+    tweens.finishAll()
+    const reduced = reducedMotion(),
+      players = game.players.length,
+      hands = game.players.map((p) => p.hand.length),
+      dealt = hands.reduce((a, b) => a + b, 0),
+      mine = inDom(state.viewer) ? game.players[state.viewer].hand.map((c) => c.id) : []
+    penalty = null
+    inFlight.length = 0
+    Object.assign(view, fromGame(game), {
+      counts: game.players.map(() => 0),
+      deck: game.drawPile.length + dealt + game.discardPile.length,
+      top: null,
+      arriving: [...mine],
+      dealing: true,
+    })
+    table.setDirection(game.direction)
+    emit()
+    queue.push(
+      {
+        label: 'gather',
+        run: () => {
+          // Pile cards lie face up and turn over on the way; fan cards already face down.
+          const leaving = [
+            ...pile.splice(0).map((p) => ({ object: p.object, flip: true })),
+            ...fans.flatMap((fan) => fan.splice(0).map((object) => ({ object, flip: false }))),
+          ]
+          rosette = false
+          if (reduced) {
+            leaving.forEach(({ object }) => cards.release(object))
+            return 0
+          }
+          let ms = 0
+          leaving.forEach(({ object, flip }, i) => {
+            ms = Math.max(
+              ms,
+              fly(object, deckHome(deck.length, pose()), {
+                flip,
+                ms: 380,
+                height: 0.8,
+                delay: i * 18,
+                onLand: () => cards.release(object),
+              }),
+            )
+          })
+          return ms
+        },
+      },
+      {
+        label: 'riffle',
+        run: () => {
+          syncDeck()
+          land()
+          host.cue({ kind: 'sound', sound: 'shuffle' })
+          return reduced ? 0 : riffle() + 60
+        },
+      },
+      {
+        label: 'deal',
+        run: () => {
+          const stagger = reduced ? 22 : players > 2 ? 55 : 75,
+            order = Array.from({ length: players }, (_, i) => (state.viewer + 1 + i) % players),
+            rounds = Math.max(...hands)
+          let k = 0,
+            last = 0
+          for (let round = 0; round < rounds; round++)
+            for (const player of order) {
+              if (round >= hands[player]) continue
+              const id = inDom(player) ? mine[round] : undefined,
+                delay = k++ * stagger
+              if (!delay) last = deliver(player, id, { ms: reduced ? undefined : 420 })
+              else
+                tweens.add({
+                  duration: 0,
+                  delay,
+                  update: () => {},
+                  done: () => deliver(player, id, { ms: reduced ? undefined : 420 }),
+                })
+              last = Math.max(last, delay + (reduced ? 190 : 420))
+            }
+          return last + 60
+        },
+      },
+      {
+        label: 'starter',
+        run: () => {
+          const card = game.discardPile.at(-1)
+          if (!card) return 0
+          const object = takeFromDeck()
+          cards.face(object, card)
+          const ms = fly(object, pileHome(card, pile.length, pose()), {
+            flip: true,
+            height: 1.2,
+            onLand: () => {
+              pile.push({ object, card })
+              view.top = card
+              view.color = game.activeColor
+              impact(card, object)
+              emit()
+            },
+          })
+          return ms + (reduced ? 40 : 220)
+        },
+      },
+      { label: 'settle', run: () => reconcile(game) },
+    )
+  }
+
+  const api: TableApi = {
+    update(next) {
+      const before = state,
+        previous = latest
+      const game = next.game
+      if (
+        game === latest &&
+        before.viewer === next.viewer &&
+        before.watching === next.watching &&
+        before.menu === next.menu
+      )
+        return
+      state = next
+      if (next.menu) {
+        latest = game
+        snap()
+        return
+      }
+      if (before.viewer !== next.viewer || before.watching !== next.watching || before.menu !== next.menu) {
+        latest = game
+        snap()
+        return
+      }
+      if (game.round !== previous.round) {
+        latest = game
+        deal(game)
+        return
+      }
+      if (game.sequence === previous.sequence) {
+        latest = game
+        if (!queue.busy) {
+          // Nothing happened at the table; only the room around it changed.
+          view.game = game
+          emit()
+        }
+        return
+      }
+      const fresh = game.events.filter((e) => e.id > previous.sequence),
+        missed = !game.events.length || game.events[0].id > previous.sequence + 1
+      const had = new Set(previous.players[state.viewer]?.hand.map((c) => c.id)),
+        drawn = inDom(state.viewer)
+          ? (game.players[state.viewer]?.hand.map((c) => c.id).filter((id) => !had.has(id)) ?? [])
+          : []
+      latest = game
+      if (missed || fresh.length > 40) {
+        snap()
+        return
+      }
+      view.arriving.push(...drawn)
+      queue.push(...beatsFor(fresh, [...drawn]), { label: 'settle', run: () => reconcile(game) })
+      emit()
+      // A backlog this long is a tab that slept or a reconnect: show where things stand.
+      if (queue.length > 28) {
+        queue.flush()
+        tweens.finishAll()
+      }
     },
     zoom(amount) {
-      targetZoom = THREE.MathUtils.clamp(targetZoom + amount, 0.85, 1.25)
-      needsRender = true
+      zoom = THREE.MathUtils.clamp(zoom + amount, 0.85, 1.25)
+      rig.to({ zoom }, reducedMotion() ? 40 : 7)
+      stage.invalidate()
     },
     dispose() {
-      cancelAnimationFrame(frame)
-      observer.disconnect()
-      geometries.forEach((g) => g.dispose())
-      materials.forEach((m) => m.dispose())
-      textures.forEach((t) => t.dispose())
-      environment.dispose()
-      renderer.dispose()
-      renderer.domElement.remove()
+      stopWarming()
+      document.removeEventListener('visibilitychange', onVisible)
+      queue.clear()
+      tweens.cancelAll()
+      // The controls were never connected to an element, so there is nothing of theirs to release.
+      rig.dispose()
+      particles.dispose()
+      table.dispose()
+      stage.dispose()
+      cards.dispose()
     },
   }
+
+  /** A tab that comes back with a long story to tell skips to the end of it. */
+  function onVisible() {
+    if (document.hidden || queue.length <= 6) return
+    queue.flush()
+    tweens.finishAll()
+  }
+  document.addEventListener('visibilitychange', onVisible)
+
+  let lastBreath = 0
+  stage.onFrame((dt, now) => {
+    clock = now
+    tweens.speed = queue.speed
+    const ms = dt * 1000
+    let moving = tweens.step(ms)
+    queue.step(ms)
+    // Whoever is on turn leans in toward the pile once the table has caught up.
+    const playing = !state.menu && latest.status === 'playing' && !queue.busy && !view.dealing
+    const next = playing && !inDom(view.game.currentPlayer) ? view.game.currentPlayer : -1
+    if (next !== thinker) {
+      thinker = next
+      thinkingSince = now
+    }
+    for (let player = 0; player < latest.players.length; player++) {
+      const target = player === thinker ? 1 : 0,
+        l = lean[player] ?? 0
+      const breathing = player === thinker && now - thinkingSince < 4000
+      if (Math.abs(l - target) > 1e-3 || (breathing && now - lastBreath > 32)) {
+        lean[player] = Math.abs(l - target) > 1e-3 ? damp(l, target, 6, dt) : target
+        if (breathing) lastBreath = now
+        layoutFan(player)
+      }
+    }
+    if (restless) {
+      let any = false
+      for (const object of deck) any = cards.settle(object, dt) || any
+      for (const { object } of pile) any = cards.settle(object, dt) || any
+      for (const fan of fans) if (fan) for (const object of fan) any = cards.settle(object, dt) || any
+      restless = any
+      moving = moving || any
+    }
+    moving = particles.step(dt) || moving
+    moving = rig.step(dt) || moving
+    return moving || queue.busy
+  })
+
+  // First look: a round that is only just dealt is dealt again in front of the
+  // viewer, from the deck; anything later is simply shown as it stands.
+  if (!initial.menu && freshRound(initial.game)) deal(initial.game)
+  else snap()
+  stage.start()
+  return api
 }

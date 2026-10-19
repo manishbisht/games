@@ -12,6 +12,12 @@ const turnLine = (page: Page) => page.locator('.pr-turn-announcement strong')
 const myTurn = (page: Page) => page.getByText('Your turn. Make it colorful.', { exact: true })
 const cards = (page: Page) => page.locator('.pr-card')
 /**
+ * The table shows each card land before it hands the turn on, and says it is
+ * still catching up with `aria-busy`. Waiting it out is waiting for the room's
+ * last word to be on screen, rather than the one before it.
+ */
+const settled = (page: Page) => expect(page.locator('.pr-arena[aria-busy="true"]')).toHaveCount(0)
+/**
  * The table arrives as its own chunk — three.js and all — fetched only once the
  * room has a game to show, so the first paint is the one wait here that is about
  * a download rather than about the room.
@@ -75,8 +81,9 @@ async function newPlayer(browser: Browser, errors: string[]) {
  */
 async function takeTurn(page: Page) {
   for (let step = 0; step < 4; step++) {
+    await settled(page)
     const held = await cards(page).count()
-    const legal = page.locator('.pr-card:enabled')
+    const legal = page.locator('.pr-card.pr-playable')
     if (await legal.count()) {
       await legal.first().click()
       const play = page.getByRole('button', { name: 'Play card', exact: true })
@@ -95,6 +102,7 @@ async function takeTurn(page: Page) {
     }
     await page.getByRole('button', { name: 'Draw card', exact: true }).click()
     await expect(cards(page)).toHaveCount(held + 1)
+    await settled(page)
     // A drawn card that can be played leaves the turn where it is.
     if (!(await myTurn(page).isVisible())) return
   }
@@ -108,6 +116,7 @@ async function takeTurn(page: Page) {
  */
 async function handOver(page: Page) {
   for (let attempt = 0; attempt < 12; attempt++) {
+    await settled(page)
     if (!(await myTurn(page).isVisible())) return
     await takeTurn(page)
   }
@@ -167,7 +176,7 @@ test('two browsers deal, play and keep their cards to themselves', async ({ brow
   await expect(host.getByRole('button', { name: 'Draw card', exact: true })).toBeEnabled()
   await expect(turnLine(guest)).toHaveText('Ann’s turn')
   await expect(guest.getByRole('button', { name: 'Draw card', exact: true })).toBeDisabled()
-  await expect(guest.locator('.pr-card:enabled')).toHaveCount(0)
+  await expect(guest.locator('.pr-card.pr-playable')).toHaveCount(0)
 
   await handOver(host)
   // The offer to play is what has to go: the turn only passed when it did.

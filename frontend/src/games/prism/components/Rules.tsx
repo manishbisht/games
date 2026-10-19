@@ -1,5 +1,5 @@
 import { ArrowRight, Layers, Megaphone, Palette, Trophy } from 'lucide-react'
-import Dialog from './Dialog'
+import Dialog, { DialogDismiss } from './Dialog'
 import CardFace from './CardFace'
 import { createDeck } from '@games/shared/prism'
 
@@ -69,9 +69,9 @@ export default function Rules({ onClose }: { onClose: () => void }) {
         deck? We recycle the discards, keeping the top card. If all cards are held and nobody can play, the
         round is a draw. Play against bots or meet friends in an online room.
       </p>
-      <button className="pr-primary" onClick={onClose}>
+      <DialogDismiss className="pr-primary">
         Back to the table <ArrowRight size={17} />
-      </button>
+      </DialogDismiss>
     </Dialog>
   )
 }

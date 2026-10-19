@@ -36,13 +36,18 @@ import type { Card, Command } from '@games/shared/prism/types'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { sound } from './game/audio'
 import TableScene from './scene/TableScene'
-import type { TableApi } from './scene/createScene'
+import { tableView } from './scene/createScene'
+import type { Cue, TableApi, TableHost, TableView } from './scene/createScene'
+import { warmImages } from './scene/artwork'
+import { setMotionPreference, useReducedMotion } from '../../motion/preference'
+import { useHeld } from '../../motion/hooks'
 import { useBotRoom } from '../../online/useBotRoom'
 import { prismGame } from '../catalog'
 import Setup from './components/Setup'
 import type { SetupOptions } from './components/Setup'
 import CardFace from './components/CardFace'
-import Dialog from './components/Dialog'
+import Dialog, { DialogDismiss } from './components/Dialog'
+import { useHandMotion } from './components/useHandMotion'
 import Rules from './components/Rules'
 import { claimTarget } from './online/session'
 import type { OnlinePrismSession } from './online/session'
@@ -103,22 +108,32 @@ function AbandonmentNotice({
   )
 }
 
+type CueKind = Exclude<Cue['kind'], 'sound'>
+type Cues = Partial<Record<CueKind, Cue & { key: number }>>
+/** The newest cue of `kind`, if it is about `player`. */
+function cueFor<K extends CueKind>(cues: Cues, kind: K, player: number) {
+  const cue = cues[kind] as (Extract<Cue, { kind: K }> & { key: number }) | undefined
+  return cue && 'player' in cue && cue.player === player ? cue : null
+}
+
 export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
   const [options, setOptions] = useState<SetupOptions>(DEFAULT_OPTIONS)
   // The table shown behind the setup panel. It is never played: choosing a
   // game creates a room, and the room deals the real one.
   const preview = useMemo(() => createGame(seats(DEFAULT_OPTIONS)), [])
   const [dialog, setDialog] = useState<'rules' | 'settings' | 'leave' | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
+  // Card ids repeat from round to round (the same deck is dealt again), so a
+  // selection only counts in the round it was made.
+  const [selection, setSelection] = useState<{ round: number; id: string } | null>(null)
   const [wildCard, setWildCard] = useState<Card | null>(null)
   const [muted, setMuted] = useState(false)
-  const [reducedMotion, setReducedMotion] = useState(
-    () => matchMedia('(prefers-reduced-motion: reduce)').matches,
-  )
-  const [fast, setFast] = useState(false)
+  const reducedMotion = useReducedMotion()
   const [showFeed, setShowFeed] = useState(false)
   const [sort, setSort] = useState(false)
-  const table = useRef<Pick<TableApi, 'zoom'>>(null)
+  const [view, setView] = useState<TableView | null>(null)
+  const [cues, setCues] = useState<Cues>({})
+  const table = useRef<Pick<TableApi, 'zoom'>>(null),
+    handElement = useRef<HTMLDivElement>(null)
   // The room is the only source of a dealt table, and the hand this browser is
   // shown is the only one in the state that is real.
   const game = online ? online.state : preview
@@ -126,17 +141,35 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
   /** Someone watching has no hand of their own, so they look over seat one's shoulder. */
   const watching = online ? online.viewer === null : false
   const viewer = online?.viewer ?? 0
-  const active = game.players[game.currentPlayer],
+  const motion = useHandMotion(handElement, game.round)
+  useEffect(() => warmImages(), [])
+  /**
+   * What the table is showing. It trails the room by as long as the cards take
+   * to land, and everything on the page that reads as "now" — whose turn, the
+   * counts, the pile, the result — reads from it, so nothing gets ahead of the
+   * felt. Without a 3D table it is simply the room's state.
+   */
+  const shown = view && view.game.round === game.round ? view : tableView(game)
+  const now = shown.game
+  const caughtUp = !shown.busy && shown.sequence === game.sequence
+  const active = now.players[now.currentPlayer],
     me = game.players[viewer]
+  const arriving = new Set(shown.arriving)
+  const wild = wildCard && me.hand.some((c) => c.id === wildCard.id) ? wildCard : null
   const enabled =
     !menu &&
     !watching &&
     !dialog &&
-    !wildCard &&
+    !wild &&
+    caughtUp &&
     game.status === 'playing' &&
-    active.kind === 'human' &&
+    game.players[game.currentPlayer].kind === 'human' &&
     game.currentPlayer === viewer
   const moves = playableCards(game)
+  const selected =
+    selection && selection.round === game.round && me.hand.some((c) => c.id === selection.id)
+      ? selection.id
+      : null
   const selectedCard = me.hand.find((c) => c.id === selected)
   const canCall =
     !menu &&
@@ -147,7 +180,6 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
   /** A watcher is shown seat one's hand, and it arrives already face-down. */
   const hideHand = watching
   const awayBlocking = online ? claimTarget(online) : null
-  const previousSound = useRef(game.sequence)
   const visibleHand = useMemo(() => {
     const cards = handView(game, viewer)
     return sort
@@ -159,28 +191,39 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
         )
       : cards
   }, [game, viewer, sort])
+  const held = me.hand.filter((c) => !arriving.has(c.id)).length
 
   const send = useCallback(
     (command: Command) => {
       // Nothing is applied here: the command goes to the room, and the table
       // moves when the room says it did.
       online?.send.command(command)
-      if (command.type === 'play' || command.type === 'draw' || command.type === 'pass') setSelected(null)
+      if (command.type === 'play' || command.type === 'draw' || command.type === 'pass') setSelection(null)
     },
     [online],
   )
 
-  useEffect(() => {
-    const recent = game.events.filter((e) => e.id > previousSound.current)
-    previousSound.current = game.sequence
-    if (menu || muted || !recent.length) return
-    const event =
-      recent.find((e) => e.kind === 'win') ??
-      recent.find((e) => e.kind === 'call') ??
-      recent.find((e) => e.kind === 'effect') ??
-      recent.at(-1)!
-    sound(event.kind)
-  }, [game.sequence, game.events, menu, muted])
+  /** How the table reaches the page: what it shows, where the hand's cards are, and its moments. */
+  const host: TableHost = {
+    view: setView,
+    slot: motion.slot,
+    cue: (cue) => {
+      if (cue.kind === 'sound') {
+        if (!muted) sound(cue.sound)
+        return
+      }
+      setCues((current) => {
+        const previous = current[cue.kind]
+        // A penalty counting its cards in is one moment, not one per card.
+        const same =
+          cue.kind === 'penalty' &&
+          previous?.kind === 'penalty' &&
+          previous.player === cue.player &&
+          cue.landed > 0
+        return { ...current, [cue.kind]: { ...cue, key: same ? previous.key : (previous?.key ?? 0) + 1 } }
+      })
+    },
+  }
 
   const room = useBotRoom('prism', prismGame.path)
   const start = () =>
@@ -192,13 +235,22 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
 
   function play(card: Card) {
     if (!enabled || !moves.some((c) => c.id === card.id)) return
+    // Where it sits now is where the table picks it up from.
+    motion.launch(card.id)
     if (card.isWild) setWildCard(card)
     else send({ type: 'play', player: viewer, cardId: card.id })
   }
-  const top = game.discardPile.at(-1)!
-  const lastEvent = game.events.at(-1)
-  /** True when the seat on turn is this browser's to play — never a watcher's. */
-  const mine = !watching && active.id === viewer
+  const top = shown.top
+  const lastEvent = now.events.at(-1)
+  /**
+   * True when the seat on turn is this browser's to play — never a watcher's.
+   * The table may still be showing the last card land, but once this seat has
+   * acted it is no longer its turn, whatever is still in the air.
+   */
+  const mine = !watching && active.id === viewer && game.currentPlayer === viewer
+  const holder = active.id === viewer && !mine ? game.players[game.currentPlayer] : active
+  // The result waits for the last card to land and the confetti to go up.
+  const showResult = useHeld(!menu && now.status !== 'playing', 650)
   /** Only the viewer's own leftovers can be counted: the rest stay face-down. */
   const leftovers = (player: (typeof game.players)[number]) =>
     player.hand.reduce((sum, c) => sum + cardPoints(c), 0)
@@ -211,9 +263,18 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
           ? a.hand.length - b.hand.length
           : leftovers(a) - leftovers(b),
   )
+  const headline = shown.dealing
+    ? 'Shuffling up.'
+    : now.status !== 'playing'
+      ? 'A round well played.'
+      : mine
+        ? 'Your turn. Make it colorful.'
+        : `${holder.name}’s turn`
+  const skipped = cueFor(cues, 'skip', viewer),
+    hit = cueFor(cues, 'penalty', viewer)
 
   return (
-    <div className={`pr-app ${menu ? 'pr-is-menu' : 'pr-is-playing'} ${reducedMotion ? 'pr-reduced' : ''}`}>
+    <div className={`pr-app ${menu ? 'pr-is-menu' : 'pr-is-playing'}`}>
       <header className="pr-header">
         <div className="pr-header-left">
           <Link to="/" className="pr-all-games">
@@ -256,9 +317,9 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
           <HeaderAuth readOnly={Boolean(online)} />
         </nav>
       </header>
-      <main className="pr-arena">
+      <main className="pr-arena" aria-busy={shown.busy || undefined}>
         <div className="pr-scene-wrap">
-          <TableScene ref={table} state={{ game, viewer, menu, reducedMotion, watching }} />
+          <TableScene ref={table} state={{ game, viewer, menu, watching }} host={host} />
         </div>
         {menu ? (
           <>
@@ -290,8 +351,10 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               <span className="pr-round-separator">/</span> CLASSIC
             </div>
             <div className="pr-direction">
-              <ArrowRightLeft size={15} className={game.direction === -1 ? 'pr-reverse' : ''} />
-              <span>{game.direction === 1 ? 'Clockwise' : 'Counterclockwise'}</span>
+              <ArrowRightLeft size={15} className={shown.direction === -1 ? 'pr-reverse' : ''} />
+              <span key={cues.reverse?.key} className={cues.reverse ? 'motion-pop' : ''}>
+                {shown.direction === 1 ? 'Clockwise' : 'Counterclockwise'}
+              </span>
             </div>
             {game.players
               // A watcher holds no seat, so nobody at the table is "not an
@@ -307,36 +370,45 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                       : offset === 1
                         ? 'left'
                         : 'right'
+                const count = shown.counts[p.id] ?? p.hand.length,
+                  current = active.id === p.id && !shown.dealing,
+                  skip = cueFor(cues, 'skip', p.id),
+                  penalty = cueFor(cues, 'penalty', p.id)
                 return (
                   <div
-                    className={`pr-opponent pr-opponent-${position} ${active.id === p.id ? 'pr-current' : ''}`}
+                    className={`pr-opponent pr-opponent-${position} ${current ? 'pr-current' : ''} ${penalty ? `pr-hit-${penalty.key % 2}` : ''}`}
                     key={p.id}
-                    aria-label={`${p.name}, ${p.hand.length} cards${active.id === p.id ? ', current turn' : ''}`}
+                    aria-label={`${p.name}, ${count} cards${current ? ', current turn' : ''}`}
                   >
                     <span className="pr-avatar" style={{ '--token': TOKEN_COLORS[p.id] } as CSSProperties}>
                       {TOKENS[p.id]}
-                      {active.id === p.id && <i />}
+                      {current && <i />}
+                      {skip && <b key={skip.key} className="pr-stamp" aria-hidden="true" />}
                     </span>
                     <div className="pr-opponent-info">
                       <strong>
-                        {p.name}{' '}
-                        {(p.kind === 'ai' || online?.players[p.id]?.bot) && <Bot size={12} />}
+                        {p.name} {(p.kind === 'ai' || online?.players[p.id]?.bot) && <Bot size={12} />}
                         {online && online.players[p.id]?.connected === false && (
                           <WifiOff size={12} aria-label="away" />
                         )}
                       </strong>
                       <span>
-                        {p.hand.length === 1 ? (
+                        {count === 1 ? (
                           <b>1 CARD LEFT</b>
                         ) : (
                           <>
-                            <Layers size={11} /> {p.hand.length} cards
+                            <Layers size={11} /> {count} cards
                           </>
                         )}
                         {p.called && <Check size={12} />}
                       </span>
                     </div>
-                    {active.id === p.id && (
+                    {penalty && (
+                      <span key={penalty.key} className="pr-penalty" aria-hidden="true">
+                        <span key={penalty.landed}>+{penalty.count}</span>
+                      </span>
+                    )}
+                    {current && (
                       <span className="pr-thinking">
                         {p.kind === 'ai' ? 'Thinking' : 'Their turn'}
                         <i />
@@ -349,36 +421,33 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               })}
             <div className="pr-center-info">
               <span className="pr-pile-name">
-                DRAW PILE <small>{game.drawPile.length} cards</small>
+                DRAW PILE <small>{shown.deck} cards</small>
               </span>
               <span className="pr-pile-name">
-                IN PLAY <small>{cardName(top)}</small>
+                IN PLAY <small>{top ? cardName(top) : '—'}</small>
               </span>
             </div>
             <div
               className="pr-active-color"
-              style={{ '--active-color': COLOR_HEX[game.activeColor] } as CSSProperties}
+              style={{ '--active-color': COLOR_HEX[shown.color] } as CSSProperties}
             >
               <i />
+              {cues.wild && <b key={cues.wild.key} className="pr-color-wave" aria-hidden="true" />}
               <span>
-                Active color <strong>{game.activeColor}</strong>
+                Active color <strong>{shown.color}</strong>
               </span>
-              {top.isWild && <Sparkles size={13} />}
+              {top?.isWild && <Sparkles size={13} />}
             </div>
-            <div className="pr-turn-announcement" role="status" aria-live="polite">
+            <div className="pr-turn-announcement">
               <span className={`pr-turn-dot ${enabled ? 'pr-turn-ready' : ''}`} />
               <div>
-                <strong>
-                  {game.status !== 'playing'
-                    ? 'A round well played.'
-                    : mine
-                      ? 'Your turn. Make it colorful.'
-                      : `${active.name}’s turn`}
-                </strong>
+                <strong>{headline}</strong>
                 <small>
-                  {game.status !== 'playing'
-                    ? 'Good cards. Better company.'
-                    : !mine
+                  {shown.dealing
+                    ? 'Seven cards each, coming round.'
+                    : now.status !== 'playing'
+                      ? 'Good cards. Better company.'
+                      : !mine || !caughtUp
                         ? 'A good move is worth the wait.'
                         : game.pendingPenalty
                           ? `Take ${game.pendingPenalty.count} or play a matching penalty.`
@@ -390,13 +459,19 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                 </small>
               </div>
             </div>
+            {cues.call && (
+              <div key={cues.call.key} className="pr-callout" aria-hidden="true">
+                <strong>Prism!</strong>
+                <span>{'player' in cues.call && game.players[cues.call.player]?.name} called it</span>
+              </div>
+            )}
             <aside className={`pr-feed ${showFeed ? 'pr-feed-expanded' : ''}`} aria-label="Game events">
               <button onClick={() => setShowFeed(!showFeed)}>
                 <span>AT THE TABLE</span>
                 {showFeed ? <X size={13} /> : <ChevronRight size={13} />}
               </button>
               <ol>
-                {game.events.slice(showFeed ? -8 : -2).map((e) => (
+                {now.events.slice(showFeed ? -8 : -2).map((e) => (
                   <li
                     key={e.id}
                     className={e.kind === 'effect' || e.kind === 'call' ? 'pr-event-special' : ''}
@@ -407,8 +482,9 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                 ))}
               </ol>
             </aside>
+            {/* One voice for the table: what just happened, then whose turn it is. */}
             <div className="sr-only" aria-live="polite">
-              {lastEvent?.text}
+              {lastEvent?.text} {headline}
             </div>
             <div className="pr-camera-controls">
               <button className="pr-icon" aria-label="Zoom out" onClick={() => table.current?.zoom(-0.1)}>
@@ -423,7 +499,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               <div className="pr-hand-topline">
                 <span>
                   <Hand size={14} /> {me.name === 'You' ? 'YOUR HAND' : `${me.name.toUpperCase()}’S HAND`}{' '}
-                  <b>{me.hand.length}</b>
+                  <b>{held}</b>
                 </span>
                 <button onClick={() => setSort(!sort)} aria-pressed={sort}>
                   <ArrowRightLeft size={12} /> {sort ? 'Dealt order' : 'Sort by color'}
@@ -431,49 +507,64 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               </div>
               <div className="pr-hand-scroll">
                 <div
+                  ref={handElement}
                   className={`pr-hand ${me.hand.length > 10 ? 'pr-hand-many' : ''}`}
                   style={{ '--count': visibleHand.length } as CSSProperties}
                 >
                   {!hideHand &&
-                    visibleHand.map((card, i) => (
-                      <button
-                        key={card.id}
-                        className={`pr-card ${card.playable && enabled ? 'pr-playable' : 'pr-unplayable'} ${card.id === selected ? 'pr-selected' : ''} ${card.id === game.drawnCardId ? 'pr-just-drawn' : ''}`}
-                        style={
-                          {
-                            '--i': i,
-                            '--angle': `${(i - (visibleHand.length - 1) / 2) * Math.min(3.2, 21 / visibleHand.length)}deg`,
-                            '--lift': `${Math.pow(i - (visibleHand.length - 1) / 2, 2) * Math.min(1.05, 28 / (visibleHand.length * visibleHand.length))}px`,
-                          } as CSSProperties
-                        }
-                        disabled={!enabled || !card.playable}
-                        aria-label={`${cardName(card)}${card.id === game.drawnCardId ? ', drawn card' : ''}${card.playable && enabled ? ', playable' : ', not playable'}`}
-                        aria-pressed={selected === card.id}
-                        onClick={() => {
-                          if (selected === card.id) play(card)
-                          else setSelected(card.id)
-                        }}
-                      >
-                        <CardFace card={card} />
-                        <span className="pr-card-play-hint">
-                          {selected === card.id ? 'TAP TO PLAY' : 'PLAYABLE'}
-                        </span>
-                      </button>
-                    ))}
+                    visibleHand.map((card, i) => {
+                      // Still in the air: the slot is kept so the hand has
+                      // already made room, and the card appears as it lands.
+                      const pending = arriving.has(card.id),
+                        playable = card.playable && enabled && !pending
+                      return (
+                        <button
+                          key={card.id}
+                          data-card={card.id}
+                          className={`pr-card ${playable ? 'pr-playable' : 'pr-unplayable'} ${card.id === selected ? 'pr-selected' : ''} ${card.id === game.drawnCardId ? 'pr-just-drawn' : ''} ${pending ? 'pr-pending' : ''}`}
+                          style={
+                            {
+                              '--i': i,
+                              '--angle': `${(i - (visibleHand.length - 1) / 2) * Math.min(3.2, 21 / visibleHand.length)}deg`,
+                              '--lift': `${Math.pow(i - (visibleHand.length - 1) / 2, 2) * Math.min(1.05, 28 / (visibleHand.length * visibleHand.length))}px`,
+                            } as CSSProperties
+                          }
+                          // Focusable either way, so the whole hand can be read
+                          // from the keyboard; only playable cards act.
+                          aria-disabled={!playable}
+                          aria-hidden={pending || undefined}
+                          tabIndex={pending ? -1 : undefined}
+                          aria-label={`${cardName(card)}${card.id === game.drawnCardId ? ', drawn card' : ''}${playable ? ', playable' : ', not playable'}`}
+                          aria-pressed={selected === card.id}
+                          onClick={() => {
+                            if (!playable) return
+                            if (selected === card.id) play(card)
+                            else setSelection({ round: game.round, id: card.id })
+                          }}
+                        >
+                          <CardFace card={card} />
+                          <span className="pr-card-play-hint">
+                            {selected === card.id ? 'TAP TO PLAY' : 'PLAYABLE'}
+                          </span>
+                        </button>
+                      )
+                    })}
                 </div>
               </div>
               <div className="pr-hand-toolbar">
-                <div className="pr-you">
+                <div className={`pr-you ${hit ? `pr-hit-${hit.key % 2}` : ''}`}>
                   <span className="pr-avatar" style={{ '--token': TOKEN_COLORS[viewer] } as CSSProperties}>
                     {TOKENS[viewer]}
+                    {skipped && <b key={skipped.key} className="pr-stamp" aria-hidden="true" />}
+                    {hit && (
+                      <span key={hit.key} className="pr-penalty" aria-hidden="true">
+                        <span key={hit.landed}>+{hit.count}</span>
+                      </span>
+                    )}
                   </span>
                   <span>
                     <strong>{me.name}</strong>
-                    <small>
-                      {me.hand.length === 1
-                        ? '1 CARD LEFT'
-                        : `${me.hand.length} cards · ${me.totalScore} points`}
-                    </small>
+                    <small>{held === 1 ? '1 CARD LEFT' : `${held} cards · ${me.totalScore} points`}</small>
                   </span>
                 </div>
                 <div className="pr-play-controls">
@@ -521,21 +612,19 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               active.kind === 'human' &&
               !hideHand && (
                 <button
-                  className="pr-catch"
+                  className="pr-catch motion-enter"
                   onClick={() => send({ type: 'catch', player: viewer, target: game.callWindow! })}
                 >
                   <Flag size={16} /> Catch {game.players[game.callWindow].name} — no call!
                 </button>
               )}
-            {game.callWindow !== null &&
-              !watching &&
-              (game.callWindow === viewer || options.mode === 'local') && (
-                <div className="pr-call-notice">
-                  <Megaphone size={17} />
-                  <span>{game.players[game.callWindow].name}: one card left. Call Prism!</span>
-                  <button onClick={() => send({ type: 'call', player: game.callWindow! })}>Prism!</button>
-                </div>
-              )}
+            {game.callWindow !== null && !watching && game.callWindow === viewer && (
+              <div className="pr-call-notice motion-enter">
+                <Megaphone size={17} />
+                <span>{game.players[game.callWindow].name}: one card left. Call Prism!</span>
+                <button onClick={() => send({ type: 'call', player: game.callWindow! })}>Prism!</button>
+              </div>
+            )}
             {awayBlocking && (
               <AbandonmentNotice
                 name={awayBlocking.name}
@@ -572,15 +661,9 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
             },
             {
               label: 'Reduced motion',
-              detail: 'Quiet transitions and no flying cards.',
+              detail: 'Cards slide and fade instead of flying. Applies to every game here.',
               value: reducedMotion,
-              change: () => setReducedMotion(!reducedMotion),
-            },
-            {
-              label: 'Faster AI turns',
-              detail: 'Keep the cards moving.',
-              value: fast,
-              change: () => setFast(!fast),
+              change: () => setMotionPreference(reducedMotion ? 'full' : 'reduced'),
             },
           ].map((setting) => (
             <div className="pr-setting" key={setting.label}>
@@ -600,12 +683,12 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
             </div>
           ))}
           <p className="pr-fine-print">
-            Classic rules · no stacking · draw one · restricted Take Four. Your current round pauses while
-            this panel is open.
+            Classic rules · no stacking · draw one · restricted Take Four. An online table plays on while this
+            panel is open.
           </p>
-          <button className="pr-primary" onClick={() => setDialog(null)}>
+          <DialogDismiss className="pr-primary">
             All set <Check size={16} />
-          </button>
+          </DialogDismiss>
         </Dialog>
       )}
       {dialog === 'leave' && (
@@ -620,9 +703,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               : 'This round will end. There’s always room for another game.'}
           </p>
           <div className="pr-dialog-actions">
-            <button className="pr-secondary" onClick={() => setDialog(null)}>
-              Keep playing
-            </button>
+            <DialogDismiss className="pr-secondary">Keep playing</DialogDismiss>
             {online && (
               <button className="pr-primary" onClick={online.leave}>
                 Leave room
@@ -631,15 +712,15 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
           </div>
         </Dialog>
       )}
-      {wildCard && (
-        <Dialog title="Choose a color" onClose={() => setWildCard(null)}>
+      {wild && (
+        <Dialog title="Choose a color" onClose={() => setWildCard(null)} className="pr-wild-dialog">
           <div className="pr-wild-preview">
-            <CardFace card={wildCard} />
+            <CardFace card={wild} />
           </div>
           <p className="pr-eyebrow">CHANGE THE CONVERSATION</p>
           <h2>Choose a color.</h2>
           <p className="pr-dialog-copy">
-            {wildCard.value === 'draw4'
+            {wild.value === 'draw4'
               ? 'Take Four. A new color, and four cards for the next player.'
               : 'A fresh color. A whole new possibility.'}
           </p>
@@ -650,7 +731,7 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
                 style={{ '--choice': COLOR_HEX[color] } as CSSProperties}
                 aria-label={`Choose ${color}`}
                 onClick={() => {
-                  send({ type: 'play', player: viewer, cardId: wildCard.id, color })
+                  send({ type: 'play', player: viewer, cardId: wild.id, color })
                   setWildCard(null)
                 }}
               >
@@ -659,23 +740,11 @@ export default function PrismGame({ online }: { online?: OnlinePrismSession }) {
               </button>
             ))}
           </div>
-          <button className="pr-text-button" onClick={() => setWildCard(null)}>
-            Back to my hand
-          </button>
+          <DialogDismiss className="pr-text-button">Back to my hand</DialogDismiss>
         </Dialog>
       )}
-      {!menu && game.status !== 'playing' && (
-        <Dialog title="Round result" onClose={() => {}} locked>
-          {!reducedMotion && game.status === 'won' && (
-            <div className="pr-confetti" aria-hidden="true">
-              {Array.from({ length: 30 }, (_, i) => (
-                <i
-                  key={i}
-                  style={{ '--n': i, '--confetti': Object.values(COLOR_HEX)[i % 4] } as CSSProperties}
-                />
-              ))}
-            </div>
-          )}
+      {showResult && (
+        <Dialog title="Round result" onClose={() => {}} locked className="pr-result">
           <span className="pr-win-token">
             {game.winner === null ? <Hand size={35} /> : <Trophy size={35} />}
           </span>
