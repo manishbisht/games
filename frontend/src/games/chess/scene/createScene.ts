@@ -1,14 +1,23 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import type { Color, GameState, MoveRecord, Preferences, Square } from '@games/shared/chess/types'
+import { createGame, playMove } from '@games/shared/chess'
+import type {
+  Color,
+  GameState,
+  MoveRecord,
+  Preferences,
+  PromotionPiece,
+  Square,
+} from '@games/shared/chess/types'
 import { createCameraRig } from '../../../motion/camera'
-import { dampFactor, inOutCubic, lerp, outCubic } from '../../../motion/ease'
+import type { Orbit } from '../../../motion/camera'
+import { dampFactor, lerp, outCubic } from '../../../motion/ease'
 import { createParticles } from '../../../motion/particles'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
 import { createStage, disposeTree } from '../../../motion/stage'
 import { createQueue, createTweens } from '../../../motion/tween'
-import type { Tween } from '../../../motion/tween'
+import type { ChessSound, SoundDetail } from '../game/audio'
 import { BOARD_Y, createCast } from './actors'
 import type { Actor } from './actors'
 import {
@@ -38,11 +47,11 @@ export interface SceneState {
   /** The seat at this browser; the winner's confetti falls for them (and for spectators). */
   seat?: Color | null
 }
-export type Impact = 'move' | 'capture' | 'check' | 'end' | 'promote'
+export type Impact = Exclude<ChessSound, 'lift' | 'tick' | 'flag'>
 export interface SceneEvents {
   select: (square: Square) => void
   /** A sound-worthy moment, timed to the board rather than to the snapshot. */
-  impact?: (kind: Impact) => void
+  impact?: (kind: Impact, detail: SoundDetail) => void
   /** True while the board is still playing out moves the game has already made. */
   presenting?: (busy: boolean) => void
   /** How many victims of each colour have reached the trays. */
@@ -52,6 +61,13 @@ export interface SceneOptions {
   black: boolean
   /** The lobby's preview: a slow orbit while it is on screen, and nothing to play. */
   showcase?: boolean
+  /**
+   * How long ago, by the server's clock, the game reached the state the board
+   * opens on. A board that opens moments after a move — a join or a reload
+   * mid-move — plays that move from where it has got to rather than setting it
+   * down already finished.
+   */
+  since?: number
 }
 export interface SceneApi {
   update: (state: SceneState) => void
@@ -73,6 +89,16 @@ const VIEW = { polar: 0.88, azimuth: (black: boolean) => (black ? Math.PI + 0.24
 const TARGET = new THREE.Vector3(0, 0.2, 0)
 const RADIUS = 22
 const DRAG_LIFT = 0.5
+/** A move younger than this when the board opens is still playing; see `SceneOptions.since`. */
+const LIVE_MOVE_MS = 1200
+
+/** The position one move back: what the board looked like before the last move began. */
+function beforeLast(game: GameState): GameState {
+  let previous = createGame({ ...game.options, clock: 0 }, game.initialFen, 0)
+  for (const move of game.history.slice(0, -1))
+    previous = playMove(previous, move.from, move.to, move.promotion as PromotionPiece | undefined, 0)
+  return previous
+}
 
 /**
  * The chess table. The room's snapshot is the truth; this turns each new one
@@ -156,8 +182,17 @@ export function createScene(
   paintTrays()
 
   let muted = false
-  const impact = (kind: Impact) => {
-    if (!muted) events.impact?.(kind)
+  const heard = new THREE.Vector3(),
+    onScreen = new THREE.Vector2()
+  /** A sound, panned to where on screen it happened. */
+  const impact = (kind: Impact, at?: { x: number; z: number }, strength = 1) => {
+    if (muted) return
+    let pan = 0
+    if (at && stage.size.width) {
+      stage.toScreen(heard.set(at.x, BOARD_Y, at.z), onScreen)
+      pan = THREE.MathUtils.clamp((onScreen.x / stage.size.width) * 2 - 1, -1, 1) * 0.6
+    }
+    events.impact?.(kind, { pan, strength })
   }
   const cast = createCast(scene, tweens, particles, { theme: () => theme, muted: () => muted })
   const highlights = createHighlights(scene)
@@ -180,6 +215,11 @@ export function createScene(
   }
   function emitGraves() {
     if (!muted) events.graves?.({ w: settled('w'), b: settled('b') })
+  }
+  /** A victim has come to rest in its tray. */
+  const arrived = (actor: Actor) => () => {
+    emitGraves()
+    impact('tray', actor.pos)
   }
   /** Victims that have actually arrived, not ones still on their way. */
   const settled = (color: Color) => cast.graves[color].filter((a) => !a.graveTween).length
@@ -236,10 +276,11 @@ export function createScene(
       if (Math.hypot(dx, dz) < 0.05) ({ x: dx, z: dz } = mover!.leanDir)
       const occupied = new Set<string>(squares.keys())
       occupied.delete(plan.to)
-      impact('capture')
+      impact('capture', victim.pos)
       cast.topple(victim, fallDirection(plan.victim!, { x: dx, z: dz }, occupied), {
         knock: 0.24,
-        done: () => cast.bury(victim, { delay: 60, onArrive: emitGraves }),
+        onImpact: () => impact('fall', victim.pos, 0.7),
+        done: () => cast.bury(victim, { delay: 60, onArrive: arrived(victim) }),
       })
     }
     const duration = cast.travel(mover, home(plan.to), {
@@ -263,7 +304,7 @@ export function createScene(
           height: 1.95,
           duration: 640,
           delay: duration * 0.4,
-          onLand: () => impact('move'),
+          onLand: () => impact('move', rook.pos),
         }),
       )
     if (plan.promotion) hold += reducedMotion() ? 260 : 620
@@ -273,20 +314,20 @@ export function createScene(
 
   function landed(plan: MovePlan, mover: Actor, captured: boolean, final: GameState | null) {
     shown.last = { from: plan.from, to: plan.to }
-    if (!plan.check && !plan.promotion && !captured) impact('move')
+    if (!plan.check && !plan.promotion && !captured) impact('move', mover.pos)
     const afterwards = () => {
       if (plan.check) {
         const king = kingOf(other(plan.color))
         shown.check = king?.square ?? null
         shown.threats = final?.threats ?? []
-        impact(plan.mate ? 'end' : 'check')
+        impact(plan.mate ? 'end' : 'check', king?.actor.pos)
         if (king && !plan.mate) cast.shudder(king.actor)
         if (plan.mate && final) finale(final, true)
       }
       paint()
     }
     if (plan.promotion) {
-      impact('promote')
+      impact('promote', mover.pos)
       cast.promote(mover, plan.promotion, () => {
         if (plan.promotion === 'n')
           cast.travel(mover, mover.pos.clone(), { hop: true, height: 0.75, duration: 480 })
@@ -319,8 +360,9 @@ export function createScene(
       delay: mate ? 380 : 150,
       onImpact: () => {
         if (!animate) return
+        impact('fall', king.actor.pos)
         if (!mate) impact('end')
-        if (!reducedMotion()) {
+        if (!reducedMotion() && stage.quality > 0) {
           rig.shake(mate ? 0.07 : 0.03, 300)
           particles.burst({
             origin: new THREE.Vector3(at.x + away.x * 0.4, BOARD_Y + 0.05, at.z + away.z * 0.4),
@@ -334,10 +376,10 @@ export function createScene(
       },
     })
     if (animate && mate && !rig.userControlled)
-      orbitTo({
+      orbit({
         target: new THREE.Vector3(at.x * 0.45, 0.3, at.z * 0.45),
         zoom: 1.22,
-        azimuth: spherical().azimuth + 0.3,
+        azimuth: rig.angle.azimuth + 0.3,
         polar: 0.8,
         ms: 1900,
         delay: 250,
@@ -346,6 +388,8 @@ export function createScene(
   }
 
   function confetti(amount: number) {
+    // A slow device keeps the moment, with less paper in the air.
+    amount *= [0.35, 0.65, 1][stage.quality]
     const colors = ['#f6c453', '#fff4dc', '#7f935e', '#c9a86a', '#e9706a']
     for (const [i, x] of [-3.4, 3.4, 0].entries())
       later(i * 220, () =>
@@ -409,6 +453,8 @@ export function createScene(
                 duration: 430 + 70 * Math.sqrt(distance),
                 delay,
                 quiet: true,
+                // Thirty-two pieces going home: a soft clatter, not thirty-two moves.
+                onLand: () => impact('move', to, 0.22),
               }),
         )
         squares.set(piece.square, actor)
@@ -420,7 +466,7 @@ export function createScene(
     }
     for (const actor of spare) cast.vanish(actor)
     if (!rig.userControlled)
-      orbitTo({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 1200 })
+      orbit({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 1200 })
     paint()
     return hold + GAP
   }
@@ -444,7 +490,7 @@ export function createScene(
     }
     for (const actor of cast.actors.values())
       if (actor.state === 'board' && !seen.has(actor) && !actor.flights)
-        cast.bury(actor, { onArrive: emitGraves })
+        cast.bury(actor, { onArrive: arrived(actor) })
     squares.clear()
     for (const piece of game.pieces) squares.set(piece.square, cast.actors.get(piece.id)!)
     const last = game.history.at(-1)
@@ -636,80 +682,14 @@ export function createScene(
     camera.lookAt(controls.target)
   }
   const offset = new THREE.Vector3()
-  function spherical() {
-    offset.subVectors(camera.position, controls.target)
-    const length = offset.length() || 1
-    return {
-      azimuth: Math.atan2(offset.x, offset.z),
-      polar: Math.acos(THREE.MathUtils.clamp(offset.y / length, -1, 1)),
-    }
+  /** Where the zoom is heading, so a flip mid-zoom keeps the zoom the viewer asked for. */
+  let zoomGoal = 1
+  /** The rig's orbit, at the site's motion preference: short and level when reduced. */
+  function orbit(goal: Orbit) {
+    const reduced = reducedMotion()
+    if (goal.zoom !== undefined) zoomGoal = goal.zoom
+    rig.orbit({ ...goal, ms: reduced ? 240 : (goal.ms ?? 950), swoop: reduced ? 0 : goal.swoop })
   }
-  let cameraTween: Tween | null = null,
-    cameraGoal = { zoom: 1 }
-  /**
-   * An orbiting camera move: azimuth and polar angle ease on the sphere, so a
-   * flip swings round the board instead of cutting through it. It moves the
-   * camera by the change each frame, so it composes with the rig's shake.
-   */
-  function orbitTo(goal: {
-    azimuth?: number
-    polar?: number
-    zoom?: number
-    target?: THREE.Vector3
-    swoop?: number
-    ms?: number
-    delay?: number
-  }) {
-    cameraTween?.cancel()
-    const reduced = reducedMotion(),
-      fromTarget = controls.target.clone(),
-      toTarget = (goal.target ?? fromTarget).clone(),
-      fromZoom = camera.zoom,
-      toZoom = goal.zoom ?? fromZoom,
-      last = new THREE.Vector3(),
-      desired = new THREE.Vector3()
-    cameraGoal = { zoom: toZoom }
-    let from = spherical(),
-      toAzimuth = 0
-    cameraTween = tweens.add({
-      duration: reduced ? 240 : (goal.ms ?? 950),
-      delay: goal.delay,
-      ease: inOutCubic,
-      start: () => {
-        from = spherical()
-        last.copy(camera.position)
-        toAzimuth = goal.azimuth ?? from.azimuth
-        while (toAzimuth - from.azimuth > Math.PI) toAzimuth -= Math.PI * 2
-        while (toAzimuth - from.azimuth < -Math.PI) toAzimuth += Math.PI * 2
-      },
-      update: (e, raw) => {
-        const azimuth = lerp(from.azimuth, toAzimuth, e),
-          polar =
-            lerp(from.polar, goal.polar ?? from.polar, e) -
-            (reduced ? 0 : (goal.swoop ?? 0) * Math.sin(Math.PI * raw))
-        controls.target.lerpVectors(fromTarget, toTarget, e)
-        desired
-          .set(
-            Math.sin(azimuth) * Math.sin(polar) * RADIUS,
-            Math.cos(polar) * RADIUS,
-            Math.cos(azimuth) * Math.sin(polar) * RADIUS,
-          )
-          .add(controls.target)
-        camera.position.add(offset.subVectors(desired, last))
-        last.copy(desired)
-        camera.zoom = lerp(fromZoom, toZoom, e)
-        camera.updateProjectionMatrix()
-        camera.lookAt(controls.target)
-      },
-      done: () => {
-        cameraTween = null
-      },
-    })
-  }
-  controls.addEventListener('start', () => {
-    cameraTween?.cancel()
-    cameraTween = null
-  })
   controls.addEventListener('change', () => stage.invalidate())
   stage.onResize((width, height) => {
     const aspect = width / height,
@@ -724,18 +704,10 @@ export function createScene(
 
   // ——— pointer: taps, drags and hover ———
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -BOARD_Y),
-    ray = new THREE.Raycaster(),
-    ndc = new THREE.Vector2(),
     point = new THREE.Vector3()
   function boardPoint(event: { clientX: number; clientY: number }, height = BOARD_Y) {
-    const rect = canvas.getBoundingClientRect()
-    ndc.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    )
-    ray.setFromCamera(ndc, camera)
     plane.constant = -height
-    return ray.ray.intersectPlane(plane, point)
+    return stage.ray(event)?.intersectPlane(plane, point) ?? null
   }
   /** A piece first — but never one mid-flight, whose square is its destination — then the square under the pointer. */
   function pick(event: { clientX: number; clientY: number }) {
@@ -981,7 +953,7 @@ export function createScene(
     if (particles.step(dt)) moving = true
     if (controls.update()) moving = true
     if (rig.step(dt)) moving = true
-    if (options.showcase && showcaseVisible && !reducedMotion() && !cameraTween) {
+    if (options.showcase && showcaseVisible && !reducedMotion() && !rig.busy) {
       // The lobby's board turns slowly while it is on screen, drawn at half rate.
       offset
         .subVectors(camera.position, controls.target)
@@ -1011,7 +983,30 @@ export function createScene(
     stage.invalidate()
   })
 
-  build(initial.game)
+  // A slow device draws a smaller shadow map; at the lowest tier the stage drops shadows itself.
+  // A visit that was already slow on an earlier board starts here rather than finding out again.
+  function fitQuality(tier: number) {
+    if (tier > 1 || key.shadow.mapSize.x <= 1024) return
+    key.shadow.mapSize.set(1024, 1024)
+    key.shadow.map?.dispose()
+    key.shadow.map = null
+  }
+  fitQuality(stage.quality)
+  const stopQuality = stage.onQuality(fitQuality)
+
+  const live =
+    !options.showcase &&
+    options.since !== undefined &&
+    options.since < LIVE_MOVE_MS &&
+    initial.game.history.length > 0
+  build(live ? beforeLast(initial.game) : initial.game)
+  if (live) {
+    // Opened mid-move: the move starts over from where the server's clock says it has got to.
+    queued = beforeLast(initial.game)
+    tell(initial.game)
+    queue.step(options.since!)
+    tweens.step(options.since!)
+  }
   lifts()
   paint()
   stage.start()
@@ -1047,26 +1042,28 @@ export function createScene(
     flip(next) {
       if (next === black) return
       black = next
-      orbitTo({
+      orbit({
         azimuth: VIEW.azimuth(black),
         polar: VIEW.polar,
         target: TARGET,
-        zoom: cameraTween ? cameraGoal.zoom : camera.zoom,
+        zoom: rig.busy ? zoomGoal : camera.zoom,
         swoop: 0.32,
         ms: 1150,
       })
     },
     zoom(amount) {
-      orbitTo({ zoom: THREE.MathUtils.clamp(camera.zoom + amount * 0.15, 0.75, 1.65), ms: 320 })
+      const from = rig.busy ? zoomGoal : camera.zoom
+      orbit({ zoom: THREE.MathUtils.clamp(from + amount * 0.15, 0.75, 1.65), ms: 320 })
     },
     reset() {
-      orbitTo({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 800 })
+      orbit({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 800 })
     },
     top() {
-      orbitTo({ azimuth: black ? Math.PI : 0, polar: 0.04, ms: 800 })
+      orbit({ azimuth: black ? Math.PI : 0, polar: 0.04, ms: 800 })
     },
     dispose() {
       removeFrame()
+      stopQuality()
       stopMotion()
       visibility?.disconnect()
       container.removeEventListener('pointerdown', down, { capture: true })

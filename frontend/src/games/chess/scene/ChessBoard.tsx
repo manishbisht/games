@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import type { KeyboardEvent } from 'react'
 import type { Color, Square } from '@games/shared/chess/types'
 import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
+import type { SoundDetail } from '../game/audio'
 import { createScene } from './createScene'
 import type { Impact, SceneApi, SceneState } from './createScene'
 
@@ -10,19 +11,21 @@ interface BoardProps {
   state: SceneState
   black: boolean
   onSelect: (square: Square) => void
-  onImpact?: (kind: Impact) => void
+  onImpact?: (kind: Impact, detail: SoundDetail) => void
   onPresenting?: (busy: boolean) => void
   onGraves?: (counts: Record<Color, number> | null) => void
   /** The lobby's preview: turns slowly while on screen. */
   showcase?: boolean
+  /** Read once, on mount: how long ago the opening state began; see `SceneOptions.since`. */
+  since?: number
 }
 const ChessBoard = forwardRef<BoardControls, BoardProps>(function ChessBoard(
-  { state, black, onSelect, onImpact, onPresenting, onGraves, showcase = false },
+  { state, black, onSelect, onImpact, onPresenting, onGraves, showcase = false, since },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null),
     api = useRef<SceneApi | null>(null),
-    initial = useRef({ state, black, showcase }),
+    initial = useRef({ state, black, showcase, since }),
     handlers = useRef({ onSelect, onImpact, onPresenting, onGraves })
   const [failed, setFailed] = useState(false),
     [focused, setFocused] = useState<Square | null>(null),
@@ -46,10 +49,10 @@ const ChessBoard = forwardRef<BoardControls, BoardProps>(function ChessBoard(
       api.current = createScene(
         container.current,
         start.state,
-        { black: start.black, showcase: start.showcase },
+        { black: start.black, showcase: start.showcase, since: start.since },
         {
           select: (square) => handlers.current.onSelect(square),
-          impact: (kind) => handlers.current.onImpact?.(kind),
+          impact: (kind, detail) => handlers.current.onImpact?.(kind, detail),
           presenting: (busy) => handlers.current.onPresenting?.(busy),
           graves: (counts) => handlers.current.onGraves?.(counts),
         },
