@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import type { Browser, Page } from '@playwright/test'
+import type { Browser, BrowserContext, Page } from '@playwright/test'
 
 /**
  * The table is paced by the server — the dice spin and the token walks on its
@@ -18,8 +18,15 @@ const turnOf = (page: Page) => page.locator('.turn-eyebrow')
 const settle = (page: Page) =>
   expect(page.getByRole('button', { name: BUSY })).toHaveCount(0, { timeout: 20000 })
 
+/** Every browser a test opened: closed after it, so a finished table stops playing in the background. */
+const opened: BrowserContext[] = []
+test.afterEach(async () => {
+  await Promise.all(opened.splice(0).map((context) => context.close()))
+})
+
 async function newPlayer(browser: Browser, errors: string[]) {
   const context = await browser.newContext()
+  opened.push(context)
   // The first-game guide has its own spec (estate-guide).
   await context.addInitScript(() => localStorage.setItem('games-guide-estate', 'done'))
   const page = await context.newPage()
