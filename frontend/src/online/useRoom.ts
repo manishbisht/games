@@ -163,8 +163,10 @@ export function useRoom(
       }
       ws.onclose = (event) => {
         clearInterval(heartbeat)
+        // A replaced socket's close can arrive after its successor has joined
+        // (StrictMode's double mount, a quick reconnect); it speaks for itself only.
+        if (disposed || socket.current !== ws) return
         joined.current = false
-        if (disposed) return
         dispatch({ type: 'close', code: event.code })
         timer = setTimeout(open, backoff(attempts.current++))
       }
@@ -185,6 +187,7 @@ export function useRoom(
       clearInterval(heartbeat)
       window.removeEventListener('online', retryNow)
       document.removeEventListener('visibilitychange', retryNow)
+      joined.current = false
       socket.current?.close()
       socket.current = null
     }
