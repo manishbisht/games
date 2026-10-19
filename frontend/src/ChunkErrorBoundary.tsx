@@ -1,6 +1,7 @@
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 import { Link } from 'react-router'
+import { reportError } from './errorReports'
 
 /**
  * Every game is a lazy import, and a rejected one rejects for good: React
@@ -44,6 +45,7 @@ export default class ChunkErrorBoundary extends Component<{ children: ReactNode;
     // Worth a line in the console: the message names the chunk that went
     // missing, which is the only clue to a bad deploy.
     console.error('A game failed to load.', error, info.componentStack)
+    reportError('boundary', error)
   }
 
   render(): ReactNode {

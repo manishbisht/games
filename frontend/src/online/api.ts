@@ -46,6 +46,9 @@ export async function createRoom(
       ...(options === undefined ? {} : { options }),
     }),
   })
+  // The server limits how fast one address may make rooms; say so, rather
+  // than suggesting the service is down.
+  if (res.status === 429) throw new Error('That’s a lot of rooms at once. Try again in a minute.')
   if (!res.ok) throw new Error('Could not create a room right now.')
   const { code } = (await res.json()) as { code: string }
   return code
@@ -66,11 +69,7 @@ export interface PresenceCounts {
   byGame: Record<string, number>
 }
 
-export async function presenceBeat(
-  clientId: string,
-  tabId: string,
-  game?: string,
-): Promise<PresenceCounts> {
+export async function presenceBeat(clientId: string, tabId: string, game?: string): Promise<PresenceCounts> {
   const res = await fetch(`${API_URL}/api/presence`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

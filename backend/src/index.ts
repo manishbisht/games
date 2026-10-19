@@ -5,6 +5,8 @@ import { resolveIdentity } from './auth'
 import { secureRandom } from './room'
 import { allowedOrigin, corsHeaders } from './cors'
 import { resolvePresenceGame, validPresenceId } from './presence'
+import { overLimit, RETRY_AFTER_S } from './limits'
+import { logReport, MAX_REPORT_BYTES, parseReport } from './clientErrors'
 
 export { RoomDO } from './room'
 export { LobbyDO } from './lobby'
@@ -14,6 +16,13 @@ function json(data: unknown, status: number, origin: string | null): Response {
   const headers = new Headers({ 'content-type': 'application/json' })
   if (origin) for (const [k, v] of Object.entries(corsHeaders(origin))) headers.set(k, v as string)
   return new Response(JSON.stringify(data), { status, headers })
+}
+
+/** Refused for asking too often, with how long to leave it before asking again. */
+function tooMany(origin: string | null): Response {
+  const response = json({ error: 'too many requests' }, 429, origin)
+  response.headers.set('Retry-After', String(RETRY_AFTER_S))
+  return response
 }
 
 /**
@@ -41,6 +50,7 @@ export default {
     if (url.pathname === '/health') return json({ ok: true }, 200, origin)
 
     if (url.pathname === '/api/rooms' && request.method === 'POST') {
+      if (await overLimit(env.ROOMS_LIMITER, request)) return tooMany(origin)
       const body = await readObject(request)
       if (!body) return json({ error: 'invalid JSON' }, 400, origin)
       // A game is bookable exactly when its adapter is registered — having a
@@ -96,6 +106,9 @@ export default {
     if (roomMatch && request.method === 'GET') {
       const code = normalizeRoomCode(roomMatch[1])
       if (!code) return json({ error: 'invalid room code' }, 404, origin)
+      // Counted before the room is woken: a reconnect loop gone wrong should
+      // cost this Worker a header check, not a Durable Object a socket.
+      if (await overLimit(env.SOCKETS_LIMITER, request)) return tooMany(origin)
       return env.ROOM.getByName(code).fetch(request)
     }
 
@@ -105,10 +118,21 @@ export default {
       const clientId = validPresenceId(body.clientId)
       const tabId = validPresenceId(body.tabId)
       const game = resolvePresenceGame(body.game)
-      if (!clientId || !tabId || game === null)
-        return json({ error: 'invalid presence beat' }, 400, origin)
+      if (!clientId || !tabId || game === null) return json({ error: 'invalid presence beat' }, 400, origin)
       const counts = await env.PRESENCE.getByName('global').beat(clientId, tabId, game)
       return json(counts, 200, origin)
+    }
+
+    if (url.pathname === '/api/errors' && request.method === 'POST') {
+      // Checked against the declared length first, so an oversized body is
+      // refused without being read.
+      if (Number(request.headers.get('content-length') ?? 0) > MAX_REPORT_BYTES)
+        return json({ error: 'report too large' }, 413, origin)
+      if (await overLimit(env.ERRORS_LIMITER, request)) return tooMany(origin)
+      const report = parseReport(await request.text())
+      if (!report) return json({ error: 'invalid report' }, 400, origin)
+      logReport(report, request)
+      return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} })
     }
 
     if (url.pathname === '/api/lobby' && request.method === 'GET') {

@@ -6,6 +6,7 @@ import './motion/motion.css'
 // Sets <html data-motion> before the first paint, so CSS sees the preference.
 import './motion/preference'
 import App from './App.tsx'
+import { installErrorReporting } from './errorReports'
 import { createAppHistory } from './navigation'
 import { AuthProvider } from './online/identity'
 import { ThemeProvider } from './theme/ThemeProvider'
@@ -16,6 +17,8 @@ import { ThemeProvider } from './theme/ThemeProvider'
  * again straight away, something else is wrong and the boundary's message is
  * the honest answer, so don't loop.
  */
+installErrorReporting()
+
 const RELOADED_AT = 'games-chunk-reload'
 window.addEventListener('vite:preloadError', () => {
   try {

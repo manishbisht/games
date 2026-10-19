@@ -14,5 +14,19 @@
     { "tag": "v1", "new_sqlite_classes": ["RoomDO", "LobbyDO"] },
     { "tag": "v2", "new_sqlite_classes": ["PresenceDO"] },
   ],
+  // Per client address, per Cloudflare location (see src/limits.ts, which also
+  // exempts loopback so local dev, tests and CI never count). `namespace_id` is
+  // any integer unique within the Cloudflare account.
+  "ratelimits": [
+    // Making rooms: a person makes a handful an hour; a script makes thousands.
+    { "name": "ROOMS_LIMITER", "namespace_id": "41001", "simple": { "limit": 20, "period": 60 } },
+    // Opening room sockets: generous, since every reconnect is one.
+    { "name": "SOCKETS_LIMITER", "namespace_id": "41002", "simple": { "limit": 120, "period": 60 } },
+    // Error reports: the page caps itself at ten a session; this is for anything that does not.
+    { "name": "ERRORS_LIMITER", "namespace_id": "41003", "simple": { "limit": 30, "period": 60 } },
+  ],
+  // Workers Logs: every `console.*` line, including the structured
+  // `client_error` reports POST /api/errors writes, is kept and searchable in
+  // the dashboard (Workers & Pages → games-api → Logs).
   "observability": { "enabled": true },
 }
