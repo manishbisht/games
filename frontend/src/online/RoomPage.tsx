@@ -282,7 +282,7 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
             leave={leave}
           />
         </Suspense>
-        {overlay}
+        {!config.anchorsReactions && overlay}
         {toastStack}
       </>
     )

@@ -52,6 +52,11 @@ interface OnlineGameConfig {
    * that nobody else turned up to can be started anyway.
    */
   minSeats: number
+  /**
+   * The game draws reactions at its own seats during play, so the room page's
+   * generic overlay stays out of the way once the game is on.
+   */
+  anchorsReactions?: boolean
   /** What the button that takes this seat should say. */
   seatLabel(seat: SeatId, index: number): string
   /**
