@@ -265,7 +265,7 @@ export function PortfolioDialog({
                     {prop?.mortgaged
                       ? '· Mortgaged'
                       : prop?.level
-                        ? `· ${prop.level === 5 ? 'Hotel' : `${prop.level} houses`}`
+                        ? `· ${prop.level === 5 ? 'Hotel' : `${prop.level} ${prop.level === 1 ? 'house' : 'houses'}`}`
                         : ''}
                   </small>
                 </div>

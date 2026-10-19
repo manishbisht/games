@@ -1,6 +1,12 @@
 .app-shell {
   min-height: 100svh;
-  background: radial-gradient(ellipse at 40% 8%, light-dark(color-mix(in srgb, var(--theme-page) 15%, transparent), #1c233025), transparent 65%), light-dark(var(--theme-page), #111722);
+  background:
+    radial-gradient(
+      ellipse at 40% 8%,
+      light-dark(color-mix(in srgb, var(--theme-page) 15%, transparent), #1c233025),
+      transparent 65%
+    ),
+    light-dark(var(--theme-page), #111722);
 }
 .site-header {
   height: 79px;
@@ -208,14 +214,22 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  background: radial-gradient(ellipse at 50% 47%, light-dark(color-mix(in srgb, var(--theme-surface) 28%, transparent), #2e394747) 0%, light-dark(color-mix(in srgb, var(--theme-surface) 32%, transparent), #19233052) 44%, light-dark(color-mix(in srgb, var(--theme-surface) 33%, transparent), #131b2855) 79%);
+  background: radial-gradient(
+    ellipse at 50% 47%,
+    light-dark(color-mix(in srgb, var(--theme-surface) 28%, transparent), #2e394747) 0%,
+    light-dark(color-mix(in srgb, var(--theme-surface) 32%, transparent), #19233052) 44%,
+    light-dark(color-mix(in srgb, var(--theme-surface) 33%, transparent), #131b2855) 79%
+  );
   isolation: isolate;
 }
 .board-viewport:before {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(light-dark(color-mix(in srgb, var(--theme-inset) 4%, transparent), #a5bad20b) 0.5px, transparent 0.5px);
+  background-image: radial-gradient(
+    light-dark(color-mix(in srgb, var(--theme-inset) 4%, transparent), #a5bad20b) 0.5px,
+    transparent 0.5px
+  );
   background-size: 5px 5px;
   pointer-events: none;
 }
@@ -511,7 +525,11 @@
   border-color: var(--player-color);
 }
 .player-card.active {
-  background: linear-gradient(115deg, color-mix(in srgb, var(--player-color) 23%, light-dark(var(--theme-surface), #17202d)), light-dark(var(--theme-surface), #1c2531));
+  background: linear-gradient(
+    115deg,
+    color-mix(in srgb, var(--player-color) 23%, light-dark(var(--theme-surface), #17202d)),
+    light-dark(var(--theme-surface), #1c2531)
+  );
   border-color: var(--player-color);
   padding-bottom: 0;
   box-shadow:
@@ -664,7 +682,7 @@
   align-items: flex-start;
   position: relative;
   margin-bottom: 17px;
-  animation: event-appear 0.3s ease-out;
+  animation: event-drop var(--motion-slow) var(--ease-spring) both;
 }
 .activity-event p {
   font-size: 10px;
@@ -841,7 +859,7 @@
   border: 1px solid light-dark(var(--theme-border), #3a4451);
   padding: 8px 10px;
   border-radius: 7px;
-  animation: event-appear 0.4s ease-out;
+  animation: chip-in var(--motion-slow) var(--ease-spring) both;
   box-shadow: 0 3px 15px #0002;
 }
 .mini-die {
@@ -885,7 +903,7 @@
   text-align: center;
   pointer-events: none;
   text-shadow: 0 4px 20px #0008;
-  animation: reward 3.5s both;
+  animation: reward 3.2s var(--ease-out) both;
 }
 .go-reward span {
   display: block;
@@ -893,26 +911,6 @@
   color: #d0e6d4;
   margin-top: 4px;
   white-space: nowrap;
-}
-.pause-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  background: light-dark(color-mix(in srgb, var(--theme-surface) 53%, transparent), #11172288);
-  backdrop-filter: blur(5px);
-  display: grid;
-  place-items: center;
-}
-.pause-overlay button {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 18px 25px;
-  background: light-dark(var(--theme-surface), #252e3e);
-  color: light-dark(var(--theme-accent), #e9bd8c);
-  border: 1px solid light-dark(var(--theme-border), #6b5c4c);
-  border-radius: 12px;
-  box-shadow: 0 12px 30px #0002;
 }
 .game-stage:fullscreen {
   border-radius: 0;
@@ -949,7 +947,6 @@
   box-shadow: 0 35px 150px #0009;
   overflow: auto;
   overscroll-behavior: contain;
-  animation: dialog-appear 0.22s ease-out;
 }
 .dialog::backdrop {
   background: #080d18b0;
@@ -1702,11 +1699,19 @@ kbd {
   color: light-dark(var(--theme-accent), #e2b078);
   font-family: Georgia, serif;
   font-size: 100px;
-  background: radial-gradient(ellipse, light-dark(color-mix(in srgb, var(--theme-inset) 13%, transparent), #ce9a6422), transparent 70%);
+  background: radial-gradient(
+    ellipse,
+    light-dark(color-mix(in srgb, var(--theme-inset) 13%, transparent), #ce9a6422),
+    transparent 70%
+  );
 }
 .event-card.chest .card-illustration {
   color: light-dark(var(--theme-muted), #8eb8b5);
-  background: radial-gradient(ellipse, light-dark(color-mix(in srgb, var(--theme-inset) 13%, transparent), #6ba6a522), transparent 70%);
+  background: radial-gradient(
+    ellipse,
+    light-dark(color-mix(in srgb, var(--theme-inset) 13%, transparent), #6ba6a522),
+    transparent 70%
+  );
 }
 .event-card > p {
   font-size: 14px;
@@ -1764,7 +1769,11 @@ kbd {
   gap: 17px;
   padding: 12px 0;
   color: light-dark(var(--theme-accent), #dfba86);
-  background: radial-gradient(ellipse, light-dark(color-mix(in srgb, var(--theme-inset) 11%, transparent), #ddae791b), transparent 67%);
+  background: radial-gradient(
+    ellipse,
+    light-dark(color-mix(in srgb, var(--theme-inset) 11%, transparent), #ddae791b),
+    transparent 67%
+  );
 }
 .winner-confetti > .token-icon {
   filter: drop-shadow(0 5px 15px #e9ad7240);
@@ -1832,7 +1841,6 @@ kbd {
   box-shadow: 0 10px 40px #0004;
   font-size: 12px;
   max-width: 90vw;
-  animation: event-appear 0.2s ease-out;
 }
 .toast > svg {
   flex-shrink: 0;
@@ -1844,26 +1852,6 @@ kbd {
   margin-left: 5px;
 }
 
-@keyframes event-appear {
-  from {
-    opacity: 0;
-    translate: 0 4px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
-}
-@keyframes dialog-appear {
-  from {
-    opacity: 0;
-    transform: scale(0.98) translateY(7px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
 @keyframes roll-icon {
   0% {
     transform: rotate(0);
@@ -1878,16 +1866,24 @@ kbd {
 @keyframes reward {
   0% {
     opacity: 0;
-    translate: 0 14px;
+    translate: 0 18px;
+    scale: 0.6;
   }
-  15%,
-  65% {
+  10% {
+    opacity: 1;
+    translate: 0 -4px;
+    scale: 1.12;
+  }
+  18%,
+  68% {
     opacity: 1;
     translate: 0 0;
+    scale: 1;
   }
   100% {
     opacity: 0;
-    translate: 0 -20px;
+    translate: 0 -26px;
+    scale: 0.96;
   }
 }
 
@@ -2793,16 +2789,6 @@ kbd {
     height: max(280px, calc(100svh - 32px));
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *:before,
-  *:after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-  }
-}
 
 .header-online {
   font-size: 9px;
@@ -2820,4 +2806,248 @@ kbd {
   width: 5px;
   border-radius: 50%;
   background: light-dark(var(--theme-inset), #7fa88a);
+}
+
+/*
+ * The table in motion. Buttons answer a press, cards and chips arrive with a
+ * little spring, money floats off the balance it changed, and coins cross the
+ * sidebar when it changes hands. Reduced motion is motion.css's business: its
+ * rule lands every one of these at once.
+ */
+.app-shell button {
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out),
+    scale var(--motion-fast) var(--ease-spring);
+}
+.app-shell button:active:not(:disabled) {
+  scale: 0.97;
+}
+.primary-button:hover:not(:disabled) {
+  translate: 0 -1px;
+}
+.app-shell .primary-button {
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out),
+    translate var(--motion-fast) var(--ease-out),
+    scale var(--motion-fast) var(--ease-spring);
+}
+.app-shell .player-card {
+  transition:
+    background var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-slow) var(--ease-out),
+    opacity var(--motion-slow) var(--ease-out),
+    filter var(--motion-slow) var(--ease-out),
+    scale var(--motion-fast) var(--ease-spring);
+}
+.player-card.bankrupt {
+  filter: grayscale(0.85);
+}
+.player-card.active {
+  animation: card-wake var(--motion-slow) var(--ease-spring);
+}
+@keyframes card-wake {
+  from {
+    box-shadow:
+      inset 0 0 0 var(--player-color),
+      0 0 0 #0000;
+  }
+}
+.player-turn-label {
+  overflow: hidden;
+  animation: turn-label-in var(--motion-slow) var(--ease-out) both;
+}
+@keyframes turn-label-in {
+  from {
+    max-height: 0;
+    padding-block: 0;
+    margin-top: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 40px;
+  }
+}
+.player-turn-label > i {
+  animation: turn-dot 1.6s var(--ease-in-out) infinite;
+}
+@keyframes turn-dot {
+  50% {
+    scale: 1.8;
+    opacity: 0.5;
+  }
+}
+.ownership-strips i {
+  transition: background-color var(--motion-slow) var(--ease-out);
+  transform-origin: left;
+  animation: strip-in var(--motion-slow) var(--ease-spring) both;
+}
+@keyframes strip-in {
+  from {
+    scale: 0 1;
+  }
+}
+
+.counted-money {
+  position: relative;
+  font-variant-numeric: tabular-nums;
+}
+.money-delta {
+  position: absolute;
+  right: 0;
+  top: -2px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: money-rise 1.5s var(--ease-out) both;
+}
+.money-delta.up {
+  color: light-dark(#2f8a55, #8fe0a8);
+}
+.money-delta.down {
+  color: light-dark(#b8463b, #f19a8c);
+  animation-name: money-fall;
+}
+@keyframes money-rise {
+  0% {
+    opacity: 0;
+    translate: 0 6px;
+    scale: 0.7;
+  }
+  14% {
+    opacity: 1;
+    translate: 0 -10px;
+    scale: 1.08;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 -26px;
+    scale: 1;
+  }
+}
+@keyframes money-fall {
+  0% {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.7;
+  }
+  14% {
+    opacity: 1;
+    translate: 0 14px;
+    scale: 1.08;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 26px;
+    scale: 1;
+  }
+}
+.flying-coin {
+  position: fixed;
+  z-index: 60;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #fff3c4, #f0c35a 45%, #b9842a);
+  box-shadow:
+    0 0 0 1px #8a5f1c55,
+    0 3px 8px #0004;
+}
+
+.turn-avatar {
+  animation: avatar-in var(--motion-slow) var(--ease-spring) both;
+}
+@keyframes avatar-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+    rotate: -14deg;
+  }
+}
+.turn-copy h2,
+.turn-copy p {
+  animation: motion-enter var(--motion-slow) var(--ease-out) both;
+}
+
+@keyframes event-drop {
+  from {
+    opacity: 0;
+    translate: 0 -10px;
+  }
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.7;
+  }
+}
+.dice-result .mini-die {
+  animation: mini-die-in var(--motion-slow) var(--ease-spring) both;
+}
+.dice-result .mini-die + .mini-die {
+  animation-delay: 70ms;
+}
+@keyframes mini-die-in {
+  from {
+    rotate: -120deg;
+    scale: 0.4;
+  }
+}
+.dice-result.doubles {
+  border-color: light-dark(var(--theme-accent), #d9a35f);
+  box-shadow:
+    0 0 0 3px light-dark(color-mix(in srgb, var(--theme-accent) 18%, transparent), #d9a35f26),
+    0 3px 15px #0002;
+}
+
+/* A drawn card turns over on its way to you, from edge-on to face-up. */
+.event-card[open] {
+  animation: card-reveal 640ms var(--ease-out) both;
+  transform-origin: 50% 50%;
+}
+@keyframes card-reveal {
+  0% {
+    transform: perspective(900px) rotateY(-90deg);
+  }
+  62% {
+    transform: perspective(900px) rotateY(9deg);
+  }
+  100% {
+    transform: perspective(900px) rotateY(0);
+  }
+}
+.event-card .card-illustration {
+  animation: motion-pop var(--motion-slow) var(--ease-spring) 240ms both;
+}
+
+.winner-confetti > * {
+  animation: motion-pop var(--motion-slow) var(--ease-spring) both;
+}
+.winner-confetti > :nth-child(2) {
+  animation:
+    motion-pop var(--motion-slow) var(--ease-spring) 120ms both,
+    winner-bob 2.4s var(--ease-in-out) 600ms infinite;
+}
+.winner-confetti > :nth-child(3) {
+  animation-delay: 220ms;
+}
+@keyframes winner-bob {
+  50% {
+    translate: 0 -6px;
+  }
 }

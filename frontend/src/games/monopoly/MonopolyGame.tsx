@@ -20,7 +20,6 @@ import {
   Maximize,
   Minus,
   MousePointer2,
-  Pause,
   Play,
   Plus,
   RotateCcw,
@@ -30,6 +29,7 @@ import {
   Trophy,
   Volume2,
   VolumeX,
+  Wind,
   X,
 } from 'lucide-react'
 import { Link } from 'react-router'
@@ -40,15 +40,19 @@ import { createGame, debtCapacity, netWorth, ownedSpaces } from '@games/shared/e
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { playSound, unlockAudio } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
+import { useCountUp, useHeld } from '../../motion/hooks'
+import { useMotionPreference, useReducedMotion } from '../../motion/preference'
 import { cardKeyOf, claimTarget, onlineDispatch, tradeKeyOf } from './online/session'
 import type { OnlineEstateSession } from './online/session'
 import BoardScene from './scene/BoardScene'
-import type { BoardControls } from './scene/BoardScene'
+import type { BoardControls, SceneCue } from './scene/BoardScene'
 import TokenIcon from './components/TokenIcon'
 import Dialog from './components/Dialog'
 import SetupDialog from './components/SetupDialog'
 import { PortfolioDialog, PropertyDetail, PropertySummary, TradeButton } from './components/PropertyDialogs'
 import TradeDialog from './components/TradeDialog'
+import CountedMoney from './components/Money'
+import { useCoinFlights, useFlip } from './components/useTableMotion'
 import './MonopolyGame.css'
 
 type Modal = 'setup' | 'rules' | 'settings' | 'portfolio' | 'trade' | null
@@ -159,45 +163,112 @@ function AbandonmentNotice({
   )
 }
 
+/**
+ * The seats the room plays, said in the state's own terms. The engine's
+ * `isBot` is false at every online seat — the room, not the engine, knows who
+ * is a computer — so the dialogs and the turn banner, which read that flag,
+ * learn it from the session here.
+ */
+function seated(state: GameState, online?: OnlineEstateSession): GameState {
+  if (!online || state.players.every((p, i) => p.isBot || !online.players[i]?.bot)) return state
+  return {
+    ...state,
+    players: state.players.map((p, i) => (online.players[i]?.bot ? { ...p, isBot: true } : p)),
+  }
+}
+
+/** A lap of GO the board has walked past but the room has not yet said so. */
+interface GoBonus {
+  player: number
+  /** The last event the page had shown when the token crossed GO. */
+  at: number
+}
+
+function WinnerStats({ cash, properties, worth }: { cash: number; properties: number; worth: number }) {
+  // Counted up from nothing once the dialog is open, which is the point of a final tally.
+  const [counting, setCounting] = useState(false)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setCounting(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  const shownCash = useCountUp(counting ? cash : 0, 1300),
+    shownProperties = useCountUp(counting ? properties : 0, 900),
+    shownWorth = useCountUp(counting ? worth : 0, 1600)
+  return (
+    <div className="winner-stats">
+      <div>
+        <span>FINAL CASH</span>
+        <strong>{money(shownCash)}</strong>
+      </div>
+      <div>
+        <span>PROPERTIES</span>
+        <strong>{shownProperties}</strong>
+      </div>
+      <div>
+        <span>NET WORTH</span>
+        <strong>{money(shownWorth)}</strong>
+      </div>
+    </div>
+  )
+}
+
 function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
-  // Online the room is the only source of truth: the reducer below never runs,
-  // this device's saved game is neither read nor written, and the table is
-  // already under way by the time this component mounts.
+  // Online the room is the only source of truth, and the table is already
+  // under way by the time this component mounts.
   // The board behind the setup dialog. It is never played: choosing a table
   // creates a room, and the room deals the real one.
   const preview = useMemo(() => createGame(), [])
-  const state = online ? online.state : preview
+  /** What the room says right now. */
+  const live = online ? online.state : preview
+  /**
+   * What the table shows: the room's state once the board has played it out.
+   * The token walks before the money moves, the buy prompt waits for it to
+   * land, and the card waits for its flip — so everything on the page reads
+   * from this, and only what must not wait (an offer arriving) reads `live`.
+   */
+  const [shown, setShown] = useState(live)
+  const state = useMemo(() => seated(shown, online), [shown, online])
   // The dialogs take a `dispatch` and know nothing about rooms. It is the wire:
   // everything a person may decide goes down it, and the beats the room paces
   // for itself are dropped rather than sent (see `./online/session`).
   const dispatch = useMemo(() => (online ? onlineDispatch(online) : () => {}), [online])
-  const [modal, setModal] = useState<Modal>(() => (state.trade ? 'trade' : null)),
+  const [modal, setModal] = useState<Modal>(() => (live.trade ? 'trade' : null)),
     [selected, setSelected] = useState<number | null>(null)
   const [portfolioPlayer, setPortfolioPlayer] = useState<number | undefined>(),
     [muted, setMuted] = useState(false)
-  const [fast, setFast] = useState(false),
-    [paused, setPaused] = useState(false),
-    [winnerDismissed, setWinnerDismissed] = useState(false)
+  const [winnerDismissed, setWinnerDismissed] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  /** The roll whose dice have come to rest on the board. */
+  const [landedRoll, setLandedRoll] = useState(live.rollId)
+  const [goBanner, setGoBanner] = useState<{ serial: number; player: number } | null>(null),
+    [goBonus, setGoBonus] = useState<GoBonus[]>([])
+  const [, setMotion] = useMotionPreference()
+  const calm = useReducedMotion()
   const board = useRef<BoardControls>(null),
-    gameArea = useRef<HTMLDivElement>(null)
+    gameArea = useRef<HTMLDivElement>(null),
+    shell = useRef<HTMLDivElement>(null),
+    feed = useRef<HTMLDivElement>(null)
   const player = state.players[state.current],
     isSetup = state.status === 'setup',
     isFinished = state.status === 'finished'
   const busy = state.phase === 'rolling' || state.phase === 'moving'
-  /** Whose inputs this browser may make: its own seat online, the shared one locally. */
+  const diceDown = state.rollId > 0 && (state.phase !== 'rolling' || landedRoll >= state.rollId)
+  const doubles = state.dice[0] === state.dice[1]
+  /** Past the dice and onto the walk — unless the dice kept someone in jail. */
+  const walking =
+    state.phase === 'moving' || (state.phase === 'rolling' && diceDown && (!player.jailed || doubles))
+  /** Whose inputs this browser may make: its own seat. */
   const humanTurn =
     !player.isBot && !isSetup && !isFinished && Boolean(online) && online!.mySeat === state.current
-  const lastEvent = state.events[0]
   const canTrade =
     humanTurn && ['ready', 'end'].includes(state.phase) && state.players.filter((p) => !p.bankrupt).length > 1
   /** The seat the table is stuck on, if its player has gone and can be claimed. */
   const awayBlocking = online ? claimTarget(online) : null
   /** Looking at an offer of your own: the one review with a button you may not press. */
-  const reviewingOwnOffer = Boolean(online && state.trade && online.mySeat === state.trade.from)
+  const reviewingOwnOffer = Boolean(online && live.trade && online.mySeat === live.trade.from)
   /** An offer you are party to is always reachable again, however you dismissed it. */
   const myOffer = Boolean(
-    online && state.trade && (online.mySeat === state.trade.from || online.mySeat === state.trade.to),
+    online && live.trade && (online.mySeat === live.trade.from || online.mySeat === live.trade.to),
   )
   // Online every fresh game shows its own result — a rematch arrives as a new
   // state rather than through the local restart that would have cleared this.
@@ -212,7 +283,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
    * watched by identity — see `tradeKeyOf` — so an unrelated broadcast cannot
    * shut an offer that is still being composed.
    */
-  const tradeKey = online ? tradeKeyOf(state) : ''
+  const tradeKey = online ? tradeKeyOf(live) : ''
   const [tradeShown, setTradeShown] = useState(tradeKey)
   /**
    * The same trick for the card, to the opposite end: a viewer who did not draw
@@ -227,23 +298,77 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     if (online.mySeat !== null && parties.includes(online.mySeat)) setModal('trade')
     else setModal((open) => (open === 'trade' ? null : open))
   }
+  /**
+   * Everything the table has logged since it last spoke, said once, in order.
+   * A snapshot can carry several events at once — a roll, a landing, a rent —
+   * and every one of them is news.
+   */
+  const [announced, setAnnounced] = useState({ id: state.eventId, text: state.events[0]?.text ?? '' })
+  if (state.eventId !== announced.id) {
+    const fresh = state.events.filter((event) => event.id > announced.id).reverse()
+    setAnnounced({
+      id: state.eventId,
+      text: (fresh.length ? fresh : state.events.slice(0, 1)).map((event) => event.text).join(' '),
+    })
+  }
+  const heard = useRef(state.eventId)
   useEffect(() => {
-    if (!muted && lastEvent && ['purchase', 'money'].includes(lastEvent.type))
-      playSound(lastEvent.type as 'purchase' | 'money')
-  }, [lastEvent, muted])
-  useEffect(() => {
-    if (!muted && state.phase === 'rolling') playSound('roll')
-  }, [state.phase, muted])
+    const fresh = state.events.filter((event) => event.id > heard.current)
+    heard.current = state.eventId
+    // A lap of GO already rang when the token crossed it.
+    const news = fresh.filter((event) => !event.text.includes('passed GO'))
+    if (muted || !news.length) return
+    if (news.some((event) => event.type === 'purchase')) playSound('purchase')
+    else if (news.some((event) => event.type === 'money')) playSound('money')
+  }, [state, muted])
+  /** The cash each card shows: the state's, plus any lap of GO walked but not yet booked. */
+  const cash = state.players.map(
+    (p) =>
+      p.cash + goBonus.filter((bonus) => bonus.player === p.id && bonus.at >= state.eventId).length * 200,
+  )
+  useCoinFlights(cash, shell)
+  useFlip(feed, state.eventId)
+  function onCue(cue: SceneCue) {
+    if (cue.type === 'present') {
+      setShown(cue.state)
+      setGoBonus((all) =>
+        all.some((bonus) => bonus.at < cue.state.eventId)
+          ? all.filter((bonus) => bonus.at >= cue.state.eventId)
+          : all,
+      )
+    } else if (cue.type === 'dice') setLandedRoll(cue.rollId)
+    else if (cue.type === 'go') {
+      setGoBanner((last) => ({ serial: (last?.serial ?? 0) + 1, player: cue.player }))
+      setGoBonus((all) => [...all, { player: cue.player, at: shown.eventId }])
+      if (!muted) playSound('money')
+    } else if (cue.type === 'sound' && !muted) playSound(cue.sound, cue.strength)
+  }
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(null), 3500)
     return () => clearTimeout(timer)
   }, [toast])
+  /**
+   * Turn the card over. It goes down at once: what it does — a walk, a trip to
+   * jail — plays on the board, and the card has no business sitting over it.
+   */
+  function readCard() {
+    setCardDismissed(cardKey)
+    dispatch({ type: 'ACK_CARD' })
+  }
+  /** Ask the room for a roll, and pick the dice up while it answers. */
+  function roll() {
+    board.current?.shake()
+    dispatch({ type: 'ROLL' })
+  }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (
         modal ||
         selected !== null ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
         ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes((e.target as HTMLElement)?.tagName)
       )
         return
@@ -251,19 +376,19 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         e.preventDefault()
         unlockAudio()
         if (isSetup) setModal('setup')
-        else if (humanTurn && !paused && state.phase === 'ready') dispatch({ type: 'ROLL' })
-        else if (humanTurn && !paused && state.phase === 'end') dispatch({ type: 'END_TURN' })
+        else if (humanTurn && state.phase === 'ready') roll()
+        else if (humanTurn && state.phase === 'end') dispatch({ type: 'END_TURN' })
       }
       if (e.key.toLowerCase() === 'r') board.current?.reset()
       if (e.key.toLowerCase() === 'm') {
-        setPortfolioPlayer(state.current)
+        setPortfolioPlayer(online?.mySeat ?? state.current)
         setModal('portfolio')
       }
       if (e.key === '?') setModal('rules')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modal, selected, isSetup, humanTurn, paused, state, dispatch])
+  })
   const room = useBotRoom('estate', estateGame.path)
   function startGame(players: PlayerConfig[], mode: GameState['mode']) {
     unlockAudio()
@@ -274,8 +399,8 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
       options: { mode },
     })
   }
-  // Locally the player on turn is the person at the keyboard; online it is
-  // whoever's turn it happens to be, and your own properties are still yours.
+  // The player on turn is whoever's turn it happens to be, and your own
+  // properties are still yours.
   function openPortfolio(id = online?.mySeat ?? state.current) {
     setPortfolioPlayer(id)
     setModal('portfolio')
@@ -289,27 +414,20 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
       else setModal('setup')
       return
     }
-    if (paused) {
-      setPaused(false)
-      return
-    }
     if (!humanTurn) return
-    if (state.phase === 'ready') dispatch({ type: 'ROLL' })
+    if (state.phase === 'ready') roll()
     if (state.phase === 'end') {
       dispatch({ type: 'END_TURN' })
-      if (state.extraRoll) dispatch({ type: 'ROLL' })
+      if (state.extraRoll) roll()
     }
     if (state.phase === 'purchase') dispatch({ type: 'BUY' })
   }
   /**
-   * Dismissing the trade dialog. Locally, closing a review *is* declining it —
-   * the dialog is the only place that deal lives. Online it is not: the offer
-   * lives in the room, and both of the dialog's own buttons already send their
-   * own message before calling this, so rejecting here too would put a second
-   * message on the wire behind every answer. Online, dismissing is local.
+   * Dismissing the trade dialog. The offer lives in the room, and both of the
+   * dialog's own buttons already send their own message before calling this,
+   * so dismissing is local.
    */
   function closeTrade() {
-    if (state.trade && !online) dispatch({ type: 'REJECT_TRADE' })
     setModal(null)
   }
   async function fullscreen() {
@@ -321,34 +439,34 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
       setToast('Use the camera controls to find your perfect view.')
     }
   }
+  const showWinner = useHeld(isFinished && !winnerDismissed && modal !== 'setup', 2800)
+  const winner = state.winner !== null ? state.players[state.winner] : null
   const actionText = isSetup
     ? 'Start game'
     : isFinished
       ? 'Play again'
-      : paused
-        ? 'Resume game'
-        : busy
-          ? state.phase === 'rolling'
-            ? 'Rolling the dice…'
-            : 'On the move…'
-          : // The other seat's decisions are theirs to make, and to be seen making.
-            player.isBot || (online && !humanTurn)
-            ? `${player.name} is playing…`
-            : state.phase === 'purchase'
-              ? `Buy for ${money(BOARD[player.position].price || 0)}`
-              : state.phase === 'end'
-                ? state.extraRoll
-                  ? 'Roll again'
-                  : 'End turn'
-                : state.phase === 'debt'
-                  ? 'Resolve payment'
-                  : state.phase === 'card'
-                    ? 'Your card awaits'
-                    : 'Roll dice'
+      : busy
+        ? // The room holds the whole roll as one beat, so the button says so for all of it.
+          state.phase === 'rolling'
+          ? 'Rolling the dice…'
+          : 'On the move…'
+        : // The other seat's decisions are theirs to make, and to be seen making.
+          player.isBot || (online && !humanTurn)
+          ? `${player.name} is playing…`
+          : state.phase === 'purchase'
+            ? `Buy for ${money(BOARD[player.position].price || 0)}`
+            : state.phase === 'end'
+              ? state.extraRoll
+                ? 'Roll again'
+                : 'End turn'
+              : state.phase === 'debt'
+                ? 'Resolve payment'
+                : state.phase === 'card'
+                  ? 'Your card awaits'
+                  : 'Roll dice'
   const actionDisabled =
     !isSetup &&
     !isFinished &&
-    !paused &&
     (busy ||
       player.isBot ||
       Boolean(online && !humanTurn) ||
@@ -357,37 +475,37 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   const actionTitle = isSetup
     ? 'Your next great game starts here.'
     : isFinished
-      ? `${state.players[state.winner!].name} takes the city.`
-      : paused
-        ? 'A little intermission.'
-        : state.phase === 'purchase'
-          ? BOARD[player.position].name
-          : state.phase === 'rolling'
-            ? 'A little luck goes a long way.'
-            : state.phase === 'moving'
-              ? `${player.name} is making moves.`
-              : state.phase === 'end'
-                ? state.extraRoll
-                  ? 'Double the dice. Double the fun.'
-                  : 'A good move. What’s next?'
-                : player.jailed
-                  ? `${player.name} is in jail.`
-                  : `${player.name === 'You' ? 'Your' : `${player.name}’s`} turn to make a move.`
+      ? `${winner?.name} takes the city.`
+      : state.phase === 'purchase'
+        ? BOARD[player.position].name
+        : state.phase === 'rolling'
+          ? walking
+            ? `${player.name} is making moves.`
+            : 'A little luck goes a long way.'
+          : state.phase === 'moving'
+            ? `${player.name} is making moves.`
+            : state.phase === 'end'
+              ? state.extraRoll
+                ? 'Double the dice. Double the fun.'
+                : 'A good move. What’s next?'
+              : player.jailed
+                ? `${player.name} is in jail.`
+                : `${player.name === 'You' ? 'Your' : `${player.name}’s`} turn to make a move.`
   const actionDescription = isSetup
     ? 'Gather your people. Build your fortune.'
     : state.phase === 'purchase'
       ? 'An opportunity to call a little more of the city your own.'
-      : player.jailed
-        ? 'Roll doubles to leave, or pay the $50 release fee.'
-        : state.phase === 'end'
-          ? state.extraRoll
-            ? 'You rolled doubles. Take another turn.'
-            : 'Manage your properties or pass the dice.'
-          : state.phase === 'moving'
-            ? `${state.stepsRemaining} spaces to go. Let’s see where you land.`
+      : walking
+        ? `${state.phase === 'moving' ? state.stepsRemaining : state.dice[0] + state.dice[1]} spaces to go. Let’s see where you land.`
+        : player.jailed
+          ? 'Roll doubles to leave, or pay the $50 release fee.'
+          : state.phase === 'end'
+            ? state.extraRoll
+              ? 'You rolled doubles. Take another turn.'
+              : 'Manage your properties or pass the dice.'
             : 'Roll the dice and see where the city takes you.'
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={shell}>
       <header className="site-header">
         <Link
           className="wordmark"
@@ -464,13 +582,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                 <div className="board-label">
                   <span className="live-dot" />
                   <span>
-                    {isSetup
-                      ? 'YOUR CITY AWAITS'
-                      : isFinished
-                        ? 'A CITY WELL PLAYED'
-                        : paused
-                          ? 'GAME PAUSED'
-                          : 'THE CITY IS YOURS'}
+                    {isSetup ? 'YOUR CITY AWAITS' : isFinished ? 'A CITY WELL PLAYED' : 'THE CITY IS YOURS'}
                   </span>
                 </div>
                 <button
@@ -481,20 +593,24 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                   <Expand size={17} />
                 </button>
               </div>
-              <BoardScene ref={board} state={state} selected={selected} onSelect={setSelected} />
-              {state.rollId > 0 && state.phase !== 'rolling' && (
-                <div className="dice-result" key={state.rollId}>
+              <BoardScene ref={board} state={live} selected={selected} onSelect={setSelected} onCue={onCue} />
+              {diceDown && (
+                <div className={`dice-result ${doubles ? 'doubles' : ''}`} key={state.rollId}>
                   <MiniDie value={state.dice[0]} />
                   <MiniDie value={state.dice[1]} />
                   <span>
-                    <strong>{state.dice[0] + state.dice[1]}</strong>{' '}
-                    {state.dice[0] === state.dice[1] ? 'DOUBLES' : 'TOTAL'}
+                    <strong>{state.dice[0] + state.dice[1]}</strong> {doubles ? 'DOUBLES' : 'TOTAL'}
                   </span>
                 </div>
               )}
-              {lastEvent?.text.includes('+$200') && (
-                <div className="go-reward" key={lastEvent.id}>
-                  +$200 <span>Looking good. You passed GO.</span>
+              {goBanner && state.players[goBanner.player] && (
+                <div className="go-reward" key={goBanner.serial} aria-hidden="true">
+                  +$200{' '}
+                  <span>
+                    {online?.mySeat === goBanner.player
+                      ? 'Looking good. You passed GO.'
+                      : `${state.players[goBanner.player].name} passed GO.`}
+                  </span>
                 </div>
               )}
               <div className="board-bottomline">
@@ -525,13 +641,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                   </button>
                 </div>
               </div>
-              {paused && (
-                <div className="pause-overlay">
-                  <button onClick={() => setPaused(false)}>
-                    <Play size={24} fill="currentColor" /> Back to the table
-                  </button>
-                </div>
-              )}
             </div>
             {awayBlocking && (
               <AbandonmentNotice
@@ -541,7 +650,11 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
               />
             )}
             <div className="action-dock">
-              <div className="turn-avatar" style={{ '--player-color': player.color } as React.CSSProperties}>
+              <div
+                className="turn-avatar"
+                key={isSetup ? 'setup' : state.current}
+                style={{ '--player-color': player.color } as React.CSSProperties}
+              >
                 <TokenIcon token={player.token} color={player.color} size={45} />
                 <span />
               </div>
@@ -612,6 +725,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                     <button
                       className={`player-card ${active ? 'active' : ''} ${p.bankrupt ? 'bankrupt' : ''}`}
                       key={p.id}
+                      data-player={p.id}
                       style={{ '--player-color': p.color } as React.CSSProperties}
                       onClick={() => openPortfolio(p.id)}
                       aria-label={`${p.name}, ${money(p.cash)}, ${owned.length} properties. View portfolio.`}
@@ -634,13 +748,11 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                                 ? 'In jail'
                                 : online
                                   ? presence(online, p.id)
-                                  : p.isBot
-                                    ? 'Computer'
-                                    : 'You'}
+                                  : 'Waiting to play'}
                           </span>
                         </div>
                         <div className="player-money">
-                          <strong>{money(p.cash)}</strong>
+                          <CountedMoney value={cash[p.id]} />
                           <span>
                             <Building2 size={11} /> {owned.length}{' '}
                             {owned.length === 1 ? 'property' : 'properties'}
@@ -678,10 +790,14 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                   <i /> LIVE
                 </span>
               </div>
-              <div className="activity-feed">
+              <div className="activity-feed" ref={feed}>
                 {state.events.length ? (
                   state.events.slice(0, 18).map((event, i) => (
-                    <div className={`activity-event ${i === 0 ? 'latest' : ''}`} key={event.id}>
+                    <div
+                      className={`activity-event ${i === 0 ? 'latest' : ''}`}
+                      key={event.id}
+                      data-flip={event.id}
+                    >
                       <span className={`event-symbol ${event.type}`}>
                         {event.type === 'roll' ? (
                           <Dice5 size={13} />
@@ -727,9 +843,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                 <span>
                   {online
                     ? 'The room keeps this game. Close the tab and come back to it.'
-                    : isSetup
-                      ? 'A fresh start for everyone.'
-                      : 'Your game is saved automatically.'}
+                    : 'A fresh start for everyone.'}
                 </span>
               </div>
             </div>
@@ -747,18 +861,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
             {/* Online a dismissed review has to be reachable again: the offer is
                 still on the table and the game is frozen until it is answered. */}
             <TradeButton disabled={!canTrade && !myOffer} onClick={() => setModal('trade')} />
-            <span className="toolbar-separator" />
-            <button
-              className="utility-action"
-              // A table with other people at it does not stop because one of
-              // them would like it to — and a pause would only gate their own
-              // inputs while the room played on without them.
-              disabled={Boolean(online) || isSetup || isFinished || state.trade !== null}
-              onClick={() => setPaused((v) => !v)}
-            >
-              {paused ? <Play size={16} /> : <Pause size={16} />}
-              <span>{paused ? 'Resume' : 'Pause game'}</span>
-            </button>
           </div>
           <span className="table-tip">
             <span className="tip-star">✧</span> Big dreams. Small houses. Endless possibilities.
@@ -772,10 +874,10 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         </span>
       </footer>
       <div className="sr-only" role="status" aria-live="polite">
-        {lastEvent?.text}
+        {announced.text}
       </div>
       {toast && (
-        <div className="toast" role="status">
+        <div className="toast motion-enter" role="status">
           <BadgeCheck size={18} />
           {toast}
           <button aria-label="Dismiss notification" onClick={() => setToast(null)}>
@@ -806,10 +908,10 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           // call site can do about a button it must not offer is not render it.
           // Decline stays: for the seat that made the offer, it withdraws it.
           <div className="trade-as-proposer">
-            <TradeDialog state={state} dispatch={dispatch} onClose={closeTrade} />
+            <TradeDialog state={seated(live, online)} dispatch={dispatch} onClose={closeTrade} />
           </div>
         ) : (
-          <TradeDialog state={state} dispatch={dispatch} onClose={closeTrade} />
+          <TradeDialog state={seated(live, online)} dispatch={dispatch} onClose={closeTrade} />
         ))}
       {selected !== null && (
         <PropertyDetail
@@ -894,16 +996,16 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           <div className="settings-row">
             <div>
               <h3>
-                <Dice5 size={18} /> Faster computer turns
+                <Wind size={18} /> Calmer motion
               </h3>
-              <p>Keep the dice moving.</p>
+              <p>Shorter, softer moves on the board. Follows your device until you choose.</p>
             </div>
             <button
-              className={`toggle ${fast ? 'on' : ''}`}
+              className={`toggle ${calm ? 'on' : ''}`}
               role="switch"
-              aria-checked={fast}
-              aria-label="Faster computer turns"
-              onClick={() => setFast((v) => !v)}
+              aria-checked={calm}
+              aria-label="Calmer motion"
+              onClick={() => setMotion(calm ? 'full' : 'reduced')}
             >
               <span />
             </button>
@@ -913,7 +1015,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
             <p>
               {online
                 ? 'The room holds this game for everyone at the table. You can close the tab and come back to the same city.'
-                : 'Your game saves on this device after each completed move. You can close the tab and pick up where you left off.'}
+                : 'Every table lives in its own room on the server. Keep its link and you can come back to it.'}
             </p>
           </div>
           {online ? (
@@ -927,41 +1029,35 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           )}
         </Dialog>
       )}
-      {state.phase === 'card' &&
-        state.card &&
-        cardDismissed !== cardKey &&
-        !modal &&
-        selected === null &&
-        !paused && (
-          <Dialog
-            title={state.card.title}
-            eyebrow={state.card.deck === 'chance' ? 'A LITTLE CHANCE' : 'FROM YOUR COMMUNITY'}
-            // Turning the card over belongs to the player who drew it. For anyone
-            // else online this is a card they are being shown, and putting it down
-            // has to be something they can do without sending anything.
-            onClose={() =>
-              online && !humanTurn ? setCardDismissed(cardKey) : dispatch({ type: 'ACK_CARD' })
-            }
-            className={`event-card ${state.card.deck}`}
+      {state.phase === 'card' && state.card && cardDismissed !== cardKey && !modal && selected === null && (
+        <Dialog
+          title={state.card.title}
+          eyebrow={state.card.deck === 'chance' ? 'A LITTLE CHANCE' : 'FROM YOUR COMMUNITY'}
+          // Turning the card over belongs to the player who drew it. For anyone
+          // else online this is a card they are being shown, and putting it down
+          // has to be something they can do without sending anything.
+          onClose={() => (online && !humanTurn ? setCardDismissed(cardKey) : readCard())}
+          className={`event-card ${state.card.deck}`}
+          key={cardKey}
+        >
+          <div className="card-illustration">
+            {state.card.deck === 'chance' ? '?' : <Sparkles size={74} strokeWidth={1} />}
+          </div>
+          <p>{state.card.text}</p>
+          <div className="card-for">
+            A card for <strong style={{ color: player.color }}>{player.name}</strong>
+          </div>
+          {/* Everyone sees the card; only the player who drew it turns it over. */}
+          <button
+            className="primary-button full-width"
+            disabled={Boolean(online && !humanTurn)}
+            onClick={readCard}
           >
-            <div className="card-illustration">
-              {state.card.deck === 'chance' ? '?' : <Sparkles size={74} strokeWidth={1} />}
-            </div>
-            <p>{state.card.text}</p>
-            <div className="card-for">
-              A card for <strong style={{ color: player.color }}>{player.name}</strong>
-            </div>
-            {/* Everyone sees the card; only the player who drew it turns it over. */}
-            <button
-              className="primary-button full-width"
-              disabled={Boolean(online && !humanTurn)}
-              onClick={() => dispatch({ type: 'ACK_CARD' })}
-            >
-              {online && !humanTurn ? `${player.name} is reading it…` : 'Let’s see what’s next'}{' '}
-              <ArrowRight size={18} />
-            </button>
-          </Dialog>
-        )}
+            {online && !humanTurn ? `${player.name} is reading it…` : 'Let’s see what’s next'}{' '}
+            <ArrowRight size={18} />
+          </button>
+        </Dialog>
+      )}
       {state.phase === 'debt' && state.debt && humanTurn && !modal && selected === null && (
         <Dialog title="Time to make a plan." eyebrow="A PAYMENT IS DUE" onClose={() => openPortfolio()}>
           <div className="debt-amount">
@@ -991,38 +1087,25 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
           )}
         </Dialog>
       )}
-      {isFinished && !winnerDismissed && modal !== 'setup' && (
+      {showWinner && winner && (
         <Dialog
           title="The city is yours."
           eyebrow="A GAME VERY WELL PLAYED"
           onClose={() => setWinnerDismissed(true)}
           className="winner-dialog"
         >
-          <div className="winner-confetti">
+          <div className="winner-confetti" style={{ '--player-color': winner.color } as React.CSSProperties}>
             <Trophy size={26} />
-            <TokenIcon
-              token={state.players[state.winner!].token}
-              color={state.players[state.winner!].color}
-              size={120}
-            />
+            <TokenIcon token={winner.token} color={winner.color} size={120} />
             <Sparkles size={26} />
           </div>
-          <h3>{state.players[state.winner!].name} wins!</h3>
+          <h3>{winner.name} wins!</h3>
           <p>Good moves. Bold decisions. One well-earned victory.</p>
-          <div className="winner-stats">
-            <div>
-              <span>FINAL CASH</span>
-              <strong>{money(state.players[state.winner!].cash)}</strong>
-            </div>
-            <div>
-              <span>PROPERTIES</span>
-              <strong>{ownedSpaces(state, state.winner!).length}</strong>
-            </div>
-            <div>
-              <span>NET WORTH</span>
-              <strong>{money(netWorth(state, state.winner!))}</strong>
-            </div>
-          </div>
+          <WinnerStats
+            cash={winner.cash}
+            properties={ownedSpaces(state, winner.id).length}
+            worth={netWorth(state, winner.id)}
+          />
           {online ? (
             <button
               className="primary-button full-width"

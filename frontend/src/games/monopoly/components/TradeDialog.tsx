@@ -46,7 +46,7 @@ export default function TradeDialog({
             <small>
               {recipient.isBot
                 ? 'Your computer opponent is considering the offer…'
-                : `Pass the device to ${recipient.name} to review and confirm.`}
+                : `Only ${recipient.name} can accept it, from their own seat.`}
             </small>
           </div>
           <div className="trade-columns">
