@@ -45,8 +45,51 @@ jobs:
       - name: Test and typecheck backend
         run: npm run test -w backend && npm run typecheck -w backend
 
+  # The browser half of the gate: every Playwright spec (smoke excepted) against
+  # the real Worker under `wrangler dev` and the built site under `vite preview`,
+  # both started by playwright.config.ts's webServer. No secrets, like `check`:
+  # without a Clerk key the site plays as guests, which is what these specs do.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node.js
+        # Wrangler needs Node 22 or later.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        # The bundled Chromium, not Chrome: the config picks it when CI is set.
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        working-directory: frontend
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 14
+
   build:
-    needs: check
+    needs: [check, e2e]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: github-pages
@@ -74,6 +117,8 @@ jobs:
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
           VITE_API_URL: ${{ secrets.VITE_API_BASE_URL }}
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          # Stamped on client error reports, so a log line names the deploy it came from.
+          VITE_RELEASE: ${{ github.sha }}
         run: npm run build -w frontend -- --base "${PAGES_BASE_PATH}/"
 
       - name: Upload site artifact
@@ -96,7 +141,7 @@ jobs:
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
 
   deploy-api:
-    needs: check
+    needs: [check, e2e]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     # The Cloudflare token is a secret of this environment, and a job only sees

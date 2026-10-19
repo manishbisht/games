@@ -15,6 +15,9 @@ export default defineConfig({
   expect: { timeout: 15000 },
   fullyParallel: false,
   workers: 1,
+  // One retry on CI, where a shared runner can starve a WebGL frame; a test
+  // that only passes on its retry is still reported as flaky, not hidden.
+  retries: process.env.CI ? 1 : 0,
   webServer: [
     {
       command: 'npm run dev -w backend',
@@ -37,10 +40,15 @@ export default defineConfig({
   ],
   use: {
     baseURL: 'http://127.0.0.1:5173',
-    channel: 'chrome',
+    // Installed Chrome locally (its GPU path is the one players have); CI has
+    // no Chrome, so it runs Playwright's own Chromium (`npx playwright install
+    // chromium`).
+    channel: process.env.CI ? undefined : 'chrome',
     headless: true,
     viewport: { width: 1440, height: 960 },
     screenshot: 'only-on-failure',
+    // On CI a failure has to explain itself from an artifact alone.
+    trace: process.env.CI ? 'retain-on-failure' : 'off',
   },
-  reporter: 'list',
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
 })
