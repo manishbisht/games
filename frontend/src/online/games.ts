@@ -1,5 +1,5 @@
 import type { ComponentType, LazyExoticComponent } from 'react'
-import type { GameId, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
+import type { GameId, ReplayFrame, ReplayPlayer, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import { games } from '../games/catalog'
 import { lazyWithPreload } from '../lazyPreload'
 import type { RoomApi } from './useRoom'
@@ -44,6 +44,35 @@ export interface BotSkill {
   label: string
 }
 
+/**
+ * What a game's replay gets: a finished game's every state, as a spectator saw
+ * it, and where the player bar's playhead is. The page owns the clock — play,
+ * pause, step, scrub, speed — and the view only ever shows `states[index]`.
+ *
+ * Animate into a new index only when it is the next one (`index === previous
+ * + 1`) while `playing`, and finish within `replayHoldMs(states, index, speed)`
+ * (./replayTiming), the time that state stays on screen. Any other change — a
+ * step back, a scrub, a jump to either end, a step while paused — lands on the
+ * state at once (or with a short settle), because there is nothing between
+ * the two states to show. Honour `reducedMotion()` as the live table does.
+ */
+export interface ReplayViewProps<S = unknown> {
+  /** Every state the game passed through, oldest first. Fixed for the life of the view. */
+  states: ReplayFrame<S>[]
+  /** The state to show. */
+  index: number
+  playing: boolean
+  /** Playback rate, one of `REPLAY_SPEEDS`; scale the view's own animations by it. */
+  speed: number
+  /** Who sat where, in seat order, as the game was dealt. */
+  players: ReplayPlayer[]
+  /**
+   * Call once the scene can show a frame (a 3D board has its first render).
+   * Playback starts then, or after a short grace if it is never called.
+   */
+  onReady?: () => void
+}
+
 /** The part of a game's room config that isn't already in the catalog. */
 interface OnlineGameConfig {
   /**
@@ -73,6 +102,23 @@ interface OnlineGameConfig {
    */
   RoomView: LazyExoticComponent<ComponentType<RoomViewProps>>
   preloadRoomView: () => Promise<boolean>
+  /**
+   * How this game plays back a finished game (see `ReplayViewProps`), lazy like
+   * `RoomView`. Until a game has one, its replay page says so and keeps the
+   * timeline working.
+   */
+  ReplayView?: LazyExoticComponent<ComponentType<ReplayViewProps>>
+  preloadReplayView?: () => Promise<boolean>
+  /**
+   * Whose turn a state is, as anything comparable — the scrubber marks each
+   * index where it changes. Without it every state gets a mark.
+   */
+  replayTurn?: (state: unknown) => unknown
+  /**
+   * The game's own result screen links to its replay (with `replayUrl`), so the
+   * room page leaves out its generic "Watch the replay" link.
+   */
+  linksReplay?: boolean
 }
 
 export interface OnlineGame extends OnlineGameConfig {
@@ -84,6 +130,15 @@ export interface OnlineGame extends OnlineGameConfig {
 function roomView(load: () => Promise<{ default: ComponentType<RoomViewProps> }>) {
   const { Component, preload } = lazyWithPreload(load)
   return { RoomView: Component, preloadRoomView: preload }
+}
+
+/**
+ * Spread into a config to give the game a replay:
+ * `...replayView(() => import('../games/chess/online/ChessReplayView'))`.
+ */
+export function replayView(load: () => Promise<{ default: ComponentType<ReplayViewProps> }>) {
+  const { Component, preload } = lazyWithPreload(load)
+  return { ReplayView: Component, preloadReplayView: preload }
 }
 
 const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
@@ -154,4 +209,13 @@ export function onlineGame(id: string): OnlineGame | undefined {
   // builds the room route off the same entry, so they cannot drift apart.
   const entry = config && games.find((game) => game.id === id && game.online)
   return entry && config ? { ...config, basePath: entry.path, name: entry.name } : undefined
+}
+
+/**
+ * Where a room's last finished game plays back, as a router path (`<Link
+ * to={replayUrl('chess', code)}>`, `navigate(…)`). Available once the game has
+ * finished, for as long as the room lives: 24 hours after its last move.
+ */
+export function replayUrl(game: GameId, code: string): string {
+  return `${onlineGame(game)?.basePath ?? `/${game}`}/replay/${code}`
 }
