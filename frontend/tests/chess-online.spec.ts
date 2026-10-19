@@ -146,7 +146,7 @@ test('a timed room counts both clocks down by the server’s clock, through a re
   // The lobby's clock picker reaches the server through the room's create call; this makes that
   // call directly, as the host, so the clock is checked from the server's side of it.
   const hostId = crypto.randomUUID()
-  const created = await request.post(`${process.env.E2E_API_URL ?? 'http://127.0.0.1:8787'}/api/rooms`, {
+  const created = await request.post(`${process.env.VITE_API_URL || 'http://127.0.0.1:8787'}/api/rooms`, {
     data: {
       game: 'chess',
       visibility: 'private',
