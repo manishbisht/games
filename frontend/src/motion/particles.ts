@@ -1,5 +1,13 @@
 import * as THREE from 'three'
 import { hash01 } from './ease'
+import type { QualityTier } from './stage'
+
+/**
+ * How much of a burst a quality tier can afford: every game thinned its
+ * effects by roughly these shares, so they live here. Set `particles.density`
+ * from `stage.onQuality` and every burst scales with it.
+ */
+export const qualityDensity = (tier: QualityTier) => [0.35, 0.65, 1][tier]
 
 /**
  * One pooled InstancedMesh for every burst a game fires — confetti for a win,
@@ -69,14 +77,22 @@ export function createParticles(scene: THREE.Scene, { max = 600, floor = -Infini
   let live = 0,
     seed = 1
 
+  let density = 1
   return {
     get active() {
       return live > 0
     },
+    /** Multiplies every burst's count (see `qualityDensity`). */
+    get density() {
+      return density
+    },
+    set density(value: number) {
+      density = Math.max(0, Math.min(1, value))
+    },
     burst(burst: Burst) {
       const k = burst.kind ?? 'confetti',
         spec = KIND[k],
-        count = Math.min(burst.count ?? 40, max - live),
+        count = Math.min(Math.round((burst.count ?? 40) * density), max - live),
         speed = burst.speed ?? spec.speed,
         spread = burst.spread ?? spec.spread,
         sizeScale = burst.size ?? 1,

@@ -124,15 +124,37 @@ export interface Beat {
  * When a backlog builds up — a reconnect, a burst of bot moves, a tab that was
  * hidden — `speed` rises so the board catches up instead of falling further
  * behind; hand it to the tweens (`tweens.speed = queue.speed`).
+ *
+ * The backlog is counted in beats by default. With `countBy: 'push'` it is
+ * counted in pushes instead — one push per snapshot, however many beats that
+ * snapshot's story takes — so a single long story (a +4 and its draws) does
+ * not read as a backlog, while three snapshots waiting do.
  */
-export function createQueue({ catchUpAfter = 2, catchUpSpeed = 2.5 } = {}) {
-  const beats: Beat[] = []
+export function createQueue({
+  catchUpAfter = 2,
+  catchUpSpeed = 2.5,
+  countBy = 'beat',
+}: { catchUpAfter?: number; catchUpSpeed?: number; countBy?: 'beat' | 'push' } = {}) {
+  const beats: Beat[] = [],
+    groups: number[] = []
   const idle = new Set<() => void>()
   let hold = 0,
-    running = false
+    running = false,
+    pushes = 0
+  /** Waiting pushes: groups are numbered in order, so it is a span, not a count. */
+  const backlog = () =>
+    countBy === 'beat' ? beats.length : groups.length ? groups.at(-1)! - groups[0] + 1 : 0
+  const shift = () => {
+    groups.shift()
+    return beats.shift()!
+  }
   const api = {
     get speed() {
-      return beats.length > catchUpAfter ? catchUpSpeed : 1
+      return backlog() > catchUpAfter ? catchUpSpeed : 1
+    },
+    /** What is waiting, in the unit `countBy` names. */
+    get backlog() {
+      return backlog()
     },
     get busy() {
       return running || beats.length > 0
@@ -141,7 +163,10 @@ export function createQueue({ catchUpAfter = 2, catchUpSpeed = 2.5 } = {}) {
       return beats.length
     },
     push(...next: Beat[]) {
+      if (!next.length) return
+      pushes++
       beats.push(...next)
+      for (let i = 0; i < next.length; i++) groups.push(pushes)
       if (!running) advance()
     },
     /** Advances the current hold; returns whether the queue still has work. */
@@ -157,12 +182,13 @@ export function createQueue({ catchUpAfter = 2, catchUpSpeed = 2.5 } = {}) {
      * fresh snapshot makes the queued story irrelevant.
      */
     flush() {
-      for (let guard = 0; guard < 256 && beats.length; guard++) beats.shift()!.run()
+      for (let guard = 0; guard < 256 && beats.length; guard++) shift().run()
       hold = 0
       settle()
     },
     clear() {
       beats.length = 0
+      groups.length = 0
       hold = 0
       settle()
     },
@@ -175,7 +201,7 @@ export function createQueue({ catchUpAfter = 2, catchUpSpeed = 2.5 } = {}) {
   function advance() {
     while (beats.length) {
       running = true
-      const wait = beats.shift()!.run() || 0
+      const wait = shift().run() || 0
       if (wait > 0) {
         hold = wait
         return

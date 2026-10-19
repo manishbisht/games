@@ -92,6 +92,18 @@ describe('tweens', () => {
 })
 
 describe('presentation queue', () => {
+  it('can count its backlog in snapshots rather than beats', () => {
+    const queue = createQueue({ countBy: 'push', catchUpAfter: 1, catchUpSpeed: 3 })
+    // One long story: five beats, one push — no backlog.
+    queue.push(...Array.from({ length: 5 }, () => ({ run: () => 100 })))
+    expect(queue.speed).toBe(1)
+    // Two more snapshots behind it: now it is behind.
+    queue.push({ run: () => 100 })
+    queue.push({ run: () => 100 })
+    expect(queue.backlog).toBe(3)
+    expect(queue.speed).toBe(3)
+  })
+
   it('plays beats one after another, holding each for its duration', () => {
     const queue = createQueue(),
       log: string[] = []

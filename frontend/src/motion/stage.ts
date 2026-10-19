@@ -67,7 +67,8 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
     dirty = true,
     frame = 0,
     last = performance.now(),
-    clock = 0
+    clock = 0,
+    drift = 0
   const frames = new Set<FrameCallback>(),
     resizers = new Set<(width: number, height: number) => void>(),
     cleanups: (() => void)[] = []
@@ -131,7 +132,10 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
       if (testClock.frozen && delta === 0) return
     }
     const dt = running ? Math.min(delta / 1000, 1 / 20) : 0
-    if (running) clock += Math.min(delta, 50)
+    if (running) {
+      clock += Math.min(delta, 50)
+      drift += Math.max(0, delta - 50)
+    }
     let moving = false
     for (const callback of frames) if (callback(dt, clock)) moving = true
     if ((moving || dirty) && camera) {
@@ -217,6 +221,17 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
     invalidate() {
       dirty = true
     },
+    /**
+     * Wall time the scene clock skipped by capping long frames (shader
+     * compiles right after `start()`, a stalled main thread), returned once
+     * and reset. A board keeping time with the room steps its tweens by it so
+     * it lands when everyone else does; anything else can ignore it.
+     */
+    takeDrift() {
+      const ms = drift
+      drift = 0
+      return ms
+    },
     /** Pausing freezes the clock and every dt, so tweens and queues hold where they are. */
     setRunning(next: boolean) {
       running = next
@@ -263,6 +278,7 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
     start() {
       resize()
       last = performance.now()
+      drift = 0
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(tick)
     },

@@ -9,7 +9,8 @@ import type { Ease } from './ease'
  * the viewer's chosen angle, and shakes on impact — and it backs off for a few
  * seconds whenever the viewer grabs the camera themselves.
  *
- * Call `step(dt)` every frame *after* `controls.update()`.
+ * Call `step(dt)` every frame *after* `controls.update()`. A scene without
+ * OrbitControls passes `{ target }` instead — the point the camera looks at.
  */
 export interface Shot {
   position?: THREE.Vector3
@@ -37,7 +38,7 @@ export interface Orbit {
 
 export function createCameraRig(
   camera: THREE.OrthographicCamera | THREE.PerspectiveCamera,
-  controls: OrbitControls,
+  controls: OrbitControls | { target: THREE.Vector3 },
   { yieldMs = 4000 } = {},
 ) {
   let shot: Shot | null = null,
@@ -69,7 +70,9 @@ export function createCameraRig(
     userUntil = clock + yieldMs
     shot = null
   }
-  controls.addEventListener('start', onStart)
+  // A table the viewer cannot orbit hands over just a target; nothing to yield to then.
+  const orbitControls = 'addEventListener' in controls ? controls : null
+  orbitControls?.addEventListener('start', onStart)
 
   function setZoom(target: number, k: number) {
     if (Math.abs(camera.zoom - target) < 1e-4) return false
@@ -218,7 +221,7 @@ export function createCameraRig(
       return moving
     },
     dispose() {
-      controls.removeEventListener('start', onStart)
+      orbitControls?.removeEventListener('start', onStart)
     },
   }
 }
