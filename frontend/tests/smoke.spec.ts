@@ -61,6 +61,11 @@ function watch(page: Page) {
 test.beforeEach(async ({ page }) => {
   socketLog = []
   await page.emulateMedia({ reducedMotion: 'reduce' })
+  // The smoke run plays the games, not their first-game guides.
+  await page.addInitScript(() => {
+    for (const game of ['hearth', 'estate', 'chess', 'prism', 'wildrise'])
+      localStorage.setItem(`games-guide-${game}`, 'done')
+  })
 })
 
 // eslint-disable-next-line no-empty-pattern -- Playwright wants a fixture pattern here, and none is needed.
