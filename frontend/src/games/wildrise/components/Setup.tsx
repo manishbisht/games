@@ -1,13 +1,13 @@
 import { ArrowRight, Bot, Check, Leaf } from 'lucide-react'
 import type { Control } from '@games/shared/wildrise/types'
 import { PALETTES, PLAYER_IDS } from '@games/shared/wildrise/board'
+import { companionNames } from '@games/shared/wildrise/online'
 import TokenPortrait from './TokenPortrait'
 import PlayOptions from '../../../online/PlayOptions'
 import { wildriseGame } from '../../catalog'
 
 export interface SetupOptions {
   count: number
-  names: string[]
   style: Control
   exact: boolean
 }
@@ -23,6 +23,7 @@ export default function Setup({
   /** True while the identity is still settling: starting would do nothing. */
   disabled?: boolean
 }) {
+  const companions = companionNames(3)
   return (
     <section className="wr-setup" aria-labelledby="wr-setup-title">
       <div className="wr-eyebrow">
@@ -55,22 +56,14 @@ export default function Setup({
           ))}
         </div>
         <div className="wr-setup-players">
+          {/* The room names its own seats — yours from "Your name" above, the
+              companions from its list — so this introduces them rather than
+              offering names it could never send. */}
           {PLAYER_IDS.slice(0, options.count).map((id, i) => (
             <div className="wr-setup-player" key={id}>
               <TokenPortrait id={id} size={38} />
               <div>
-                <input
-                  aria-label={`${PALETTES[id].name} player name`}
-                  value={options.names[i]}
-                  maxLength={18}
-                  placeholder={PALETTES[id].name}
-                  onChange={(e) =>
-                    onChange({
-                      ...options,
-                      names: options.names.map((name, index) => (index === i ? e.target.value : name)),
-                    })
-                  }
-                />
+                <strong>{i === 0 ? 'You' : companions[i - 1]}</strong>
                 <span>{PALETTES[id].animal} miniature</span>
               </div>
               <small>

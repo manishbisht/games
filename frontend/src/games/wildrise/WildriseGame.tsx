@@ -1,5 +1,6 @@
 import ThemeControl from '../../theme/ThemeControl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import { HeaderAuth } from '../../online/identity'
 import { Link } from 'react-router'
@@ -15,8 +16,6 @@ import {
   Flag,
   Leaf,
   Maximize2,
-  Pause,
-  Play,
   RotateCcw,
   RotateCw,
   Sparkles,
@@ -35,11 +34,15 @@ import Dialog from './components/Dialog'
 import TokenPortrait from './components/TokenPortrait'
 import { PALETTES, PLAYER_IDS } from '@games/shared/wildrise/board'
 import { createGame } from '@games/shared/wildrise'
+import { companionNames } from '@games/shared/wildrise/online'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { sound, unlockAudio } from './game/audio'
-import type { GameConfig } from '@games/shared/wildrise/types'
+import type { Cue } from './game/audio'
+import type { GameConfig, GameState, Player } from '@games/shared/wildrise/types'
+import { useCountUp, useHeld } from '../../motion/hooks'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
+import type { Squares } from './scene/story'
 import { claimTarget } from './online/session'
 import type { OnlineWildriseSession } from './online/session'
 import './WildriseGame.css'
@@ -47,7 +50,7 @@ import './WildriseGame.css'
 function toConfig(options: SetupOptions): GameConfig {
   return {
     playerCount: options.count,
-    names: options.names,
+    names: ['You', ...companionNames(3)],
     controls: PLAYER_IDS.slice(0, options.count).map((_, i) => (i > 0 ? options.style : 'human')),
     rules: { exactFinish: options.exact },
   }
@@ -113,6 +116,93 @@ function AbandonmentNotice({
   )
 }
 
+/** A number that counts on screen instead of jumping: a square, a stat. */
+function Count({ value }: { value: number }) {
+  return <>{useCountUp(value)}</>
+}
+
+/**
+ * One seat around the table. Its square is the one the board is showing, not
+ * the one the server last wrote down, so the number climbs hop by hop with the
+ * token and only jumps a ladder when the token does.
+ */
+function PlayerCard({
+  player,
+  square,
+  active,
+  winner,
+  online,
+}: {
+  player: Player
+  square: number
+  active: boolean
+  winner: boolean
+  online?: OnlineWildriseSession
+}) {
+  const shown = useCountUp(square, 520)
+  return (
+    <div
+      className={`wr-player ${active ? 'wr-player-active' : ''}`}
+      data-testid={`wildrise-player-${player.id}`}
+      style={
+        {
+          '--player-color': PALETTES[player.id].color,
+          '--player-pale': PALETTES[player.id].pale,
+        } as CSSProperties
+      }
+    >
+      <TokenPortrait id={player.id} />
+      <div className="wr-player-info">
+        <strong>
+          {player.name} {(player.control !== 'human' || online?.players[player.id]?.bot) && <Bot size={12} />}
+          {online?.mySeat === player.id && <span className="wr-seat-badge">YOU</span>}
+          {online?.players[player.id]?.connected === false && (
+            <span className="wr-seat-badge wr-away-badge">AWAY</span>
+          )}
+          {/* Away and claimed: the room is rolling for them now. */}
+          {online?.players[player.id]?.abandoned && <span className="wr-seat-badge">AUTO</span>}
+        </strong>
+        <span>
+          {active
+            ? winner
+              ? 'The trailblazer'
+              : 'Taking a turn'
+            : PALETTES[player.id].animal + ' miniature'}
+        </span>
+      </div>
+      <div className="wr-position">
+        <strong>{shown === 0 ? '—' : shown}</strong>
+        <small>{shown === 0 ? 'at camp' : 'of 100'}</small>
+      </div>
+      <div className="wr-progress">
+        <i style={{ transform: `scaleX(${shown / 100})` }} />
+      </div>
+    </div>
+  )
+}
+
+/** What the roll panel's heading says about the beat the table is in. */
+function rollHeading(game: GameState, myTurn: boolean) {
+  const current = game.players[game.currentPlayer]
+  switch (game.phase) {
+    case 'won':
+      return 'Made it to the top.'
+    case 'rolling':
+      return 'Here goes…'
+    case 'ready':
+      return myTurn ? 'Your move, explorer.' : `Over to ${current.name}.`
+    case 'moving':
+      return `A ${game.dice}. Let’s go.`
+    case 'transporting':
+      return game.motion?.kind === 'ladder' ? 'Up, up & away.' : 'Enjoy the slide.'
+    case 'settling':
+      // Settling follows a landing, or a roll that went nowhere: say which.
+      return game.events[0]?.kind === 'wait' && game.events[0].turn === game.turn
+        ? `A ${game.dice}. Not this time.`
+        : `Settled on ${current.position}.`
+  }
+}
+
 function Table({
   config,
   options,
@@ -140,16 +230,17 @@ function Table({
   // to be the other half of this.
   const menu = !online
   const game = online ? online.state : preview
-  const [dialog, setDialog] = useState<'rules' | 'pause' | null>(null)
+  const [dialog, setDialog] = useState<'rules' | null>(null)
   const [dismissedVictory, setDismissedVictory] = useState(false)
   const [hidden, setHidden] = useState(document.hidden)
-  const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [shown, setShown] = useState<Squares | null>(null)
   const board = useRef<BoardControls>(null)
-  const paused = menu || !!dialog || hidden
   const current = game.players[game.currentPlayer]
   /** Whose inputs this browser may make: only ever its own seat. */
   const myTurn = Boolean(online) && online!.mySeat === current.id
-  const canRoll = !paused && game.phase === 'ready' && myTurn
+  // The room keeps the table moving whatever this browser is doing, so a
+  // dialog only stops this browser asking for a roll — never the board.
+  const canRoll = !menu && !dialog && !hidden && game.phase === 'ready' && myTurn
   // The player the table is stuck on, while there is still something to ask for.
   const awayBlocking = online ? claimTarget(online) : null
   // Online every fresh game shows its own result — a rematch arrives as a new
@@ -159,21 +250,20 @@ function Table({
     setWasWon(game.phase === 'won')
     if (game.phase !== 'won') setDismissedVictory(false)
   }
+  // The banner keeps its last words while it fades out.
+  const [banner, setBanner] = useState(game.motion)
+  if (game.phase === 'transporting' && game.motion && banner !== game.motion) setBanner(game.motion)
   useEffect(() => {
     const visibility = () => setHidden(document.hidden)
-    const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const change = () => setReduced(preference.matches)
     document.addEventListener('visibilitychange', visibility)
-    preference.addEventListener('change', change)
-    return () => {
-      document.removeEventListener('visibilitychange', visibility)
-      preference.removeEventListener('change', change)
-    }
+    return () => document.removeEventListener('visibilitychange', visibility)
   }, [])
   const doRoll = useCallback(() => {
     if (!canRoll) return
     if (soundOn) unlockAudio()
-    // The die is the server's to throw, so this only ever asks for one.
+    // The die is the server's to throw, so this only ever asks for one — and
+    // rattles it in the hand until the number comes back.
+    board.current?.rolling()
     online?.send.roll()
   }, [canRoll, soundOn, online])
   useEffect(() => {
@@ -192,21 +282,21 @@ function Table({
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [canRoll, doRoll])
-  useEffect(() => {
-    if (menu || !soundOn) return
-    if (game.phase === 'rolling') sound('roll')
-    else if (game.phase === 'moving') sound('step')
-    else if (game.phase === 'transporting') sound(game.motion?.kind === 'ladder' ? 'ladder' : 'snake')
-    else if (game.phase === 'settling') sound('land')
-    else if (game.phase === 'won') sound('win')
-  }, [game, menu, soundOn])
+  // Sound is cued by the board as each thing happens on screen, so a snapshot
+  // that only says someone came or went plays nothing.
+  const onCue = useCallback(
+    (cue: Cue, n?: number) => {
+      if (!menu && soundOn) sound(cue, n)
+    },
+    [menu, soundOn],
+  )
+  const onFailure = useCallback(() => setShown(null), [])
+  const squareOf = (player: Player) => shown?.[player.id] ?? player.position
   const phaseText =
     game.phase === 'ready'
       ? myTurn
         ? 'Your next adventure is one roll away.'
-        : online
-          ? `Waiting for ${current.name} to roll…`
-          : `${current.name} is getting ready to roll…`
+        : `Waiting for ${current.name} to roll…`
       : game.phase === 'rolling'
         ? 'A little shake. A little luck.'
         : game.phase === 'moving'
@@ -217,14 +307,20 @@ function Table({
               ? 'The summit is yours.'
               : game.events[0].message
   const winner = game.players.find((p) => p.id === game.winner)
-  const showVictory = !!winner && !dismissedVictory && !dialog
+  // The win dialog waits for the board's celebration rather than covering it.
+  const celebrated = useHeld(Boolean(winner), 1800)
+  const showVictory = !!winner && celebrated && !dismissedVictory && !dialog
   const statusText = menu
     ? 'THE TABLE IS SET'
     : game.phase === 'won'
       ? 'ADVENTURE COMPLETE'
-      : dialog || hidden
-        ? 'TAKING A BREATHER'
-        : `TURN ${String(game.turn).padStart(2, '0')}`
+      : `TURN ${String(game.turn).padStart(2, '0')}`
+  // One voice for screen readers: what just happened, and whose turn it is now.
+  const announcement = menu
+    ? ''
+    : `${game.events[0]?.message ?? ''}${
+        game.phase === 'ready' ? (myTurn ? ' Your turn to roll.' : ` ${current.name}’s turn.`) : ''
+      }`
   const start = () => {
     if (soundOn) unlockAudio()
     onStart()
@@ -263,11 +359,6 @@ function Table({
           >
             {soundOn ? <Volume2 size={19} /> : <VolumeX size={19} />}
           </button>
-          {!menu && !online && (
-            <button className="wr-icon-button" aria-label="Pause game" onClick={() => setDialog('pause')}>
-              <Pause size={18} />
-            </button>
-          )}
           <ThemeControl />
           <HeaderAuth readOnly={Boolean(online)} />
         </nav>
@@ -305,19 +396,26 @@ function Table({
           </div>
           <div className="wr-stage">
             <BoardScene
-              key={`${menu ? 'preview' : 'game'}-${game.players.length}`}
               ref={board}
               state={game}
-              running={!hidden && !dialog}
+              running={!hidden}
+              canRoll={canRoll}
               onRoll={doRoll}
+              onCue={onCue}
+              onPositions={setShown}
+              onFailure={onFailure}
             />
-            {!menu && game.phase === 'transporting' && (
-              <div className={`wr-transport wr-transport-${game.motion?.kind}`} role="status">
-                {game.motion?.kind === 'ladder' ? <ArrowUpRight size={25} /> : <ArrowDownRight size={25} />}
+            {!menu && (
+              <div
+                className={`wr-transport wr-transport-${banner?.kind}`}
+                data-open={game.phase === 'transporting'}
+                aria-hidden="true"
+              >
+                {banner?.kind === 'ladder' ? <ArrowUpRight size={25} /> : <ArrowDownRight size={25} />}
                 <div>
-                  <strong>{game.motion?.kind === 'ladder' ? 'CLIMB!' : 'SLIDE!'}</strong>
+                  <strong>{banner?.kind === 'ladder' ? 'CLIMB!' : 'SLIDE!'}</strong>
                   <span>
-                    {game.motion?.from} → {game.motion?.to}
+                    {banner?.from} → {banner?.to}
                   </span>
                 </div>
               </div>
@@ -360,9 +458,7 @@ function Table({
         </section>
         <aside className="wr-sidebar">
           {menu ? (
-            <>
-              <Setup options={options} onChange={onOptions} onStart={start} disabled={startDisabled} />
-            </>
+            <Setup options={options} onChange={onOptions} onStart={start} disabled={startDisabled} />
           ) : (
             <>
               <section className="wr-players" aria-labelledby="wr-players-title">
@@ -374,49 +470,14 @@ function Table({
                 </div>
                 <div className="wr-player-list">
                   {game.players.map((player, index) => (
-                    <div
-                      className={`wr-player ${index === game.currentPlayer ? 'wr-player-active' : ''}`}
+                    <PlayerCard
                       key={player.id}
-                      data-testid={`wildrise-player-${player.id}`}
-                      style={
-                        {
-                          '--player-color': PALETTES[player.id].color,
-                          '--player-pale': PALETTES[player.id].pale,
-                        } as React.CSSProperties
-                      }
-                    >
-                      <TokenPortrait id={player.id} />
-                      <div className="wr-player-info">
-                        <strong>
-                          {player.name}{' '}
-                          {(player.control !== 'human' || online?.players[player.id]?.bot) && (
-                            <Bot size={12} />
-                          )}
-                          {online?.mySeat === player.id && <span className="wr-seat-badge">YOU</span>}
-                          {online?.players[player.id]?.connected === false && (
-                            <span className="wr-seat-badge wr-away-badge">AWAY</span>
-                          )}
-                          {/* Away and claimed: the room is rolling for them now. */}
-                          {online?.players[player.id]?.abandoned && (
-                            <span className="wr-seat-badge">AUTO</span>
-                          )}
-                        </strong>
-                        <span>
-                          {index === game.currentPlayer
-                            ? winner
-                              ? 'The trailblazer'
-                              : 'Taking a turn'
-                            : PALETTES[player.id].animal + ' miniature'}
-                        </span>
-                      </div>
-                      <div className="wr-position">
-                        <strong>{player.position === 0 ? '—' : player.position}</strong>
-                        <small>{player.position === 0 ? 'at camp' : 'of 100'}</small>
-                      </div>
-                      <div className="wr-progress">
-                        <i style={{ width: `${player.position}%` }} />
-                      </div>
-                    </div>
+                      player={player}
+                      square={squareOf(player)}
+                      active={index === game.currentPlayer}
+                      winner={Boolean(winner)}
+                      online={online}
+                    />
                   ))}
                 </div>
               </section>
@@ -426,38 +487,27 @@ function Table({
                     <p className="wr-eyebrow">
                       {game.phase === 'won' ? 'WHAT A JOURNEY' : 'LET THE GOOD TIMES ROLL'}
                     </p>
-                    <h2>
-                      {game.phase === 'won'
-                        ? 'Made it to the top.'
-                        : game.phase === 'rolling'
-                          ? 'Here goes…'
-                          : game.phase === 'ready'
-                            ? myTurn
-                              ? 'Your move, explorer.'
-                              : online
-                                ? `Over to ${current.name}.`
-                                : `${current.name} is thinking…`
-                            : game.phase === 'transporting'
-                              ? game.motion?.kind === 'ladder'
-                                ? 'Up, up & away.'
-                                : 'Enjoy the slide.'
-                              : `A ${game.dice}. Let’s go.`}
-                    </h2>
+                    <h2>{rollHeading(game, myTurn)}</h2>
                   </div>
-                  <span className={game.phase === 'rolling' && !reduced ? 'wr-die-shake' : ''}>
-                    <DieFace value={game.phase === 'rolling' ? null : game.dice} />
-                  </span>
+                  {game.phase === 'rolling' ? (
+                    <span className="wr-die-shake">
+                      <DieFace value={null} />
+                    </span>
+                  ) : (
+                    // Keyed on the roll, so each new number lands with a settle.
+                    <span className="wr-die-land" key={`${game.turn}-${game.dice}`}>
+                      <DieFace value={game.dice} />
+                    </span>
+                  )}
                 </div>
-                <p className="wr-roll-copy" role="status" aria-live="polite" aria-atomic="true">
-                  {dialog || hidden ? 'Game paused. Your adventure can wait.' : phaseText}
-                </p>
+                <p className="wr-roll-copy">{phaseText}</p>
                 <div className="wr-roll-action">
                   <span className="wr-mobile-turn">
                     <strong>{current.name}</strong>
                     <small>
                       {game.phase === 'won'
                         ? 'The trailblazer'
-                        : `Turn ${game.turn} · ${current.position === 0 ? 'At camp' : 'Space ' + current.position}`}
+                        : `Turn ${game.turn} · ${squareOf(current) === 0 ? 'At camp' : 'Space ' + squareOf(current)}`}
                     </small>
                   </span>
                   {winner ? (
@@ -472,23 +522,19 @@ function Table({
                       aria-label="Roll dice"
                     >
                       <Dices size={21} />
-                      {dialog || hidden
-                        ? 'Game paused'
-                        : game.phase === 'rolling'
-                          ? 'Rolling…'
-                          : game.phase === 'moving'
-                            ? 'On the move…'
-                            : game.phase === 'transporting'
-                              ? game.motion?.kind === 'ladder'
-                                ? 'Climbing…'
-                                : 'Sliding…'
-                              : game.phase === 'settling'
-                                ? 'Passing the die…'
-                                : myTurn
-                                  ? 'Roll dice'
-                                  : online
-                                    ? 'Waiting…'
-                                    : 'AI is getting ready…'}
+                      {game.phase === 'rolling'
+                        ? 'Rolling…'
+                        : game.phase === 'moving'
+                          ? 'On the move…'
+                          : game.phase === 'transporting'
+                            ? game.motion?.kind === 'ladder'
+                              ? 'Climbing…'
+                              : 'Sliding…'
+                            : game.phase === 'settling'
+                              ? 'Passing the die…'
+                              : myTurn
+                                ? 'Roll dice'
+                                : 'Waiting…'}
                       {canRoll && <kbd>SPACE</kbd>}
                     </button>
                   )}
@@ -546,9 +592,7 @@ function Table({
         </span>
       </footer>
       <p className="sr-only" aria-live="polite">
-        {!menu
-          ? `${current.name}'s turn. Turn ${game.turn}. Position ${current.position}. ${game.phase !== 'rolling' && game.dice ? `Last roll ${game.dice}.` : ''}`
-          : ''}
+        {announcement}
       </p>
       {awayBlocking && (
         <AbandonmentNotice
@@ -557,78 +601,61 @@ function Table({
           onClaim={() => online?.send.claim()}
         />
       )}
-      {dialog === 'rules' && (
-        <Dialog title="A few simple rules" onClose={() => setDialog(null)}>
-          <div className="wr-dialog-emblem">
-            <Leaf size={28} />
-          </div>
-          <p className="wr-eyebrow">THE SCENIC ROUTE TO 100</p>
-          <h2>A few simple rules.</h2>
-          <p className="wr-description">A familiar favorite. A fresh little adventure.</p>
-          <ol className="wr-rules">
-            <li>
-              <Dices />
-              <div>
-                <strong>Take a turn. Roll the die.</strong>
-                <p>
-                  A randomly chosen player starts. Move forward one space for every pip, then pass the die.
-                </p>
-              </div>
-            </li>
-            <li>
-              <ArrowUpRight />
-              <div>
-                <strong>A little help along the way.</strong>
-                <p>Land at the bottom of a ladder to climb to its top. Passing over it doesn’t count.</p>
-              </div>
-            </li>
-            <li>
-              <ArrowDownRight />
-              <div>
-                <strong>Every adventure has its tumbles.</strong>
-                <p>
-                  Land on a snake’s head and slide along its body to the tail. The printed arrow shows your
-                  destination.
-                </p>
-              </div>
-            </li>
-            <li>
-              <Flag />
-              <div>
-                <strong>Be the first to reach 100.</strong>
-                <p>
-                  {game.rules.exactFinish
-                    ? 'You need an exact roll to finish. Roll too many and stay put until your next turn.'
-                    : 'Reach or pass square 100 to win.'}{' '}
-                  Sharing spaces is allowed; a six does not grant an extra turn.
-                </p>
-              </div>
-            </li>
-          </ol>
-          <p className="wr-rule-footnote">
-            <Check size={15} /> AI companions use the same fair dice as you.
-          </p>
-          <button className="wr-primary" onClick={() => setDialog(null)}>
-            Got it. Let’s play. <ArrowRight size={17} />
-          </button>
-        </Dialog>
-      )}
-      {dialog === 'pause' && (
-        <Dialog title="Take a little breather" onClose={() => setDialog(null)}>
-          <div className="wr-dialog-emblem">
-            <Pause size={27} />
-          </div>
-          <h2>Take a little breather.</h2>
-          <p className="wr-description">
-            The table will be right here. Every piece, exactly where you left it.
-          </p>
-          <button className="wr-primary" onClick={() => setDialog(null)}>
-            <Play size={17} /> Back to the adventure
-          </button>
-        </Dialog>
-      )}
-      {showVictory && winner && (
+      <Dialog open={dialog === 'rules'} title="A few simple rules" onClose={() => setDialog(null)}>
+        <div className="wr-dialog-emblem">
+          <Leaf size={28} />
+        </div>
+        <p className="wr-eyebrow">THE SCENIC ROUTE TO 100</p>
+        <h2>A few simple rules.</h2>
+        <p className="wr-description">A familiar favorite. A fresh little adventure.</p>
+        <ol className="wr-rules">
+          <li>
+            <Dices />
+            <div>
+              <strong>Take a turn. Roll the die.</strong>
+              <p>A randomly chosen player starts. Move forward one space for every pip, then pass the die.</p>
+            </div>
+          </li>
+          <li>
+            <ArrowUpRight />
+            <div>
+              <strong>A little help along the way.</strong>
+              <p>Land at the bottom of a ladder to climb to its top. Passing over it doesn’t count.</p>
+            </div>
+          </li>
+          <li>
+            <ArrowDownRight />
+            <div>
+              <strong>Every adventure has its tumbles.</strong>
+              <p>
+                Land on a snake’s head and slide along its body to the tail. The printed arrow shows your
+                destination.
+              </p>
+            </div>
+          </li>
+          <li>
+            <Flag />
+            <div>
+              <strong>Be the first to reach 100.</strong>
+              <p>
+                {game.rules.exactFinish
+                  ? 'You need an exact roll to finish. Roll too many and stay put until your next turn.'
+                  : 'Reach or pass square 100 to win.'}{' '}
+                Sharing spaces is allowed; a six does not grant an extra turn.
+              </p>
+            </div>
+          </li>
+        </ol>
+        <p className="wr-rule-footnote">
+          <Check size={15} /> AI companions use the same fair dice as you.
+        </p>
+        <button className="wr-primary" onClick={() => setDialog(null)}>
+          Got it. Let’s play. <ArrowRight size={17} />
+        </button>
+      </Dialog>
+      {winner && (
         <Dialog
+          open={showVictory}
           title={`${winner.name} wins!`}
           onClose={() => setDismissedVictory(true)}
           className="wr-victory"
@@ -646,15 +673,21 @@ function Table({
           </p>
           <div className="wr-victory-stats">
             <div>
-              <strong>100</strong>
+              <strong>
+                <Count value={showVictory ? 100 : 0} />
+              </strong>
               <span>FINAL POSITION</span>
             </div>
             <div>
-              <strong>{winner.turns}</strong>
+              <strong>
+                <Count value={showVictory ? winner.turns : 0} />
+              </strong>
               <span>TURNS TAKEN</span>
             </div>
             <div>
-              <strong>{winner.climbs}</strong>
+              <strong>
+                <Count value={showVictory ? winner.climbs : 0} />
+              </strong>
               <span>LADDERS CLIMBED</span>
             </div>
           </div>
@@ -687,7 +720,6 @@ function Table({
 export default function WildriseGame({ online }: { online?: OnlineWildriseSession }) {
   const [options, setOptions] = useState<SetupOptions>({
     count: 2,
-    names: ['Red', 'Blue', 'Green', 'Yellow'],
     style: 'casual',
     exact: true,
   })
