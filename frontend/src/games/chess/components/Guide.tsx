@@ -137,8 +137,15 @@ export default function Guide({
   // Focus comes to the guide when it opens and goes back where it was when it closes.
   useEffect(() => {
     const before = document.activeElement
-    card.current?.focus({ preventScroll: true })
+    const focus = () => card.current?.focus({ preventScroll: true })
+    focus()
+    // Opened from How to play, that dialog is still playing its exit; when it
+    // closes the browser hands focus back to whatever opened it — so take it again.
+    const closing = document.querySelector('dialog[open]')
+    const refocus = () => requestAnimationFrame(focus)
+    closing?.addEventListener('close', refocus, { once: true })
     return () => {
+      closing?.removeEventListener('close', refocus)
       if (before instanceof HTMLElement && before.isConnected) before.focus({ preventScroll: true })
     }
   }, [])
