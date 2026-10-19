@@ -22,6 +22,8 @@ export interface Burst {
   life?: number
   /** 0 = straight up, 1 = a full hemisphere. */
   spread?: number
+  /** Height this burst lands on; defaults to the pool's floor. */
+  floor?: number
 }
 
 const KIND = {
@@ -55,7 +57,8 @@ export function createParticles(scene: THREE.Scene, { max = 600, floor = -Infini
     scale = new Float32Array(max * 3),
     life = new Float32Array(max),
     total = new Float32Array(max),
-    kind = new Uint8Array(max)
+    kind = new Uint8Array(max),
+    floors = new Float32Array(max)
   const kinds: BurstKind[] = ['confetti', 'spark', 'dust']
   const color = new THREE.Color(),
     matrix = new THREE.Matrix4(),
@@ -104,6 +107,7 @@ export function createParticles(scene: THREE.Scene, { max = 600, floor = -Infini
         )
         total[i] = life[i] = (burst.life ?? spec.life) * (0.7 + r(11) * 0.6)
         kind[i] = kinds.indexOf(k)
+        floors[i] = burst.floor ?? floor
         mesh.setColorAt(i, color.set(colors[Math.floor(r(12) * colors.length)]))
       }
       seed++
@@ -122,6 +126,7 @@ export function createParticles(scene: THREE.Scene, { max = 600, floor = -Infini
             life[i] = life[last]
             total[i] = total[last]
             kind[i] = kind[last]
+            floors[i] = floors[last]
             mesh.getColorAt(last, color)
             mesh.setColorAt(i, color)
           }
@@ -137,8 +142,8 @@ export function createParticles(scene: THREE.Scene, { max = 600, floor = -Infini
         position[o] += velocity[o] * dt
         position[o + 1] += velocity[o + 1] * dt
         position[o + 2] += velocity[o + 2] * dt
-        if (position[o + 1] < floor) {
-          position[o + 1] = floor
+        if (position[o + 1] < floors[i]) {
+          position[o + 1] = floors[i]
           velocity[o + 1] *= -0.3
           velocity[o] *= 0.6
           velocity[o + 2] *= 0.6

@@ -47,13 +47,18 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
-  const pmrem = new THREE.PMREMGenerator(renderer)
-  const room = new RoomEnvironment()
-  const environment = pmrem.fromScene(room, 0.03)
+  // A render target, so its pixels die with the context; rebaked on restore.
+  function bakeEnvironment() {
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    const room = new RoomEnvironment()
+    const target = pmrem.fromScene(room, 0.03)
+    room.dispose()
+    pmrem.dispose()
+    return target
+  }
+  let environment = bakeEnvironment()
   scene.environment = environment.texture
   scene.environmentIntensity = options.environmentIntensity ?? 0.3
-  room.dispose()
-  pmrem.dispose()
 
   let camera: THREE.Camera | null = null,
     disposed = false,
@@ -104,6 +109,9 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
   }
   const onRestored = () => {
     lost = false
+    environment.dispose()
+    environment = bakeEnvironment()
+    scene.environment = environment.texture
     dirty = true
   }
   renderer.domElement.addEventListener('webglcontextlost', onLost)
