@@ -6,6 +6,7 @@ import TokenIcon from './TokenIcon'
 import Dialog from './Dialog'
 import PlayOptions from '../../../online/PlayOptions'
 import { estateGame } from '../../catalog'
+import './SetupDialog.css'
 
 export default function SetupDialog({
   onClose,

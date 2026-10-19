@@ -3,21 +3,16 @@ import { botName } from '../online/bots'
 import type { ErrorCode } from '../protocol/types'
 import { BOARD } from './board'
 import { botAcceptsTrade, botAction, createGame, gameReducer } from './engine'
+import { ESTATE_PACING } from './online'
 import type { EstateOnlineAction, EstateOptions } from './online'
 import type { GameState, Trade } from './types'
 
 /**
- * The local page's pacing, read off `MonopolyGame.tsx`: a spinning die is held
- * for `DICE_SETTLE_MS`, a token takes `STEP_MS` per square and `LANDING_MS` to
- * settle on the one it stops at. Online the server holds those beats for the
- * whole table, so a turn takes as long as it always did — but it resolves in a
- * single mutation on a single deadline rather than an alarm per square.
+ * Online the server holds the board's beats for the whole table (see
+ * `ESTATE_PACING`), so a turn takes as long as it always did — but it resolves
+ * in a single mutation on a single deadline rather than an alarm per square.
  */
-const DICE_SETTLE_MS = 1200
-const STEP_MS = 215
-const LANDING_MS = 330
-/** A beat of slack after the board's animation so the last step lands, not cuts. */
-const MOTION_GRACE_MS = 300
+const { DICE_SETTLE_MS, STEP_MS, LANDING_MS, MOTION_GRACE_MS } = ESTATE_PACING
 
 /** How long a walk of `steps` squares is given before the room moves the game on. */
 const walkMs = (steps: number) => steps * STEP_MS + LANDING_MS + MOTION_GRACE_MS
@@ -289,8 +284,7 @@ export const estateAdapter: GameAdapter<GameState, EstateOnlineAction> = {
    * on each of their turns, so a single decision is all it settles. Bankruptcy
    * is the only way out of a game of Estate, and it still has to be earned.
    */
-  resolveAbsent: (state, seat, seats, ctx) =>
-    estateAdapter.bots!.decide(state, seat, seats, 'standard', ctx),
+  resolveAbsent: (state, seat, seats, ctx) => estateAdapter.bots!.decide(state, seat, seats, 'standard', ctx),
 
   /**
    * A seat the room plays. `skill` is inert: Estate's bot has one way of

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { reducedMotion } from '../../../motion/preference'
+import './Dialog.css'
 
 /** How long `motion-dialog`'s exit takes (`--motion-base`). */
 const EXIT_MS = 260

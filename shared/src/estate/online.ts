@@ -34,3 +34,16 @@ export type EstateOnlineAction =
 export interface EstateOptions {
   mode: 'classic' | 'quick'
 }
+
+/**
+ * How long the room holds each beat of a turn: a thrown die for
+ * `DICE_SETTLE_MS`, then `STEP_MS` a square and `LANDING_MS` to settle on the
+ * last, with `MOTION_GRACE_MS` of slack so the last step lands rather than cuts.
+ * The board reads it too, to place a walk it joins halfway through.
+ */
+export const ESTATE_PACING = {
+  DICE_SETTLE_MS: 1200,
+  STEP_MS: 215,
+  LANDING_MS: 330,
+  MOTION_GRACE_MS: 300,
+} as const

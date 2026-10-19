@@ -1,0 +1,297 @@
+/* A deed, the portfolio, and the toolbar buttons that open them. */
+@scope (.estate-app) {
+  .utility-actions {
+    display: flex;
+    align-items: center;
+    gap: 19px;
+  }
+
+  .utility-action {
+    background: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #a4adbb);
+    padding: 5px 0;
+  }
+
+  .utility-action:hover:not(:disabled) {
+    color: light-dark(var(--theme-accent), #e9bd8c);
+  }
+
+  .utility-action > svg {
+    color: light-dark(var(--theme-muted), #8c99ac);
+  }
+
+  .utility-action:disabled {
+    opacity: 0.36;
+  }
+
+  .count-badge {
+    min-width: 18px;
+    text-align: center;
+    font-size: 8px;
+    line-height: 16px;
+    margin-left: 2px;
+    border: 1px solid light-dark(var(--theme-border), #344052);
+    border-radius: 4px;
+    color: light-dark(var(--theme-muted), #8f9bae);
+  }
+
+  .property-banner {
+    background: var(--property-color);
+    color: #fff9e8;
+    height: 110px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    box-shadow: inset 0 1px 0 #ffffff50;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .property-banner:after {
+    content: '';
+    position: absolute;
+    width: 150px;
+    height: 150px;
+    border: 1px solid #ffffff30;
+    right: -40px;
+    transform: rotate(30deg);
+  }
+
+  .property-banner > span {
+    font-family: 'Manrope', sans-serif;
+    font-weight: 600;
+    font-size: 28px;
+    max-width: 75%;
+  }
+
+  .ownership-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 20px 0;
+    font-size: 11px;
+    color: light-dark(var(--theme-muted), #a0adbe);
+    gap: 12px;
+  }
+
+  .ownership-line strong {
+    font-weight: 600;
+  }
+
+  .small-pill {
+    padding: 4px 7px;
+    border: 1px solid light-dark(var(--theme-border), #52634f);
+    border-radius: 4px;
+    color: light-dark(var(--theme-muted), #b6cbb2);
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+
+  .rent-table {
+    background: light-dark(var(--theme-surface), #151f2b);
+    border-radius: 8px;
+    padding: 7px 15px;
+    margin: 16px 0;
+  }
+
+  .rent-table > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    padding: 9px 0;
+    color: light-dark(var(--theme-muted), #a3afbf);
+    border-bottom: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 13%, transparent), #303b4822);
+  }
+
+  .rent-table > div:last-child {
+    border-bottom: 0;
+  }
+
+  .rent-table strong {
+    color: light-dark(var(--theme-text), #dce2e9);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .rent-table .highlighted,
+  .rent-table .highlighted strong {
+    color: light-dark(var(--theme-accent), #e8bd8e);
+  }
+
+  .rent-current {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 16px;
+    color: light-dark(var(--theme-muted), #b7c4cd);
+  }
+
+  .rent-current strong {
+    color: light-dark(var(--theme-accent), #edc194);
+    font-size: 15px;
+  }
+
+  .rent-current small {
+    color: light-dark(var(--theme-muted), #919dad);
+    font-weight: 400;
+    font-size: 9px;
+  }
+
+  .property-management {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .property-management .small-copy {
+    margin: -1px 0 3px;
+    text-align: center;
+  }
+
+  .special-space-description {
+    color: light-dark(var(--theme-muted), #acb8c7);
+    font-size: 13px;
+    line-height: 1.9;
+    margin: 22px 0 4px;
+  }
+
+  .portfolio-dialog {
+    max-width: 570px;
+  }
+
+  .portfolio-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 4px 0 20px;
+  }
+
+  .portfolio-tabs button {
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    font-size: 10px;
+    background: none;
+    color: light-dark(var(--theme-muted), #a2afbf);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .portfolio-tabs button > i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .portfolio-tabs button.active {
+    background: light-dark(var(--theme-surface), #4e3b23);
+    border-color: light-dark(var(--theme-border), #d99a51);
+    color: light-dark(var(--theme-accent), #ffe5bc);
+  }
+
+  .portfolio-list {
+    max-height: 440px;
+    overflow: auto;
+  }
+
+  .portfolio-property {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    text-align: left;
+    border: 1px solid light-dark(var(--theme-border), #303d4e);
+    border-radius: 6px;
+    padding: 13px;
+    margin-bottom: 8px;
+    background: light-dark(var(--theme-surface), #202b3a);
+  }
+
+  .portfolio-property:hover {
+    background: light-dark(var(--theme-inset), #344051);
+    border-color: light-dark(var(--theme-border), #d99a51);
+    box-shadow: inset 3px 0 0 #d99a51;
+  }
+
+  .property-color {
+    width: 5px;
+    height: 32px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .portfolio-property > div {
+    flex: 1;
+  }
+
+  .portfolio-property strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .portfolio-property small {
+    display: block;
+    margin-top: 5px;
+    font-size: 9px;
+    color: light-dark(var(--theme-muted), #8f9eaf);
+  }
+
+  .portfolio-property > span:nth-last-child(2) {
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #b1bac5);
+  }
+
+  .portfolio-property > svg {
+    color: light-dark(var(--theme-muted), #8190a4);
+  }
+
+  .portfolio-key {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 9px;
+    color: light-dark(var(--theme-muted), #8697ac);
+    margin-top: 16px;
+  }
+
+  .portfolio-key svg {
+    color: light-dark(var(--theme-muted), #97b8a1);
+  }
+
+  .empty-portfolio {
+    padding: 35px 12px;
+    text-align: center;
+  }
+
+  .empty-portfolio > svg {
+    color: light-dark(var(--theme-accent), #b29673);
+    margin-bottom: 18px;
+  }
+
+  .empty-portfolio h3 {
+    font-family: 'Manrope', sans-serif;
+    font-size: 18px;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+  }
+
+  .empty-portfolio p {
+    font-size: 11px;
+    line-height: 1.8;
+    color: light-dark(var(--theme-muted), #98a8bc);
+    margin: 12px 0 22px;
+  }
+}

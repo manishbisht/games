@@ -1,0 +1,406 @@
+/* The stage around the board: its frame, the camera controls, the dice and GO chips, and the turn dock. */
+@scope (.estate-app) {
+  .game-stage {
+    background: light-dark(var(--theme-surface), #151d29);
+    border: 1px solid light-dark(var(--theme-border), #2c3443);
+    border-radius: 15px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+  }
+
+  .board-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: radial-gradient(
+      ellipse at 50% 47%,
+      light-dark(color-mix(in srgb, var(--theme-surface) 28%, transparent), #2e394747) 0%,
+      light-dark(color-mix(in srgb, var(--theme-surface) 32%, transparent), #19233052) 44%,
+      light-dark(color-mix(in srgb, var(--theme-surface) 33%, transparent), #131b2855) 79%
+    );
+    isolation: isolate;
+  }
+
+  .board-viewport:before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(
+      light-dark(color-mix(in srgb, var(--theme-inset) 4%, transparent), #a5bad20b) 0.5px,
+      transparent 0.5px
+    );
+    background-size: 5px 5px;
+    pointer-events: none;
+  }
+
+  .board-topline {
+    position: absolute;
+    top: 18px;
+    left: 22px;
+    right: 19px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .board-topline > * {
+    pointer-events: auto;
+  }
+
+  .board-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 8px;
+    letter-spacing: 1.8px;
+    font-weight: 500;
+    color: light-dark(var(--theme-muted), #99a4b3);
+  }
+
+  .live-dot {
+    width: 5px;
+    height: 5px;
+    background: #b1b9ad;
+    border-radius: 50%;
+  }
+
+  .board-expand {
+    color: light-dark(var(--theme-muted), #8792a3);
+  }
+
+  .board-bottomline {
+    position: absolute;
+    bottom: 16px;
+    left: 22px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .camera-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #7f8a9b);
+  }
+
+  .camera-hint svg {
+    color: light-dark(var(--theme-muted), #a0acba);
+  }
+
+  .camera-hint > span {
+    margin: 0 3px;
+    color: light-dark(var(--theme-muted), #616d7f);
+  }
+
+  .camera-controls {
+    display: flex;
+    gap: 1px;
+    align-items: center;
+    background: light-dark(color-mix(in srgb, var(--theme-surface) 79%, transparent), #151d29c9);
+    border: 1px solid light-dark(var(--theme-border), #343e4c);
+    border-radius: 7px;
+    overflow: hidden;
+    pointer-events: auto;
+    box-shadow: 0 2px 6px #0001;
+  }
+
+  .camera-controls button {
+    padding: 8px 9px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: transparent;
+    color: light-dark(var(--theme-muted), #9ca7b8);
+  }
+
+  .camera-controls button:hover {
+    color: light-dark(var(--theme-accent), #f3d1a9);
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 3%, transparent), #ffffff08);
+  }
+
+  .camera-controls i {
+    width: 1px;
+    height: 16px;
+    background: light-dark(var(--theme-inset), #343e4c);
+    margin: 0 2px;
+  }
+
+  .action-dock {
+    min-height: 99px;
+    border-top: 1px solid light-dark(var(--theme-border), #2c3644);
+    background: light-dark(var(--theme-surface), #1b2431);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 24px;
+    z-index: 4;
+  }
+
+  .turn-avatar {
+    width: 51px;
+    height: 51px;
+    flex-shrink: 0;
+    position: relative;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--player-color) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--player-color) 15%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .turn-avatar > span {
+    position: absolute;
+    bottom: -3px;
+    right: -3px;
+    width: 10px;
+    height: 10px;
+    border: 3px solid light-dark(var(--theme-border), #1b2431);
+    border-radius: 50%;
+    background: var(--player-color);
+  }
+
+  .turn-copy {
+    min-width: 0;
+  }
+
+  .turn-eyebrow {
+    font-size: 8px;
+    letter-spacing: 1.25px;
+    color: light-dark(var(--theme-accent), #c1a17c);
+    font-weight: 600;
+    display: block;
+    margin-bottom: 5px;
+  }
+
+  .turn-copy h2 {
+    font-family: 'Manrope', sans-serif;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.28px;
+    line-height: 1.4;
+  }
+
+  .turn-copy p {
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #8e9bad);
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  .turn-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .roll-button {
+    min-width: 170px;
+    min-height: 47px;
+    gap: 11px;
+    font-size: 13px;
+  }
+
+  .roll-button kbd {
+    margin-left: 11px;
+    font-family: inherit;
+    letter-spacing: 1px;
+    font-size: 7px;
+    padding: 3px 4px;
+    border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 33%, transparent), #775c3e55);
+    border-radius: 3px;
+    color: #3e2c15;
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 21%, transparent), #ad702636);
+  }
+
+  .roll-button.is-rolling svg {
+    animation: estate-roll-icon 0.75s infinite;
+  }
+
+  .pass-button {
+    background: none;
+    border: 0;
+    color: light-dark(var(--theme-muted), #bcc4ce);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    font-size: 11px;
+    padding: 10px 3px;
+  }
+
+  .pass-button:hover {
+    color: light-dark(var(--theme-text), #fff);
+  }
+
+  .dice-result {
+    position: absolute;
+    z-index: 3;
+    left: 22px;
+    top: 52px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: light-dark(color-mix(in srgb, var(--theme-surface) 90%, transparent), #18212fe6);
+    border: 1px solid light-dark(var(--theme-border), #3a4451);
+    padding: 8px 10px;
+    border-radius: 7px;
+    animation: estate-chip-in var(--motion-slow) var(--ease-spring) both;
+    box-shadow: 0 3px 15px #0002;
+  }
+
+  .mini-die {
+    width: 23px;
+    height: 23px;
+    background: #f1e7d7;
+    border-radius: 4px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    padding: 4px;
+  }
+
+  .mini-die > i.pip {
+    background: #36404a;
+    border-radius: 50%;
+  }
+
+  .dice-result > span:last-child {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: 4px;
+    font-size: 7px;
+    letter-spacing: 1px;
+    color: light-dark(var(--theme-muted), #9aa8b8);
+  }
+
+  .dice-result strong {
+    font-size: 16px;
+    color: light-dark(var(--theme-accent), #dfc39e);
+    letter-spacing: 0;
+  }
+
+  .go-reward {
+    position: absolute;
+    z-index: 4;
+    left: 50%;
+    top: 20%;
+    font-family: 'Manrope', sans-serif;
+    font-size: 34px;
+    font-weight: 700;
+    color: #a8dab1;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    text-shadow: 0 4px 20px #0008;
+    animation: estate-reward 3.2s var(--ease-out) both;
+  }
+
+  .go-reward span {
+    display: block;
+    font-size: 10px;
+    color: #d0e6d4;
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+
+  .game-stage:fullscreen {
+    border-radius: 0;
+    height: 100svh;
+    background: light-dark(var(--theme-surface), #141d2a);
+  }
+
+  .game-stage:fullscreen .board-viewport {
+    height: calc(100svh - 100px);
+  }
+
+  .turn-avatar {
+    animation: estate-avatar-in var(--motion-slow) var(--ease-spring) both;
+  }
+
+  .turn-copy h2,
+  .turn-copy p {
+    animation: motion-enter var(--motion-slow) var(--ease-out) both;
+  }
+
+  .dice-result .mini-die {
+    animation: estate-mini-die-in var(--motion-slow) var(--ease-spring) both;
+  }
+
+  .dice-result .mini-die + .mini-die {
+    animation-delay: 70ms;
+  }
+
+  .dice-result.doubles {
+    border-color: light-dark(var(--theme-accent), #d9a35f);
+    box-shadow:
+      0 0 0 3px light-dark(color-mix(in srgb, var(--theme-accent) 18%, transparent), #d9a35f26),
+      0 3px 15px #0002;
+  }
+}
+@keyframes estate-roll-icon {
+  0% {
+    transform: rotate(0);
+  }
+  50% {
+    transform: rotate(150deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes estate-reward {
+  0% {
+    opacity: 0;
+    translate: 0 18px;
+    scale: 0.6;
+  }
+  10% {
+    opacity: 1;
+    translate: 0 -4px;
+    scale: 1.12;
+  }
+  18%,
+  68% {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 -26px;
+    scale: 0.96;
+  }
+}
+@keyframes estate-avatar-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+    rotate: -14deg;
+  }
+}
+@keyframes estate-chip-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.7;
+  }
+}
+@keyframes estate-mini-die-in {
+  from {
+    rotate: -120deg;
+    scale: 0.4;
+  }
+}

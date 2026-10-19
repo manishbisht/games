@@ -23,6 +23,7 @@ import {
 } from '@games/shared/estate'
 import type { BoardSpace, GameAction, GameState } from '@games/shared/estate/types'
 import Dialog from './Dialog'
+import './PropertyDialogs.css'
 
 export function SpaceIcon({ space, size = 20 }: { space: BoardSpace; size?: number }) {
   if (space.kind === 'railroad') return <TrainFront size={size} />

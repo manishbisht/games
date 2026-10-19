@@ -1,0 +1,333 @@
+/* The dialogs the page opens itself: the rules, settings, a drawn card, a debt, the winner. */
+@scope (.estate-app) {
+  .rules-dialog {
+    max-width: 590px;
+  }
+
+  .rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 19px;
+    margin: 24px 0;
+  }
+
+  .rule {
+    display: flex;
+    gap: 15px;
+  }
+
+  .rule-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 37px;
+    height: 37px;
+    border-radius: 8px;
+    border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 15%, transparent), #bfa07525);
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 4%, transparent), #bfa0750a);
+    color: light-dark(var(--theme-accent), #ccae84);
+    flex-shrink: 0;
+  }
+
+  .rule h3 {
+    font-size: 12px;
+    font-weight: 600;
+    margin: 0 0 5px;
+  }
+
+  .rule h3 > span {
+    font-size: 9px;
+    color: light-dark(var(--theme-muted), #998568);
+    margin-right: 4px;
+  }
+
+  .rule p {
+    font-size: 11px;
+    line-height: 1.8;
+    color: light-dark(var(--theme-muted), #97a7bc);
+  }
+
+  .keyboard-guide {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    border-top: 1px solid light-dark(var(--theme-border), #374456);
+    padding-top: 20px;
+    color: light-dark(var(--theme-muted), #93a3b8);
+    font-size: 9px;
+  }
+
+  .keyboard-guide > span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .rules-dialog > .primary-button {
+    margin-top: 19px;
+  }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px 0;
+    border-bottom: 1px solid light-dark(var(--theme-border), #344152);
+  }
+
+  .settings-row h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .settings-row h3 svg {
+    color: light-dark(var(--theme-accent), #bea27e);
+  }
+
+  .settings-row p {
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #93a3b8);
+    line-height: 1.6;
+    margin-top: 7px;
+  }
+
+  .toggle {
+    border: 1px solid light-dark(var(--theme-border), #4c5a6b);
+    border-radius: 30px;
+    width: 40px;
+    height: 23px;
+    display: flex;
+    align-items: center;
+    padding: 3px;
+    background: light-dark(var(--theme-surface), #313d4d);
+    flex-shrink: 0;
+  }
+
+  .toggle > span {
+    width: 15px;
+    height: 15px;
+    background: #9cabbc;
+    border-radius: 50%;
+    transition:
+      transform 0.2s,
+      background 0.2s;
+  }
+
+  .toggle.on {
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 40%, transparent), #b3936666);
+    border-color: light-dark(var(--theme-border), #c5a172);
+  }
+
+  .toggle.on > span {
+    transform: translateX(16px);
+    background: #edc08b;
+  }
+
+  .settings-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: light-dark(var(--theme-muted), #8f9fb5);
+    margin: 24px 0;
+    font-size: 11px;
+    line-height: 1.8;
+  }
+
+  .settings-note svg {
+    flex-shrink: 0;
+    color: light-dark(var(--theme-muted), #87aa95);
+    margin-top: 3px;
+  }
+
+  .event-card {
+    text-align: center;
+    max-width: 415px;
+    border-color: light-dark(color-mix(in srgb, var(--theme-border) 40%, transparent), #b8967066);
+  }
+
+  .event-card .dialog-heading {
+    text-align: left;
+  }
+
+  .event-card .dialog-heading h2 {
+    font-size: 22px;
+  }
+
+  .card-illustration {
+    height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 12px 0 20px;
+    color: light-dark(var(--theme-accent), #e2b078);
+    font-family: Georgia, serif;
+    font-size: 100px;
+    background: radial-gradient(
+      ellipse,
+      light-dark(color-mix(in srgb, var(--theme-inset) 13%, transparent), #ce9a6422),
+      transparent 70%
+    );
+  }
+
+  .event-card.chest .card-illustration {
+    color: light-dark(var(--theme-muted), #8eb8b5);
+    background: radial-gradient(
+      ellipse,
+      light-dark(color-mix(in srgb, var(--theme-inset) 13%, transparent), #6ba6a522),
+      transparent 70%
+    );
+  }
+
+  .event-card > p {
+    font-size: 14px;
+    line-height: 1.9;
+    color: light-dark(var(--theme-text), #d2d9e2);
+    padding: 0 7px;
+  }
+
+  .card-for {
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #8c9ab0);
+    margin: 25px 0;
+  }
+
+  .card-for strong {
+    margin-left: 3px;
+  }
+
+  .debt-amount {
+    text-align: center;
+    color: light-dark(var(--theme-danger), #e0a58a);
+    font-family: 'Manrope', sans-serif;
+    font-size: 43px;
+    font-weight: 600;
+    margin: 26px 0;
+  }
+
+  .debt-amount > span {
+    display: block;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    color: light-dark(var(--theme-muted), #a8b3c2);
+    margin-top: 5px;
+    font-weight: 400;
+  }
+
+  .winner-dialog {
+    text-align: center;
+    border-color: light-dark(var(--theme-border), #c0a071);
+  }
+
+  .winner-dialog .dialog-heading {
+    text-align: left;
+  }
+
+  .winner-confetti {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 17px;
+    padding: 12px 0;
+    color: light-dark(var(--theme-accent), #dfba86);
+    background: radial-gradient(
+      ellipse,
+      light-dark(color-mix(in srgb, var(--theme-inset) 11%, transparent), #ddae791b),
+      transparent 67%
+    );
+  }
+
+  .winner-confetti > .token-icon {
+    filter: drop-shadow(0 5px 15px #e9ad7240);
+  }
+
+  .winner-confetti > svg:first-child {
+    transform: rotate(-16deg);
+  }
+
+  .winner-confetti > svg:last-child {
+    transform: rotate(16deg);
+  }
+
+  .winner-dialog > h3 {
+    font-family: 'Manrope', sans-serif;
+    font-size: 31px;
+    letter-spacing: -1px;
+    font-weight: 600;
+    color: light-dark(var(--theme-accent), #f0cf9f);
+    margin: 13px 0;
+  }
+
+  .winner-dialog > p {
+    font-size: 11px;
+    color: light-dark(var(--theme-muted), #9facc0);
+    line-height: 1.7;
+  }
+
+  .winner-stats {
+    display: flex;
+    justify-content: space-around;
+    gap: 12px;
+    margin: 28px 0;
+    padding: 19px 0;
+    border-block: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 27%, transparent), #9e855f44);
+  }
+
+  .winner-stats span {
+    font-size: 7px;
+    letter-spacing: 1px;
+    color: light-dark(var(--theme-muted), #95a3b6);
+    display: block;
+  }
+
+  .winner-stats strong {
+    display: block;
+    font-family: 'Manrope', sans-serif;
+    font-weight: 600;
+    font-size: 22px;
+    margin-top: 7px;
+  }
+
+  /* A drawn card turns over on its way to you, from edge-on to face-up. */
+  .event-card[open] {
+    animation: estate-card-reveal 640ms var(--ease-out) both;
+    transform-origin: 50% 50%;
+  }
+
+  .event-card .card-illustration {
+    animation: motion-pop var(--motion-slow) var(--ease-spring) 240ms both;
+  }
+
+  .winner-confetti > * {
+    animation: motion-pop var(--motion-slow) var(--ease-spring) both;
+  }
+
+  .winner-confetti > :nth-child(2) {
+    animation:
+      motion-pop var(--motion-slow) var(--ease-spring) 120ms both,
+      estate-winner-bob 2.4s var(--ease-in-out) 600ms infinite;
+  }
+
+  .winner-confetti > :nth-child(3) {
+    animation-delay: 220ms;
+  }
+}
+@keyframes estate-card-reveal {
+  0% {
+    transform: perspective(900px) rotateY(-90deg);
+  }
+  62% {
+    transform: perspective(900px) rotateY(9deg);
+  }
+  100% {
+    transform: perspective(900px) rotateY(0);
+  }
+}
+@keyframes estate-winner-bob {
+  50% {
+    translate: 0 -6px;
+  }
+}

@@ -1,0 +1,155 @@
+/* "The latest": the table's running log of what just happened. */
+@scope (.estate-app) {
+  .activity-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 130px;
+    background: light-dark(var(--theme-surface), #171f2b);
+    border: 1px solid light-dark(var(--theme-border), #283140);
+    border-radius: 10px;
+    padding: 17px 15px 0;
+    overflow: hidden;
+  }
+
+  .activity-panel .panel-heading h2 {
+    font-size: 13px;
+  }
+
+  .activity-panel .panel-heading {
+    margin-bottom: 15px;
+  }
+
+  .panel-heading > .activity-live {
+    font-size: 7px;
+    letter-spacing: 1.2px;
+    display: flex;
+    gap: 5px;
+    align-items: center;
+  }
+
+  .activity-live i {
+    width: 4px;
+    height: 4px;
+  }
+
+  .activity-feed {
+    overflow: auto;
+    min-height: 0;
+    flex: 1;
+    padding-right: 2px;
+    mask-image: linear-gradient(to bottom, black 90%, transparent);
+  }
+
+  .activity-event {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    position: relative;
+    margin-bottom: 17px;
+    animation: estate-event-drop var(--motion-slow) var(--ease-spring) both;
+  }
+
+  .activity-event p {
+    font-size: 10px;
+    line-height: 1.65;
+    color: light-dark(var(--theme-muted), #8d9aab);
+    flex: 1;
+    padding-top: 1px;
+  }
+
+  .activity-event.latest p {
+    color: light-dark(var(--theme-text), #c4cedb);
+  }
+
+  .event-symbol {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: light-dark(var(--theme-muted), #7e8a9a);
+  }
+
+  .event-symbol.purchase {
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 7%, transparent), #e7b68012);
+    border-radius: 5px;
+    color: light-dark(var(--theme-accent), #cda572);
+  }
+
+  .event-symbol.money {
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 7%, transparent), #8abda012);
+    border-radius: 5px;
+    color: light-dark(var(--theme-muted), #8abda0);
+  }
+
+  .event-symbol.roll {
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 8%, transparent), #90a1d415);
+    border-radius: 5px;
+    color: light-dark(var(--theme-text), #acb9e3);
+  }
+
+  .event-symbol.alert {
+    color: light-dark(var(--theme-danger), #d39387);
+  }
+
+  .event-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: light-dark(var(--theme-inset), #66778d);
+  }
+
+  .now-label {
+    font-size: 8px;
+    color: light-dark(var(--theme-muted), #657285);
+    margin-top: 4px;
+    margin-left: -2px;
+  }
+
+  .activity-footer {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-top: 1px solid light-dark(var(--theme-border), #2b3441);
+    font-size: 8px;
+    color: light-dark(var(--theme-muted), #6f7c8e);
+    padding: 12px 0;
+    margin-top: 5px;
+  }
+
+  .activity-footer svg {
+    color: light-dark(var(--theme-muted), #809689);
+  }
+
+  .activity-empty {
+    padding: 3px 2px;
+  }
+
+  .activity-empty span {
+    display: block;
+    height: 4px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+    background: light-dark(var(--theme-surface), #242d3b);
+    width: 82%;
+    opacity: 0.5;
+  }
+
+  .activity-empty span:nth-child(2) {
+    width: 65%;
+    opacity: 0.4;
+  }
+
+  .activity-empty span:nth-child(3) {
+    width: 74%;
+    opacity: 0.2;
+  }
+}
+@keyframes estate-event-drop {
+  from {
+    opacity: 0;
+    translate: 0 -10px;
+  }
+}

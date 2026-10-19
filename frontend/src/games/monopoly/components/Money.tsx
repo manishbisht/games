@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { money } from '@games/shared/estate/board'
 import { useCountUp } from '../../../motion/hooks'
+import './Money.css'
 
 /**
  * A balance that counts to its new value, with the change itself floating off

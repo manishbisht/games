@@ -1,0 +1,280 @@
+/* The sidebar's player cards, and the toolbar under the table. */
+@scope (.estate-app) {
+  .sidebar {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .panel-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    min-height: 21px;
+  }
+
+  .panel-heading h2 {
+    font-family: 'Manrope', sans-serif;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.3px;
+  }
+
+  .panel-heading h2 > span {
+    color: light-dark(var(--theme-accent), #e5b787);
+  }
+
+  .panel-heading > span {
+    font-size: 10px;
+    color: light-dark(var(--theme-muted), #919aaa);
+  }
+
+  .player-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .player-card {
+    width: 100%;
+    text-align: left;
+    background: light-dark(var(--theme-surface), #1b2330);
+    border: 1px solid light-dark(var(--theme-border), #2c3442);
+    border-radius: 10px;
+    padding: 13px 12px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .player-card:hover {
+    background: color-mix(in srgb, var(--player-color) 17%, light-dark(var(--theme-surface), #18212f));
+    border-color: var(--player-color);
+  }
+
+  .player-card.active {
+    background: linear-gradient(
+      115deg,
+      color-mix(in srgb, var(--player-color) 23%, light-dark(var(--theme-surface), #17202d)),
+      light-dark(var(--theme-surface), #1c2531)
+    );
+    border-color: var(--player-color);
+    padding-bottom: 0;
+    box-shadow:
+      inset 3px 0 0 var(--player-color),
+      0 4px 20px #00000018;
+  }
+
+  .player-card-main {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .player-token {
+    width: 37px;
+    height: 39px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .player-identity {
+    min-width: 0;
+  }
+
+  .player-identity > strong {
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    max-width: 115px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .player-identity > span {
+    display: block;
+    font-size: 9px;
+    color: light-dark(var(--theme-muted), #8390a2);
+    margin-top: 5px;
+  }
+
+  .you-label {
+    font-size: 6px;
+    font-weight: 500;
+    letter-spacing: 0.7px;
+    border-radius: 3px;
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 8%, transparent), #eab57914);
+    border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 15%, transparent), #eab57925);
+    color: light-dark(var(--theme-accent), #e1b787);
+    padding: 2px 4px;
+  }
+
+  .player-money {
+    margin-left: auto;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .player-money > strong {
+    display: block;
+    font-family: 'Manrope', sans-serif;
+    font-size: 16px;
+    letter-spacing: 0.2px;
+    font-weight: 650;
+  }
+
+  .player-card.active .player-money > strong {
+    color: light-dark(var(--theme-accent), #e8be91);
+  }
+
+  .player-money > span {
+    font-size: 9px;
+    color: light-dark(var(--theme-muted), #8290a3);
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+
+  .player-turn-label {
+    font-size: 7px;
+    letter-spacing: 1.25px;
+    color: var(--player-color);
+    margin-top: 11px;
+    padding: 8px 0;
+    border-top: 1px solid color-mix(in srgb, var(--player-color) 12%, transparent);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .player-turn-label > i {
+    width: 4px;
+    height: 4px;
+    background: var(--player-color);
+    border-radius: 50%;
+  }
+
+  .player-turn-label > span {
+    margin-left: auto;
+    display: flex;
+  }
+
+  .player-card.bankrupt {
+    opacity: 0.4;
+  }
+
+  .ownership-strips {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    gap: 2px;
+    height: 3px;
+    opacity: 0.85;
+  }
+
+  .ownership-strips i {
+    flex: 1;
+    max-width: 35px;
+  }
+
+  .table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    margin-top: 17px;
+    min-height: 28px;
+  }
+
+  .toolbar-separator {
+    height: 15px;
+    width: 1px;
+    background: light-dark(var(--theme-surface), #303745);
+  }
+
+  .table-tip {
+    font-size: 9px;
+    letter-spacing: 0.05px;
+    color: light-dark(var(--theme-muted), #6b798e);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .tip-star {
+    font-size: 17px;
+    color: light-dark(var(--theme-muted), #ae987b);
+  }
+
+  :scope .player-card {
+    transition:
+      background var(--motion-base) var(--ease-out),
+      border-color var(--motion-base) var(--ease-out),
+      box-shadow var(--motion-slow) var(--ease-out),
+      opacity var(--motion-slow) var(--ease-out),
+      filter var(--motion-slow) var(--ease-out),
+      scale var(--motion-fast) var(--ease-spring);
+  }
+
+  .player-card.bankrupt {
+    filter: grayscale(0.85);
+  }
+
+  .player-card.active {
+    animation: estate-card-wake var(--motion-slow) var(--ease-spring);
+  }
+
+  .player-turn-label {
+    overflow: hidden;
+    animation: estate-turn-label-in var(--motion-slow) var(--ease-out) both;
+  }
+
+  .player-turn-label > i {
+    animation: estate-turn-dot 1.6s var(--ease-in-out) infinite;
+  }
+
+  .ownership-strips i {
+    transition: background-color var(--motion-slow) var(--ease-out);
+    transform-origin: left;
+    animation: estate-strip-in var(--motion-slow) var(--ease-spring) both;
+  }
+}
+@keyframes estate-card-wake {
+  from {
+    box-shadow:
+      inset 0 0 0 var(--player-color),
+      0 0 0 #0000;
+  }
+}
+@keyframes estate-turn-label-in {
+  from {
+    max-height: 0;
+    padding-block: 0;
+    margin-top: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 40px;
+  }
+}
+@keyframes estate-turn-dot {
+  50% {
+    scale: 1.8;
+    opacity: 0.5;
+  }
+}
+@keyframes estate-strip-in {
+  from {
+    scale: 0 1;
+  }
+}

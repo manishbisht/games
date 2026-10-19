@@ -3,11 +3,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { BOARD } from '@games/shared/estate/board'
 import { gameReducer } from '@games/shared/estate'
 import type { Card, GameState } from '@games/shared/estate/types'
+import { ESTATE_PACING } from '@games/shared/estate/online'
 import { createStage, onTap } from '../../../motion/stage'
 import { createCameraRig } from '../../../motion/camera'
 import { createDieThrow } from '../../../motion/dice'
 import type { DieThrow } from '../../../motion/dice'
 import { createParticles } from '../../../motion/particles'
+import type { Burst } from '../../../motion/particles'
 import { createQueue, createTweens } from '../../../motion/tween'
 import type { Beat, Tween } from '../../../motion/tween'
 import {
@@ -26,7 +28,9 @@ import {
 } from '../../../motion/ease'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
 import type { Sound } from '../game/audio'
+import { BANK, COIN_STAGGER, coinCount, transfers } from '../game/transfers'
 import { cardKeyOf } from '../online/session'
+import { createCoins } from './coins'
 import { createLots } from './lots'
 import {
   boardPosition,
@@ -54,10 +58,19 @@ export type SceneCue =
   | { type: 'present'; state: GameState }
   | { type: 'go'; player: number }
   | { type: 'dice'; rollId: number }
-  | { type: 'sound'; sound: Sound; strength?: number }
+  | { type: 'sound'; sound: Sound; strength?: number; pan?: number }
+
+/**
+ * How far into its current beat the room already was: `elapsed` ms when the
+ * snapshot was received, at `at` on this page's `performance.now()` clock.
+ */
+export interface BeatSync {
+  elapsed: number
+  at: number
+}
 
 export interface SceneApi {
-  update: (state: GameState) => void
+  update: (state: GameState, sync?: BeatSync) => void
   select: (id: number | null) => void
   /** Rattle the dice in the hand while the roll is on its way to the server. */
   shake: () => void
@@ -71,8 +84,17 @@ export interface SceneApi {
 const STEP_MS = 200
 /** The settle after the last step: squash, dust, the tile giving a little. */
 const LAND_MS = 280
-/** The dice are given 1200ms by the server: a moment in the hand, then the toss. */
-const THROW_MS = 900
+/**
+ * The dice are given 1200ms by the server. The toss rises from wherever the
+ * dice were let go — in the hand if the roller shook them, on the table if not —
+ * so the whole beat can be the throw.
+ */
+const THROW_MS = 960
+const DICE_MS = THROW_MS + 70 + 150
+/** A beat the page only learns of this late is joined where it already is, not played from the top. */
+const JOIN_AFTER_MS = 150
+/** How much of the decoration each quality tier keeps: dust, sparks, confetti and coins. */
+const DENSITY = [0.4, 0.65, 1]
 const ORIGIN = new THREE.Vector3(0, 0.05, 0)
 const HOME = new THREE.Vector3(12, 18, 20)
 const TILE_Y = 0.17
@@ -85,7 +107,11 @@ interface Plan {
 export function createScene(
   container: HTMLElement,
   initial: GameState,
-  { onSelect, onCue }: { onSelect: (id: number) => void; onCue: (cue: SceneCue) => void },
+  {
+    onSelect,
+    onCue,
+    sync,
+  }: { onSelect: (id: number) => void; onCue: (cue: SceneCue) => void; sync?: BeatSync },
 ): SceneApi {
   let state = initial,
     disposed = false
@@ -117,6 +143,23 @@ export function createScene(
   const tweens = createTweens(),
     queue = createQueue({ catchUpAfter: 3, catchUpSpeed: 2.5 })
   const particles = createParticles(scene, { max: 520, floor: 0.232 })
+  /** Bursts thinned to the stage's quality tier; a slow device keeps the moment, with less in the air. */
+  const effects = {
+    burst: (burst: Burst) =>
+      particles.burst({
+        ...burst,
+        count: Math.max(1, Math.round((burst.count ?? 40) * DENSITY[stage.quality])),
+      }),
+  }
+  const screen = new THREE.Vector2()
+  /** Where on the board, left to right, a sound happened. */
+  const panOf = (at: THREE.Vector3) =>
+    stage.size.width
+      ? THREE.MathUtils.clamp((stage.toScreen(at, screen).x / stage.size.width) * 2 - 1, -1, 1) * 0.6
+      : 0
+  const coins = createCoins(scene, {
+    onLand: (strength, at) => cue({ type: 'sound', sound: 'coin', strength, pan: panOf(at) }),
+  })
 
   stage.onResize((w, h) => {
     const aspect = w / h,
@@ -138,6 +181,16 @@ export function createScene(
   key.shadow.bias = -0.0005
   key.shadow.normalBias = 0.02
   scene.add(key)
+  // Below full quality the shadow map halves too; tier 0 drops shadows altogether (the stage's call).
+  const lighterShadows = () => {
+    if (stage.quality === 2 || key.shadow.mapSize.x <= 1024) return
+    key.shadow.mapSize.set(1024, 1024)
+    key.shadow.map?.dispose()
+    key.shadow.map = null
+    stage.invalidate()
+  }
+  lighterShadows()
+  stage.onQuality(lighterShadows)
   const fill = new THREE.DirectionalLight('#9ab9ef', 0.65)
   fill.position.set(8, 7, -10)
   scene.add(fill)
@@ -394,7 +447,7 @@ export function createScene(
     kit,
     tiles: tileGroups,
     tweens,
-    particles,
+    particles: effects,
     ring: ringBurst,
     onBuild: () => cue({ type: 'sound', sound: 'build' }),
   })
@@ -489,22 +542,19 @@ export function createScene(
       seed: i ? 7 : 1,
       onContact: (strength) => {
         if (strength > 0.3)
-          particles.burst({
+          effects.burst({
             origin: die.position,
             kind: 'dust',
             count: Math.round(7 * strength),
             colors: ['#e7e0cc', '#cfc4a8'],
             size: 0.6,
           })
-        if (i === 0) cue({ type: 'sound', sound: 'tap', strength })
+        if (i === 0) cue({ type: 'sound', sound: 'tap', strength, pan: panOf(die.position) })
       },
     })
   })
   let shaking = false,
-    shakeFrom = 0,
     shakeUntil = 0
-  /** How long the dice are rattled in the hand before a throw, so the toss starts high. */
-  const GATHER_MS = 260
 
   // The card a player draws: lifted off its deck, turned to face the table,
   // and handed to the page to read.
@@ -654,13 +704,19 @@ export function createScene(
     })
   }
 
-  /** Walk `steps` squares forward from `from`, one hop a square, the GO square paying as it is crossed. */
-  function walkBeat(player: number, from: number, steps: number, gentle: boolean): Beat {
+  /**
+   * Walk `steps` squares forward from `from`, one hop a square, the GO square
+   * paying as it is crossed. `place` puts the token on `from` first — a walk
+   * joined partway, whose earlier squares the room has already played.
+   */
+  function walkBeat(player: number, from: number, steps: number, gentle: boolean, place = false): Beat {
     return {
       label: 'walk',
       run: () => {
         const token = tokens[player]
-        if (!token || steps <= 0) return 0
+        if (!token) return 0
+        if (place) spotFor(player, from, false, false, token.group.position)
+        if (steps <= 0) return 0
         const step = gentle ? 70 : STEP_MS
         follow(token, spotFor(player, (from + steps) % 40))
         for (let i = 1; i <= steps; i++) {
@@ -676,10 +732,15 @@ export function createScene(
             gentle,
             onLand: () => {
               dip(position, last ? 0.05 : 0.022)
-              cue({ type: 'sound', sound: 'tap', strength: last ? 0.9 : 0.3 })
+              cue({
+                type: 'sound',
+                sound: 'step',
+                strength: last ? 0.9 : 0.4,
+                pan: panOf(token.group.position),
+              })
               if (position === 0) passGo(player)
               if (last && !gentle)
-                particles.burst({
+                effects.burst({
                   origin: token.group.position,
                   kind: 'dust',
                   count: 9,
@@ -698,12 +759,36 @@ export function createScene(
     }
   }
 
+  /** The bank: the middle of the board, where taxes go and wages come from. */
+  const bankAt = new THREE.Vector3(0, 0.2, 0.6)
+  const coinFrom = new THREE.Vector3(),
+    coinTo = new THREE.Vector3()
+  /** Cash as the page was last shown it, and laps of GO already paid out on the board since. */
+  let presentedCash: number[] = [],
+    goCredit: number[] = []
+  /** A payment's coins, from the top of one token (or the bank) to the foot of another. */
+  function throwCoins(from: THREE.Vector3, to: THREE.Vector3, amount: number) {
+    coinFrom.set(from.x, from.y + (from === bankAt ? 0 : 0.45), from.z)
+    coinTo.set(to.x, to.y + 0.03, to.z)
+    coins.fly(
+      coinFrom,
+      coinTo,
+      Math.max(2, Math.round(coinCount(amount) * DENSITY[stage.quality])),
+      COIN_STAGGER,
+    )
+  }
+  const anchor = (player: number) => (player === BANK ? bankAt : (tokens[player]?.group.position ?? bankAt))
+
   function passGo(player: number) {
     cue({ type: 'go', player })
+    // The page books the $200 now; the room's own record of it must not pay twice.
+    goCredit[player] = (goCredit[player] ?? 0) + 200
     if (reducedMotion()) return
+    const token = tokens[player]
+    if (token) throwCoins(bankAt, token.group.position, 200)
     const at = tileCentre(0, goAt)
     ringBurst(at, '#f4c96b', 1.6)
-    particles.burst({
+    effects.burst({
       origin: at.setY(0.5),
       kind: 'spark',
       count: 26,
@@ -758,7 +843,7 @@ export function createScene(
             token.group.position.copy(end)
             dip(JAIL, 0.06)
             rig.shake(0.07, 240)
-            particles.burst({
+            effects.burst({
               origin: end,
               kind: 'dust',
               count: 12,
@@ -797,7 +882,7 @@ export function createScene(
     }
   }
 
-  function diceBeat(values: [number, number], rollId: number, gentle: boolean): Beat {
+  function diceBeat(values: [number, number], rollId: number, gentle: boolean, skip = 0): Beat {
     return {
       label: 'dice',
       run: () => {
@@ -807,23 +892,25 @@ export function createScene(
           cue({ type: 'dice', rollId })
           return 160
         }
-        // Gathered into the hand first — the roller's dice may already be
-        // there, everyone else's are picked up now — and only then tossed.
-        if (!shaking) {
-          throws.forEach((t) => t.shake())
-          shakeFrom = stage.now
-        }
         shaking = false
-        const gather = Math.max(0, GATHER_MS - (stage.now - shakeFrom))
-        cue({ type: 'sound', sound: 'roll' })
+        // Joined late: what is left of the throw, or — if most of it is gone —
+        // the dice already down.
+        if (skip > THROW_MS * 0.6) {
+          throws.forEach((t, i) => t.settle(values[i]))
+          cue({ type: 'dice', rollId })
+          return Math.max(0, DICE_MS - skip)
+        }
+        // Straight from wherever they are — the roller's hand, or the table —
+        // up to the release point and down: no gathering first.
+        const throwMs = THROW_MS - skip
+        cue({ type: 'sound', sound: 'roll', pan: panOf(dice[0].position) })
+        throws.forEach((t, i) => t.throw(values[i], throwMs + i * 70))
         tweens.add({
-          delay: gather,
-          duration: THROW_MS + 70,
-          start: () => throws.forEach((t, i) => t.throw(values[i], THROW_MS + i * 70)),
+          duration: throwMs + 70,
           update: () => {},
           done: () => cue({ type: 'dice', rollId }),
         })
-        return gather + THROW_MS + 200
+        return DICE_MS - skip
       },
     }
   }
@@ -944,7 +1031,7 @@ export function createScene(
       duration: 1,
       update: () => {},
       done: () =>
-        particles.burst({
+        effects.burst({
           origin: token.group.position,
           kind: 'dust',
           count: 10,
@@ -1017,7 +1104,7 @@ export function createScene(
         duration: 1,
         update: () => {},
         done: () =>
-          particles.burst({
+          effects.burst({
             origin: new THREE.Vector3(at.x, 2.4, at.z),
             kind: 'confetti',
             count: 110,
@@ -1051,6 +1138,13 @@ export function createScene(
   /** Show `next` to the page, and play whatever changed with it. */
   function present(next: GameState, gentle: boolean) {
     cue({ type: 'present', state: next })
+    // The sidebar's balances change now, so the money crosses the board now too.
+    const before = presentedCash.map((value, i) => value + (goCredit[i] ?? 0))
+    presentedCash = next.players.map((p) => p.cash)
+    goCredit = []
+    if (!gentle)
+      for (const { from, to, amount } of transfers(before, presentedCash))
+        throwCoins(anchor(from), anchor(to), amount)
     let hold = lots.sync(next.properties, colorsOf(next), true, gentle)
     const turn = next.winner ?? next.current
     if (turn !== ringPlayer) moveRing(turn, next.players[turn].color, gentle)
@@ -1079,6 +1173,9 @@ export function createScene(
     tweens.finishAll()
     tweens.cancelAll()
     particles.clear()
+    coins.clear()
+    presentedCash = next.players.map((p) => p.cash)
+    goCredit = []
     followed = null
     rig.follow(null)
     if (tokens.length !== next.players.length) setupTokens()
@@ -1123,8 +1220,10 @@ export function createScene(
     stage.invalidate()
   }
 
-  function update(next: GameState) {
+  function update(next: GameState, sync?: BeatSync) {
     if (disposed) return
+    /** How far into this state's beat the room already is — a join or a reconnect lands mid-roll. */
+    const late = sync ? sync.elapsed + (performance.now() - sync.at) : 0
     const prev = state
     state = next
     const fresh =
@@ -1143,8 +1242,12 @@ export function createScene(
       )
         setupTokens()
       snap(next)
-      return
+      // Arrived mid-roll or mid-walk: play what is left of it from where the room is.
+      if (late < JOIN_AFTER_MS || (next.phase !== 'rolling' && next.phase !== 'moving')) return
+      if (next.phase === 'rolling') lastRoll = next.rollId - 1
     }
+    /** Milliseconds of the new beat to skip; a queue still telling an older story starts it from the top. */
+    const skip = late >= JOIN_AFTER_MS && !queue.busy ? late : 0
     const gentle = reducedMotion(),
       beats: Beat[] = [],
       walking = next.phase === 'rolling' || next.phase === 'moving'
@@ -1160,13 +1263,13 @@ export function createScene(
     if (next.rollId > lastRoll) {
       lastRoll = next.rollId
       if (next.phase === 'rolling') presentBeat()
-      beats.push(diceBeat([next.dice[0], next.dice[1]], next.rollId, gentle))
+      beats.push(diceBeat([next.dice[0], next.dice[1]], next.rollId, gentle, skip))
       if (next.phase === 'rolling') {
         const p = next.current,
           settled = gameReducer(next, { type: 'DICE_SETTLED' }),
           mover = settled.players[p]
         if (settled.phase === 'moving' && settled.stepsRemaining > 0) {
-          beats.push(walkBeat(p, plan[p].position, settled.stepsRemaining, gentle))
+          beats.push(joinedWalk(p, settled.stepsRemaining, skip - ESTATE_PACING.DICE_SETTLE_MS, gentle))
           plan[p] = { position: (plan[p].position + settled.stepsRemaining) % 40, jailed: false }
         } else if (mover.jailed && !plan[p].jailed) {
           beats.push(jailBeat(p, gentle))
@@ -1181,7 +1284,7 @@ export function createScene(
         walked = key
         if (!presented) presentBeat()
         const p = next.current
-        beats.push(walkBeat(p, plan[p].position, next.stepsRemaining, gentle))
+        beats.push(joinedWalk(p, next.stepsRemaining, skip, gentle))
         plan[p] = { position: (plan[p].position + next.stepsRemaining) % 40, jailed: false }
       }
     }
@@ -1206,6 +1309,16 @@ export function createScene(
     if (!presented) presentBeat()
     queue.push(...beats)
     stage.invalidate()
+  }
+
+  /**
+   * The walk `steps` squares on from where the plan has `player`, less the
+   * squares the room has already walked `into` ms of its walk — at its own
+   * pace, `STEP_MS` a square — so a page that joins late starts on the right one.
+   */
+  function joinedWalk(player: number, steps: number, into: number, gentle: boolean) {
+    const done = into > 0 ? Math.min(steps, Math.floor(into / ESTATE_PACING.STEP_MS)) : 0
+    return walkBeat(player, (plan[player].position + done) % 40, steps - done, gentle, done > 0)
   }
 
   // Picking and hovering.
@@ -1278,6 +1391,7 @@ export function createScene(
     }
     for (const t of throws) if (t.step(dt * tweens.speed)) moving = true
     if (particles.step(dt)) moving = true
+    if (coins.step(dt * 1000)) moving = true
     // The ring stays under its token, and breathes for a few seconds after a turn changes hands.
     const owner = tokens[ringPlayer]
     if (owner) ring.position.set(owner.group.position.x, 0.258, owner.group.position.z)
@@ -1313,9 +1427,10 @@ export function createScene(
     rig.dispose()
     controls.dispose()
     particles.dispose()
+    coins.dispose()
     tooltip.remove()
   })
-  update(initial)
+  update(initial, sync)
   stage.start()
 
   return {
@@ -1328,7 +1443,6 @@ export function createScene(
     shake() {
       if (state.phase !== 'ready' || queue.busy || reducedMotion()) return
       shaking = true
-      shakeFrom = stage.now
       shakeUntil = stage.now + 3000
       throws.forEach((t) => t.shake())
       stage.invalidate()

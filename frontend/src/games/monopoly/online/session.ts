@@ -1,6 +1,6 @@
 import type { EstateOnlineAction } from '@games/shared/estate/online'
 import type { GameAction, GameState } from '@games/shared/estate/types'
-import type { RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
+import type { BeatTiming, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 
 export interface EstateSeatPlayer {
@@ -26,6 +26,10 @@ export interface OnlineEstateSession {
   /** Keyed by player index, so it lines up with `state.players`. */
   players: Partial<Record<number, EstateSeatPlayer>>
   rematch: { mine: boolean; theirs: boolean }
+  /** The room's clock for the beat `state` is in, so a page that joins mid-roll can join it there. */
+  timing?: BeatTiming
+  /** When this browser received the snapshot, on its `performance.now()` clock. */
+  receivedAt: number
   send: {
     action: (action: EstateOnlineAction) => void
     rematch: () => void
@@ -169,6 +173,8 @@ export function estateSession(
       // only starts once the whole table has asked for it.
       theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
     },
+    timing: snapshot.timing,
+    receivedAt: performance.now(),
     send: {
       action: (action) => api.action(action),
       rematch: api.rematch,

@@ -1,7 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createScene } from './createScene'
-import type { SceneApi, SceneCue } from './createScene'
+import type { BeatSync, SceneApi, SceneCue } from './createScene'
 import type { GameState } from '@games/shared/estate/types'
+import './BoardScene.css'
 
 export type BoardControls = Pick<SceneApi, 'reset' | 'zoom' | 'topView' | 'shake'>
 export type { SceneCue }
@@ -15,21 +16,25 @@ const BoardScene = forwardRef<
   BoardControls,
   {
     state: GameState
+    /** Online: how far into the room's current beat `state` already was. */
+    sync?: BeatSync
     selected: number | null
     onSelect: (id: number) => void
     onCue: (cue: SceneCue) => void
   }
->(function BoardScene({ state, selected, onSelect, onCue }, ref) {
+>(function BoardScene({ state, sync, selected, onSelect, onCue }, ref) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
   const initial = useRef(state),
+    syncRef = useRef(sync),
     selectRef = useRef(onSelect),
     cueRef = useRef(onCue)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     selectRef.current = onSelect
     cueRef.current = onCue
-  }, [onSelect, onCue])
+    syncRef.current = sync
+  }, [onSelect, onCue, sync])
   useImperativeHandle(
     ref,
     () => ({
@@ -46,6 +51,7 @@ const BoardScene = forwardRef<
       scene.current = createScene(container.current, initial.current, {
         onSelect: (id) => selectRef.current(id),
         onCue: (cue) => cueRef.current(cue),
+        sync: syncRef.current,
       })
     } catch (error) {
       console.error('Unable to initialize the 3D board', error)
@@ -59,7 +65,7 @@ const BoardScene = forwardRef<
   const passed = useRef(state.eventId)
   useEffect(() => {
     if (scene.current) {
-      scene.current.update(state)
+      scene.current.update(state, syncRef.current)
       return
     }
     // No board to walk on: a lap of GO is still worth announcing.

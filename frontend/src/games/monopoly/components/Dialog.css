@@ -1,0 +1,108 @@
+/* The modal every dialog at the table is built on, and the copy and actions dialogs share. */
+@scope (.estate-app) {
+  .dialog {
+    border: 1px solid light-dark(var(--theme-border), #3a4453);
+    border-radius: 17px;
+    padding: 28px;
+    background: light-dark(var(--theme-surface), #1a2330);
+    color: var(--text);
+    width: calc(100% - 32px);
+    max-width: 500px;
+    max-height: calc(100svh - 48px);
+    box-shadow: 0 35px 150px #0009;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .dialog::backdrop {
+    background: #080d18b0;
+    backdrop-filter: blur(7px);
+  }
+
+  .dialog-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  .dialog-heading h2 {
+    font-family: 'Manrope', sans-serif;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.8px;
+    line-height: 1.35;
+  }
+
+  .dialog-heading .eyebrow {
+    font-size: 8px;
+    color: light-dark(var(--theme-accent), #be9f7a);
+    margin-bottom: 10px;
+    letter-spacing: 1.6px;
+  }
+
+  .dialog-heading .icon-button {
+    margin-top: -5px;
+    margin-right: -7px;
+  }
+
+  .dialog-description {
+    font-size: 12px;
+    line-height: 1.8;
+    color: light-dark(var(--theme-muted), #9eacbf);
+    margin-bottom: 23px;
+  }
+
+  .full-width {
+    width: 100%;
+  }
+
+  .dialog-footnote {
+    font-size: 9px;
+    line-height: 1.7;
+    color: light-dark(var(--theme-muted), #7b8a9d);
+    text-align: center;
+    margin-top: 15px;
+  }
+
+  .muted {
+    color: light-dark(var(--theme-muted), #8e9caf);
+  }
+
+  .small-copy {
+    font-size: 10px;
+    line-height: 1.7;
+    margin: 10px 0;
+  }
+
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 23px;
+  }
+
+  .dialog-actions > .primary-button,
+  .dialog-actions > .secondary-button {
+    flex: 1;
+  }
+
+  .inline-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: light-dark(color-mix(in srgb, var(--theme-inset) 5%, transparent), #a4b39b0c);
+    border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 21%, transparent), #71826735);
+    border-radius: 6px;
+    color: light-dark(var(--theme-muted), #b3bba9);
+    font-size: 10px;
+    line-height: 1.6;
+    margin: 14px 0;
+  }
+
+  .inline-notice svg {
+    flex-shrink: 0;
+  }
+}

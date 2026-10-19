@@ -1,0 +1,64 @@
+/* The canvas the 3D board draws into, its hover tooltip, and the no-WebGL fallback. */
+@scope (.estate-app) {
+  .board-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  .board-canvas canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .board-canvas canvas:active {
+    cursor: grabbing;
+  }
+
+  .board-tooltip {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+    min-width: 180px;
+    max-width: 210px;
+    padding: 12px 15px;
+    background: light-dark(color-mix(in srgb, var(--theme-surface) 96%, transparent), #17212ff5);
+    border: 1px solid light-dark(var(--theme-border), #9c804b);
+    border-left: 4px solid var(--tooltip-color, light-dark(var(--theme-border), #d99a51));
+    border-radius: 7px;
+    box-shadow: 0 8px 24px #0008;
+  }
+
+  .board-tooltip strong {
+    display: block;
+    color: light-dark(var(--theme-accent), #fff0d7);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .board-tooltip span {
+    display: block;
+    margin-top: 5px;
+    color: light-dark(var(--theme-muted), #b9c4d2);
+    font-size: 10px;
+  }
+
+  .webgl-message {
+    position: absolute;
+    inset: 25%;
+    z-index: 1;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .webgl-message p {
+    margin-top: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+}

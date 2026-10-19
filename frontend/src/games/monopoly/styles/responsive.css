@@ -1,0 +1,701 @@
+/*
+ * Every breakpoint in one place, imported last so it overrides the component
+ * files at equal specificity. Ranges nest — 390 sits inside 600, 960 inside
+ * 1000 — so a narrower block only says what differs from the wider one.
+ */
+@scope (.estate-app) {
+  @media (min-width: 1500px) {
+    .site-header {
+      padding-inline: 54px;
+    }
+    .main-content {
+      padding-inline: 54px;
+    }
+    .game-layout {
+      grid-template-columns: minmax(0, 1fr) 310px;
+      gap: 28px;
+    }
+    .action-dock {
+      padding: 22px 28px;
+    }
+    .turn-copy h2 {
+      font-size: 16px;
+    }
+    .turn-copy p {
+      font-size: 11px;
+    }
+    .player-card {
+      padding: 15px;
+    }
+    .player-card.active {
+      padding-bottom: 0;
+    }
+    .player-identity > strong {
+      font-size: 13px;
+    }
+    .player-money > strong {
+      font-size: 18px;
+    }
+    .activity-event p {
+      font-size: 11px;
+    }
+    .board-topline {
+      top: 21px;
+      left: 26px;
+    }
+    .board-bottomline {
+      left: 26px;
+    }
+    .camera-hint {
+      font-size: 11px;
+    }
+    .site-footer {
+      padding-inline: 54px;
+    }
+    .panel-heading h2 {
+      font-size: 16px;
+    }
+  }
+
+  @media (max-width: 1190px) {
+    .site-header {
+      padding-inline: 26px;
+      gap: 19px;
+    }
+    .main-content {
+      padding-inline: 26px;
+    }
+    .header-right {
+      gap: 16px;
+    }
+    .local-label {
+      margin-right: 6px;
+      font-size: 8px;
+    }
+    .brand-description {
+      font-size: 11px;
+    }
+    .game-layout {
+      grid-template-columns: minmax(0, 1fr) 255px;
+      gap: 18px;
+    }
+    .action-dock {
+      padding: 17px;
+      gap: 10px;
+      min-height: 99px;
+    }
+    .turn-copy h2 {
+      font-size: 13px;
+    }
+    .turn-copy p {
+      font-size: 9px;
+      max-width: 230px;
+    }
+    .turn-eyebrow {
+      font-size: 7px;
+      letter-spacing: 0.8px;
+    }
+    .roll-button {
+      min-width: 140px;
+      font-size: 12px;
+      padding: 11px 13px;
+    }
+    .roll-button kbd {
+      display: none;
+    }
+    .turn-avatar {
+      width: 43px;
+      height: 47px;
+    }
+    .player-card {
+      padding-inline: 9px;
+    }
+    .player-card-main {
+      gap: 7px;
+    }
+    .player-identity > strong {
+      font-size: 11px;
+    }
+    .player-money > strong {
+      font-size: 15px;
+    }
+    .table-tip {
+      font-size: 8px;
+    }
+    .site-footer {
+      padding-inline: 26px;
+    }
+    .board-bottomline {
+      left: 16px;
+      right: 16px;
+    }
+    .camera-hint {
+      font-size: 9px;
+      gap: 6px;
+    }
+    .game-heading h1 {
+      font-size: 27px;
+    }
+    .panel-heading {
+      margin-bottom: 12px;
+    }
+    .sidebar {
+      gap: 20px;
+    }
+  }
+
+  @media (max-width: 960px) {
+    .brand-description,
+    .site-header > .header-divider,
+    .local-label {
+      display: none;
+    }
+    .game-layout {
+      grid-template-columns: minmax(0, 1fr) 235px;
+    }
+    .turn-avatar {
+      display: none;
+    }
+    .action-dock {
+      flex-wrap: wrap;
+    }
+    .turn-copy {
+      flex: 1;
+    }
+    .turn-actions {
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    .turn-eyebrow {
+      line-height: 1.6;
+    }
+    .table-tip {
+      display: none;
+    }
+    .you-label {
+      display: none;
+    }
+    .camera-hint {
+      font-size: 0;
+      gap: 0;
+    }
+    .round-badge > svg {
+      width: 13px;
+      margin: 0;
+    }
+    .activity-panel {
+      padding-inline: 12px;
+    }
+    .activity-event {
+      gap: 6px;
+    }
+  }
+
+  @media (max-width: 1000px) {
+    .site-header {
+      height: 64px;
+      padding-inline: 20px;
+    }
+    .wordmark {
+      font-size: 29px;
+    }
+    .header-help {
+      font-size: 11px;
+    }
+    .header-right > .header-divider {
+      display: none;
+    }
+    .header-right .icon-button {
+      margin-left: 0;
+    }
+    .main-content {
+      padding: 22px 16px 0;
+    }
+    .game-heading {
+      align-items: flex-start;
+      margin-bottom: 20px;
+      gap: 10px;
+    }
+    .game-heading h1 {
+      font-size: 24px;
+      line-height: 1.2;
+      margin-top: 9px;
+    }
+    .game-heading .eyebrow {
+      font-size: 6.5px;
+      letter-spacing: 1.2px;
+      gap: 6px;
+    }
+    .tiny-line {
+      width: 12px;
+    }
+    .game-meta {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 9px;
+      margin-top: 1px;
+    }
+    .mode-badge {
+      font-size: 8px;
+      white-space: nowrap;
+      padding: 5px 7px;
+    }
+    .mode-icon svg {
+      width: 11px;
+      height: 11px;
+    }
+    .round-badge {
+      font-size: 9px;
+    }
+    .round-badge strong {
+      font-size: 11px;
+    }
+    .game-layout {
+      display: flex;
+      flex-direction: column;
+      height: auto;
+      min-height: 0;
+      max-height: none;
+      gap: 23px;
+    }
+    .game-stage {
+      height: auto;
+      flex-shrink: 0;
+      border-radius: 12px;
+    }
+    .board-viewport {
+      flex: none;
+      height: clamp(320px, 90vw, 540px);
+      min-height: 0;
+    }
+    .board-canvas {
+      inset: 35px 0 66px;
+    }
+    .action-dock {
+      min-height: 105px;
+      padding: 15px 16px;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .turn-copy {
+      min-width: 0;
+      flex-basis: 100%;
+    }
+    .turn-copy h2 {
+      font-size: 15px;
+      max-width: none;
+    }
+    .turn-copy p {
+      display: block;
+      font-size: 12px;
+      max-width: none;
+      overflow-wrap: anywhere;
+    }
+    .turn-eyebrow {
+      font-size: 9px;
+      max-width: none;
+    }
+    .turn-actions {
+      margin-left: 0;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .roll-button {
+      min-height: 48px;
+      min-width: 0;
+      flex: 1;
+      font-size: 14px;
+      padding: 10px 13px;
+      gap: 8px;
+    }
+    .pass-button {
+      font-size: 13px;
+      min-height: 48px;
+    }
+    .board-bottomline {
+      left: 15px;
+      right: 15px;
+      bottom: 14px;
+    }
+    .camera-hint {
+      display: none;
+    }
+    .camera-hint > svg,
+    .camera-hint > span {
+      display: block;
+    }
+    .camera-controls button {
+      padding: 0;
+      width: 44px;
+      height: 44px;
+    }
+    .board-topline {
+      left: 16px;
+      right: 12px;
+      top: 12px;
+    }
+    .board-label {
+      font-size: 6px;
+      letter-spacing: 1.6px;
+    }
+    .board-expand svg {
+      width: 15px;
+    }
+    .sidebar {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+    .players-panel > .panel-heading {
+      margin-bottom: 12px;
+    }
+    .player-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+    .player-card {
+      min-height: 77px;
+      padding: 12px 10px;
+      align-self: start;
+    }
+    .player-card.active {
+      padding-bottom: 0;
+      min-height: 95px;
+    }
+    .player-card-main {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 8px;
+    }
+    .player-money {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .player-identity > strong {
+      font-size: 11px;
+      max-width: 100px;
+    }
+    .player-money > strong {
+      font-size: 14px;
+    }
+    .player-money > span {
+      font-size: 9px;
+    }
+    .player-identity > span {
+      font-size: 8px;
+      margin-top: 4px;
+    }
+    .player-token {
+      width: 30px;
+      height: 34px;
+    }
+    .player-token svg {
+      width: 34px;
+    }
+    .player-turn-label {
+      margin-top: 7px;
+      padding: 6px 0;
+      font-size: 6px;
+      letter-spacing: 1px;
+    }
+    .ownership-strips {
+      height: 2px;
+    }
+    .activity-panel {
+      height: 220px;
+      padding: 15px 14px 0;
+    }
+    .activity-event p {
+      font-size: 11px;
+    }
+    .activity-event {
+      margin-bottom: 14px;
+    }
+    .activity-footer {
+      font-size: 9px;
+    }
+    .activity-feed {
+      mask-image: none;
+    }
+    .table-toolbar {
+      margin-top: 18px;
+    }
+    .utility-actions {
+      width: 100%;
+      gap: 8px;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .utility-action {
+      font-size: 11px;
+      gap: 5px;
+      min-height: 44px;
+    }
+    .utility-action svg {
+      width: 15px;
+    }
+    .toolbar-separator {
+      display: none;
+    }
+    .count-badge {
+      font-size: 8px;
+      min-width: 16px;
+    }
+    .site-footer {
+      padding: 26px 17px 20px;
+      font-size: 7px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .site-footer > span:last-child {
+      font-size: 6px;
+      letter-spacing: 1px;
+    }
+    .panel-heading h2 {
+      font-size: 15px;
+    }
+    .activity-panel .panel-heading h2 {
+      font-size: 14px;
+    }
+    .dialog {
+      padding: 23px 21px;
+      max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+      border-radius: 14px;
+      overscroll-behavior: contain;
+    }
+    .dialog-heading h2 {
+      font-size: 22px;
+    }
+    .dialog-heading {
+      margin-bottom: 16px;
+    }
+    .dialog-description {
+      font-size: 11px;
+    }
+    .dialog-heading .eyebrow {
+      font-size: 7px;
+      letter-spacing: 1.3px;
+    }
+    .trade-columns {
+      gap: 13px;
+    }
+    .dialog .primary-button {
+      font-size: 11px;
+    }
+    .setup-player {
+      padding: 6px 8px;
+      gap: 7px;
+    }
+    .setup-player input {
+      font-size: 12px;
+    }
+    .setup-player select {
+      font-size: 9px;
+      width: 101px;
+    }
+    .mode-option {
+      padding: 12px 10px;
+    }
+    .mode-option > span {
+      font-size: 10px;
+    }
+    .mode-option small {
+      font-size: 8px;
+    }
+    .dialog-actions {
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .dialog-actions > .secondary-button {
+      font-size: 10px;
+      padding-inline: 10px;
+    }
+    .portfolio-property {
+      padding: 11px 9px;
+      gap: 10px;
+    }
+    .portfolio-property strong {
+      font-size: 11px;
+    }
+    .portfolio-property > span:nth-last-child(2) {
+      font-size: 9px;
+    }
+    .winner-stats strong {
+      font-size: 19px;
+    }
+    .winner-stats span {
+      font-size: 6px;
+    }
+    .dice-result {
+      left: 16px;
+      top: 45px;
+      padding: 6px 8px;
+    }
+    .dice-result .mini-die {
+      width: 21px;
+      height: 21px;
+    }
+    .go-reward {
+      font-size: 28px;
+      top: 22%;
+    }
+    .header-right {
+      gap: 0;
+    }
+    .header-help,
+    .header-right .icon-button,
+    .board-expand,
+    .dialog-heading .icon-button,
+    .stepper button {
+      min-width: 44px;
+      min-height: 44px;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .portfolio-tabs button,
+    .trade-property-list label {
+      min-height: 44px;
+    }
+    .dialog-heading > div {
+      min-width: 0;
+    }
+    .dialog-heading h2,
+    .trade-review,
+    .winner-dialog > h3 {
+      overflow-wrap: anywhere;
+    }
+    .game-stage:fullscreen .board-viewport {
+      flex: 1;
+      height: auto;
+      min-height: 0;
+    }
+  }
+
+  @media (max-width: 390px) {
+    .main-content {
+      padding-inline: 11px;
+    }
+    .site-header {
+      padding-inline: 15px;
+    }
+    .header-help span {
+      display: none;
+    }
+    .game-heading h1 {
+      font-size: 22px;
+    }
+    .mode-badge {
+      font-size: 7px;
+    }
+    .action-dock {
+      padding-inline: 12px;
+      gap: 8px;
+    }
+    .turn-eyebrow {
+      font-size: 8px;
+    }
+    .roll-button {
+      padding-inline: 10px;
+    }
+    .player-card {
+      padding-inline: 7px;
+    }
+    .player-token {
+      width: 26px;
+    }
+    .player-token svg {
+      width: 31px;
+    }
+    .player-money > strong {
+      font-size: 13px;
+    }
+    .player-identity > strong {
+      font-size: 10px;
+    }
+    .camera-hint {
+      font-size: 7px;
+    }
+    .site-footer {
+      font-size: 6px;
+    }
+    .site-footer > span:last-child {
+      font-size: 5px;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .setup-player {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      gap: 4px 10px;
+    }
+    .setup-player select {
+      grid-column: 2;
+      width: 100%;
+    }
+    .mode-options,
+    .trade-columns {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .mode-option > span {
+      font-size: 13px;
+    }
+    .mode-option small {
+      font-size: 11px;
+    }
+    .field-label {
+      flex-wrap: wrap;
+    }
+    .field-label select {
+      flex-basis: 100%;
+      max-width: 100%;
+    }
+    .dialog-actions > button {
+      flex-basis: 100%;
+    }
+    .game-heading {
+      flex-wrap: wrap;
+    }
+    .game-meta {
+      flex-direction: row;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toggle {
+      height: 44px;
+    }
+  }
+
+  @media (min-width: 601px) and (max-width: 1000px) {
+    .sidebar {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: start;
+    }
+    .activity-panel {
+      height: 100%;
+      min-height: 260px;
+      max-height: 360px;
+    }
+    .action-dock {
+      flex-wrap: nowrap;
+    }
+    .turn-copy {
+      flex: 1;
+    }
+    .turn-actions {
+      width: auto;
+      max-width: 50%;
+    }
+  }
+
+  @media (max-width: 1000px) and (max-height: 500px) and (orientation: landscape) {
+    .board-viewport {
+      height: max(280px, calc(100svh - 32px));
+    }
+  }
+}

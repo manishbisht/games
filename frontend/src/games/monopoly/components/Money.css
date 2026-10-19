@@ -1,0 +1,85 @@
+/* A balance that counts, with its change floating off it. */
+@scope (.estate-app) {
+  .counted-money {
+    position: relative;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .money-delta {
+    position: absolute;
+    right: 0;
+    top: -2px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: estate-money-rise 1.5s var(--ease-out) both;
+  }
+
+  .money-delta.up {
+    color: light-dark(#2f8a55, #8fe0a8);
+  }
+
+  .money-delta.down {
+    color: light-dark(#b8463b, #f19a8c);
+    animation-name: estate-money-fall;
+  }
+}
+@keyframes estate-money-rise {
+  0% {
+    opacity: 0;
+    translate: 0 6px;
+    scale: 0.7;
+  }
+  14% {
+    opacity: 1;
+    translate: 0 -10px;
+    scale: 1.08;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 -26px;
+    scale: 1;
+  }
+}
+@keyframes estate-money-fall {
+  0% {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.7;
+  }
+  14% {
+    opacity: 1;
+    translate: 0 14px;
+    scale: 1.08;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 26px;
+    scale: 1;
+  }
+}
+
+/*
+ * The coins that cross the sidebar (`useCoinFlights`). They are appended to
+ * <body> to fly over everything, outside the table's scope, so this one rule is
+ * global — and prefixed so it cannot meet anything else on the site.
+ */
+.estate-flying-coin {
+  position: fixed;
+  z-index: 60;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #fff3c4, #f0c35a 45%, #b9842a);
+  box-shadow:
+    0 0 0 1px #8a5f1c55,
+    0 3px 8px #0004;
+}

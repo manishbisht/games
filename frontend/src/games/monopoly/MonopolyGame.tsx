@@ -1,3 +1,4 @@
+import './styles/base.css'
 import ThemeControl from '../../theme/ThemeControl'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
@@ -37,8 +38,8 @@ import { estateGame } from '../catalog'
 import { useBotRoom } from '../../online/useBotRoom'
 import { BOARD, money } from '@games/shared/estate/board'
 import { createGame, debtCapacity, netWorth, ownedSpaces } from '@games/shared/estate'
-import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
-import { playSound, unlockAudio } from './game/audio'
+import { CLAIM_WIN_AFTER_MS, beatElapsed } from '@games/shared/protocol'
+import { feel, playSound } from './game/audio'
 import type { GameState, PlayerConfig } from '@games/shared/estate/types'
 import { useCountUp, useHeld } from '../../motion/hooks'
 import { useMotionPreference, useReducedMotion } from '../../motion/preference'
@@ -53,7 +54,11 @@ import { PortfolioDialog, PropertyDetail, PropertySummary, TradeButton } from '.
 import TradeDialog from './components/TradeDialog'
 import CountedMoney from './components/Money'
 import { useCoinFlights, useFlip } from './components/useTableMotion'
-import './MonopolyGame.css'
+import './styles/hud.css'
+import './styles/players.css'
+import './styles/activity.css'
+import './styles/table-dialogs.css'
+import './styles/responsive.css'
 
 type Modal = 'setup' | 'rules' | 'settings' | 'portfolio' | 'trade' | null
 const pipPositions = [[], [4], [0, 8], [0, 4, 8], [0, 2, 6, 8], [0, 2, 4, 6, 8], [0, 2, 3, 5, 6, 8]]
@@ -186,14 +191,9 @@ interface GoBonus {
 
 function WinnerStats({ cash, properties, worth }: { cash: number; properties: number; worth: number }) {
   // Counted up from nothing once the dialog is open, which is the point of a final tally.
-  const [counting, setCounting] = useState(false)
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setCounting(true))
-    return () => cancelAnimationFrame(frame)
-  }, [])
-  const shownCash = useCountUp(counting ? cash : 0, 1300),
-    shownProperties = useCountUp(counting ? properties : 0, 900),
-    shownWorth = useCountUp(counting ? worth : 0, 1600)
+  const shownCash = useCountUp(cash, 1300, { from: 0 }),
+    shownProperties = useCountUp(properties, 900, { from: 0 }),
+    shownWorth = useCountUp(worth, 1600, { from: 0 })
   return (
     <div className="winner-stats">
       <div>
@@ -238,8 +238,8 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     [muted, setMuted] = useState(false)
   const [winnerDismissed, setWinnerDismissed] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  /** The roll whose dice have come to rest on the board. */
-  const [landedRoll, setLandedRoll] = useState(live.rollId)
+  /** The roll whose dice have come to rest on the board — not yet, if this page arrived mid-throw. */
+  const [landedRoll, setLandedRoll] = useState(live.phase === 'rolling' ? live.rollId - 1 : live.rollId)
   const [goBanner, setGoBanner] = useState<{ serial: number; player: number } | null>(null),
     [goBonus, setGoBonus] = useState<GoBonus[]>([])
   const [, setMotion] = useMotionPreference()
@@ -340,8 +340,11 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     else if (cue.type === 'go') {
       setGoBanner((last) => ({ serial: (last?.serial ?? 0) + 1, player: cue.player }))
       setGoBonus((all) => [...all, { player: cue.player, at: shown.eventId }])
-      if (!muted) playSound('money')
-    } else if (cue.type === 'sound' && !muted) playSound(cue.sound, cue.strength)
+      if (!muted) playSound('go')
+    } else if (cue.type === 'sound') {
+      if (!muted) playSound(cue.sound, cue.strength, cue.pan)
+      feel(cue.sound, cue.strength)
+    }
   }
   useEffect(() => {
     if (!toast) return
@@ -374,7 +377,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
         return
       if (e.code === 'Space') {
         e.preventDefault()
-        unlockAudio()
         if (isSetup) setModal('setup')
         else if (humanTurn && state.phase === 'ready') roll()
         else if (humanTurn && state.phase === 'end') dispatch({ type: 'END_TURN' })
@@ -391,7 +393,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
   })
   const room = useBotRoom('estate', estateGame.path)
   function startGame(players: PlayerConfig[], mode: GameState['mode']) {
-    unlockAudio()
     void room.start({
       seats: players.length,
       // Estate's bot has one way of playing, so the id is the same for each.
@@ -406,7 +407,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
     setModal('portfolio')
   }
   function primaryAction() {
-    unlockAudio()
     if (isSetup || isFinished) {
       // In a room the next game is the room's to deal, once everyone still at
       // the table has asked for one. On the way in it is still yours to set up.
@@ -505,7 +505,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
               : 'Manage your properties or pass the dice.'
             : 'Roll the dice and see where the city takes you.'
   return (
-    <div className="app-shell" ref={shell}>
+    <div className="app-shell estate-app" ref={shell}>
       <header className="site-header">
         <Link
           className="wordmark"
@@ -537,7 +537,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
             className="icon-button"
             aria-label={muted ? 'Turn sound on' : 'Mute sound'}
             onClick={() => {
-              unlockAudio()
               setMuted((v) => !v)
             }}
           >
@@ -593,7 +592,14 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                   <Expand size={17} />
                 </button>
               </div>
-              <BoardScene ref={board} state={live} selected={selected} onSelect={setSelected} onCue={onCue} />
+              <BoardScene
+                ref={board}
+                state={live}
+                sync={online && { elapsed: beatElapsed(online.timing), at: online.receivedAt }}
+                selected={selected}
+                onSelect={setSelected}
+                onCue={onCue}
+              />
               {diceDown && (
                 <div className={`dice-result ${doubles ? 'doubles' : ''}`} key={state.rollId}>
                   <MiniDie value={state.dice[0]} />
@@ -986,7 +992,6 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
               aria-checked={!muted}
               aria-label="Game sounds"
               onClick={() => {
-                unlockAudio()
                 setMuted((v) => !v)
               }}
             >

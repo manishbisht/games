@@ -4,6 +4,7 @@ import { BOARD, money } from '@games/shared/estate/board'
 import { ownedSpaces, validTrade } from '@games/shared/estate'
 import type { GameAction, GameState, Trade } from '@games/shared/estate/types'
 import Dialog from './Dialog'
+import './TradeDialog.css'
 
 export default function TradeDialog({
   state,
