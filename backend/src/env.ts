@@ -11,6 +11,12 @@ export interface Env {
   PLAYER: DurableObjectNamespace<PlayerDO>
   CLERK_SECRET_KEY?: string
   /**
+   * The Clerk instance's PEM public key (Dashboard → API keys → JWT public key).
+   * With it, a session token is verified with no network call at all; without
+   * it, keys are fetched with the secret key and cached (see `ClerkKeys`).
+   */
+  CLERK_JWT_KEY?: string
+  /**
    * Per-address rate limits (`ratelimits` in wrangler.jsonc). Optional because
    * a Worker run without them — a config that drops one — should limit
    * nothing rather than fail every request; see `overLimit`.
@@ -20,6 +26,8 @@ export interface Env {
   ERRORS_LIMITER?: RateLimit
   PROFILES_LIMITER?: RateLimit
   REPLAYS_LIMITER?: RateLimit
+  PRESENCE_LIMITER?: RateLimit
+  LOBBY_LIMITER?: RateLimit
   /** Anonymous product events (see analytics.ts). Optional: tests and bare configs run without it. */
   ANALYTICS?: AnalyticsEngineDataset
   /**

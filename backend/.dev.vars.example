@@ -1,3 +1,6 @@
 CLERK_SECRET_KEY=
 # The private half of VAPID_PUBLIC_KEY in wrangler.jsonc (base64url, 32 bytes).
 VAPID_PRIVATE_KEY=
+# Optional: the Clerk instance's PEM public key (Dashboard → API keys → JWT public key).
+# With it, session tokens verify with no call to Clerk at all. Production: `wrangler secret put CLERK_JWT_KEY`.
+CLERK_JWT_KEY=
