@@ -41,10 +41,28 @@ const headline = (page: Page) => page.locator('.pr-turn-announcement strong')
 const myTurn = (page: Page) => page.getByText('Your turn. Make it colorful.', { exact: true })
 const draw = (page: Page) => page.getByRole('button', { name: /^(Draw card|Draw \d+)$/ })
 
-/** Steps the frozen table until it has shown everything the room has said. */
+/**
+ * How far the room has got. With the clock held it can be ahead of what the
+ * table shows: the room answers in real time, and the table only tells it as
+ * it is stepped.
+ */
+const sequence = async (page: Page) => Number(await page.locator('.pr-arena').getAttribute('data-sequence'))
+/** Waits, clock still, for the room to say something after `seen`. */
+const answer = (page: Page, seen: number) =>
+  expect.poll(() => sequence(page), { timeout: 20000 }).toBeGreaterThan(seen)
+
+/**
+ * Steps the frozen table until it has shown everything the room has said so
+ * far. Idle is read and acted on in one place: the room keeps talking in real
+ * time, and a story that arrives once the table has come to rest is left for
+ * whatever comes next rather than raced by a second look.
+ */
 async function settle(page: Page) {
-  for (let i = 0; i < 30 && (await busy(page).count()); i++) await step(page, 400)
-  await expect(busy(page)).toHaveCount(0)
+  for (let i = 0; i < 40; i++) {
+    if (!(await busy(page).count())) return
+    await step(page, 400)
+  }
+  throw new Error('The table was still telling its story after 16s of its own time.')
 }
 
 /** A solo table against one bot, dealt by the server with this page's clock already frozen. */
@@ -97,6 +115,8 @@ test('the deal, a card of yours and the bot’s reply each land before the table
   await expect(myTurn(page)).toBeVisible()
   const before = await inPlay(page).textContent()
   const legal = page.locator('.pr-card.pr-playable')
+  // How far the room had got once it took this seat's move: the bot's answer is whatever comes after.
+  let mine: number
   if (await legal.count()) {
     const name = (await legal.first().getAttribute('aria-label'))!.split(',')[0]
     await legal.first().click()
@@ -104,6 +124,7 @@ test('the deal, a card of yours and the bot’s reply each land before the table
     const colors = page.getByRole('dialog', { name: 'Choose a color', exact: true })
     if (await colors.count()) await colors.getByRole('button', { name: 'Choose red', exact: true }).click()
     await expect(cards(page)).toHaveCount(6)
+    mine = await sequence(page)
     await expect(busy(page)).toHaveCount(1)
     await step(page, 160)
     await shot(page, '4-your-card-in-flight')
@@ -115,6 +136,7 @@ test('the deal, a card of yours and the bot’s reply each land before the table
   } else {
     await draw(page).click()
     await expect(cards(page)).toHaveCount(8)
+    mine = await sequence(page)
     await expect(pending(page)).toHaveCount(1)
     await expect(page.locator('.pr-hand-topline b')).toHaveText('7')
     await step(page, 200)
@@ -126,20 +148,30 @@ test('the deal, a card of yours and the bot’s reply each land before the table
     const keep = page.getByRole('button', { name: 'Keep & pass', exact: true })
     if (await keep.count()) {
       await keep.click()
+      await answer(page, mine)
+      mine = await sequence(page)
       await expect(keep).toHaveCount(0)
     }
   }
 
   // The bot's reply, which the room sends while this page's clock stands still.
   // A move of yours may hand the turn straight back (a skip or reverse between
-  // two); keep drawing until the bot is on.
+  // two), or the bot's answer may already have been shown; keep drawing until
+  // the bot is on. Nothing is stepped once the turn is the bot's, so its answer
+  // arrives to a table still holding it back.
   for (let i = 0; i < 6 && (await myTurn(page).isVisible()); i++) {
     await draw(page).click()
-    await settle(page)
-    const keep = page.getByRole('button', { name: 'Keep & pass', exact: true })
-    if (await keep.count()) await keep.click()
-    await settle(page)
+    await answer(page, mine)
+    mine = await sequence(page)
+    // A card that fits keeps the turn here: see it land, then keep it.
+    if (await page.locator('.pr-card.pr-just-drawn').count()) {
+      await settle(page)
+      await page.getByRole('button', { name: 'Keep & pass', exact: true }).click()
+      await answer(page, mine)
+      mine = await sequence(page)
+    }
   }
+  await answer(page, mine)
   await expect(busy(page)).toHaveCount(1, { timeout: 20000 })
   // However long the story, the turn is not offered back until it has been shown.
   await expect(myTurn(page)).toHaveCount(0)
