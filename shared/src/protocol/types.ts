@@ -61,6 +61,28 @@ export interface RoomSnapshot<S = unknown> {
   seats: Partial<Record<SeatId, SeatInfo>>
   /** Redacted for the socket it is addressed to — one viewer's view of the game. */
   gameState: S | null
+  /**
+   * When the game state was entered, by the server's clock, with the server's
+   * clock at the moment this snapshot was built — so a browser that joins or
+   * reconnects mid-beat knows how far into the beat it already is, without
+   * trusting its own clock to agree with the server's. `due` is when the room
+   * will move the game on by itself, while it is in a timed phase.
+   */
+  timing?: BeatTiming
+}
+
+export interface BeatTiming {
+  /** Server clock when the snapshot was built. */
+  now: number
+  /** Server clock when the current game state was entered. */
+  since: number
+  /** Server clock when the room will advance the game itself, if it will. */
+  due?: number
+}
+
+/** How many milliseconds of the current beat had already passed when the snapshot was built. */
+export function beatElapsed(timing: BeatTiming | undefined) {
+  return timing ? Math.max(0, timing.now - timing.since) : 0
 }
 
 /** Addressed to one socket, so it may carry that socket's own id. */

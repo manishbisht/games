@@ -58,7 +58,7 @@ async function table(seats = 2, players = seats) {
   await host.waitRoom((m) => Boolean(m.snapshot.seats[`p${players - 1}`]))
   host.send({ type: 'start' })
   await host.waitRoom((m) => m.snapshot.status === 'playing')
-  return { code, host, others }
+  return { code, host, others, guestId }
 }
 
 describe('a wildrise room', () => {
@@ -78,6 +78,28 @@ describe('a wildrise room', () => {
     const board = (state: unknown) => state as GameState | null
     const seen = await host.waitRoom((m) => board(m.snapshot.gameState)?.dice === rolled.dice)
     expect(board(seen.snapshot.gameState)!.dice).toBe(rolled.dice)
+  })
+
+  it('tells every snapshot how far into the current beat it is', async () => {
+    const { code, host, others, guestId } = await table()
+    const state = (await readRecord(code))!.gameState as GameState
+    const onTurn = state.currentPlayer === 0 ? host : others[0]
+    onTurn.send({ type: 'action', action: { kind: 'roll' } })
+    const rolling = await host.waitRoom(
+      (m) => (m.snapshot.gameState as GameState | null)?.phase === 'rolling',
+    )
+    const timing = rolling.snapshot.timing!
+    expect(timing.since).toBeLessThanOrEqual(timing.now)
+    // A timed phase says when the room will move it on.
+    expect(timing.due).toBeGreaterThan(timing.since)
+    // A snapshot that does not change the game (a player reconnecting on a
+    // second socket) carries the beat's original start, so the newcomer can
+    // tell how much of it already played.
+    const late = await connect(code)
+    late.join('Ann', guestId)
+    const seen = await late.waitRoom(() => true)
+    expect(seen.snapshot.timing!.since).toBe((await readRecord(code))!.stateAt)
+    expect(seen.snapshot.timing!.now).toBeGreaterThanOrEqual(timing.now)
   })
 
   it('refuses a roll from the seat whose turn it is not', async () => {

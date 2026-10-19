@@ -84,6 +84,8 @@ export interface RoomRecord {
    * entered. Absent whenever the game is not sitting in one.
    */
   autoAt?: number
+  /** When the current game state was entered; sent as `timing.since`. */
+  stateAt?: number
   /**
    * Stand-in turns in a row that left the game exactly where it was. Only a
    * misbehaving adapter produces any; the count is what stops the room retrying
@@ -282,6 +284,7 @@ export class RoomDO extends DurableObject<Env> {
    */
   private setGameState(record: RoomRecord, state: unknown): void {
     record.gameState = state
+    record.stateAt = Date.now()
     if (this.adapter(record).isFinished(state)) record.status = 'finished'
     const pending = this.pendingPhase(record)
     record.autoAt = pending ? Date.now() + pending.afterMs : undefined
@@ -419,6 +422,15 @@ export class RoomDO extends DurableObject<Env> {
       seatIds: record.seatIds,
       seats,
       gameState: record.gameState === null ? null : this.adapter(record).view(record.gameState, viewerSeat),
+      ...(record.gameState === null || record.stateAt === undefined
+        ? {}
+        : {
+            timing: {
+              now: Date.now(),
+              since: record.stateAt,
+              ...(record.autoAt ? { due: record.autoAt } : {}),
+            },
+          }),
     }
   }
 
@@ -593,8 +605,7 @@ export class RoomDO extends DurableObject<Env> {
     seat: SeatId,
     skill: string | undefined,
   ): Promise<void> {
-    if (player.id !== record.hostId)
-      return this.fail(ws, 'NOT_HOST', 'Only the room creator can add a bot.')
+    if (player.id !== record.hostId) return this.fail(ws, 'NOT_HOST', 'Only the room creator can add a bot.')
     if (record.status !== 'open') return this.fail(ws, 'ALREADY_STARTED', 'The game has already started.')
     if (!record.seatIds.includes(seat)) return this.fail(ws, 'BAD_MESSAGE', 'Unknown seat.')
     if (record.seats[seat]) return this.fail(ws, 'SEAT_TAKEN', 'That seat is taken.')
