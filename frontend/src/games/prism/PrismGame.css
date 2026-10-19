@@ -2569,6 +2569,142 @@
   background: #80a6be;
 }
 
+/*
+ * Labels over the felt. The felt is dark green in either appearance while the
+ * page round it follows the theme, and where a label lands depends on the
+ * screen. What always sits on the felt takes the felt's own light ink; what can
+ * land on felt or page — the seats, the turn line, the hand's header, the
+ * feed, the camera controls — brings a small ground of its own in the page's
+ * colours, so it reads the same on either.
+ */
+.pr-app,
+.pr-replay {
+  --pr-felt-ink: #dde5d3;
+  --pr-felt-strong: #f3f1df;
+  --pr-felt-chip: #0e2218c7;
+  --pr-chip: light-dark(var(--theme-surface), #132a20e6);
+  --pr-chip-border: light-dark(color-mix(in srgb, var(--theme-border) 80%, transparent), #c8bd8026);
+}
+.pr-pile-name {
+  color: var(--pr-felt-strong);
+}
+.pr-pile-name small {
+  color: var(--pr-felt-ink);
+}
+.pr-active-color {
+  color: var(--pr-felt-ink);
+  background: var(--pr-felt-chip);
+  border-color: #b2c39526;
+}
+.pr-active-color strong {
+  color: var(--pr-felt-strong);
+}
+.pr-opponent {
+  background: var(--pr-chip);
+  border-color: var(--pr-chip-border);
+}
+.pr-opponent.pr-current {
+  background: var(--pr-chip);
+  border-color: light-dark(color-mix(in srgb, var(--theme-accent) 55%, transparent), #c8bd8066);
+}
+.pr-thinking {
+  left: 50%;
+  width: auto;
+  translate: -50% 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--pr-chip);
+  white-space: nowrap;
+}
+/* Side by side with the hand, the turn line and the hand's header sit on the felt; stacked under it, on the page. */
+@media (min-width: 901px) {
+  .pr-turn-announcement strong {
+    color: var(--pr-felt-strong);
+  }
+  .pr-turn-announcement small,
+  .pr-hand-topline,
+  .pr-hand-topline button {
+    color: var(--pr-felt-ink);
+  }
+  .pr-hand-topline b {
+    background: #0e22186b;
+  }
+}
+/* A short screen: the table sits a little higher, and the colour joins the pile's labels on their row. */
+@media (max-height: 850px) and (min-width: 901px) {
+  .pr-is-playing .pr-scene-wrap {
+    top: -13%;
+    bottom: 11%;
+  }
+  .pr-app .pr-center-info {
+    top: 47%;
+  }
+  .pr-app .pr-active-color {
+    top: 47%;
+    left: calc(50% + 145px);
+    transform: none;
+  }
+}
+/*
+ * Someone watching has no hand, and the near seat's fan sits where the turn
+ * line would be: beside the screen, it moves off the felt to the near seat's
+ * badge, in the page's own ink; on a phone the middle of the table makes room
+ * for the fan.
+ */
+@media (min-width: 901px) {
+  .pr-arena:has(.pr-hand-hidden) .pr-turn-announcement {
+    bottom: calc(12% + 12px);
+    left: calc(50% - 86px);
+    transform: translateX(-100%);
+  }
+  .pr-arena:has(.pr-hand-hidden) .pr-turn-announcement strong {
+    color: light-dark(var(--theme-accent), #e8e2c7);
+  }
+  .pr-arena:has(.pr-hand-hidden) .pr-turn-announcement small {
+    color: light-dark(var(--theme-muted), #a3b39b);
+  }
+}
+@media (max-width: 600px) {
+  .pr-arena:has(.pr-hand-hidden) .pr-center-info {
+    top: calc(44% - 34px);
+  }
+  .pr-arena:has(.pr-hand-hidden) .pr-active-color {
+    top: calc(50% + 40px);
+  }
+  .pr-arena:has(.pr-hand-hidden) .pr-turn-announcement {
+    bottom: 236px;
+  }
+}
+/* Folded down to its heading, the feed's ground is only as tall as the heading. */
+@media (max-width: 900px) {
+  .pr-feed:not(.pr-feed-expanded) {
+    padding-bottom: 4px;
+  }
+  .pr-feed:not(.pr-feed-expanded) ol {
+    display: none;
+  }
+}
+/* Stacked: the feed and the camera controls lift clear of the hand's header. */
+@media (max-width: 900px) and (min-width: 601px) {
+  .pr-feed,
+  .pr-camera-controls {
+    bottom: 332px;
+  }
+}
+.pr-feed:not(.pr-feed-expanded),
+.pr-camera-controls {
+  border: 1px solid var(--pr-chip-border);
+  background: var(--pr-chip);
+}
+.pr-feed:not(.pr-feed-expanded) {
+  padding: 4px 12px 8px;
+  border-radius: 10px;
+}
+.pr-camera-controls {
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+}
+
 /* The round's result offers it back. */
 .pr-result .pr-replay-link {
   display: flex;
@@ -2597,8 +2733,6 @@
  * the felt is green in both.
  */
 .pr-replay {
-  --pr-felt-ink: #bac7ad;
-  --pr-felt-strong: #e4e8cb;
   position: relative;
   min-height: clamp(360px, 62svh, 680px);
   overflow: hidden;
@@ -2619,15 +2753,6 @@
   top: 16px;
   right: 22px;
 }
-/* Every seat is someone else's here, and a side seat sits over the felt's rim: each badge brings its own ground. */
-.pr-replay .pr-opponent {
-  background: light-dark(color-mix(in srgb, var(--theme-surface) 80%, transparent), #152e23b0);
-  border-color: light-dark(color-mix(in srgb, var(--theme-border) 25%, transparent), #c8bd8024);
-}
-.pr-replay .pr-opponent.pr-current {
-  background: light-dark(color-mix(in srgb, var(--theme-surface) 94%, transparent), #152e23ee);
-  border-color: light-dark(color-mix(in srgb, var(--theme-border) 60%, transparent), #c8bd8066);
-}
 .pr-replay .pr-opponent-top {
   top: 5%;
 }
@@ -2645,18 +2770,8 @@
 .pr-replay .pr-center-info {
   top: 58%;
 }
-.pr-replay .pr-pile-name,
-.pr-replay .pr-pile-name small,
-.pr-replay .pr-active-color {
-  color: var(--pr-felt-ink);
-}
 .pr-replay .pr-active-color {
   top: 64%;
-  background: #142b2066;
-  border-color: #b2c39522;
-}
-.pr-replay .pr-active-color strong {
-  color: var(--pr-felt-strong);
 }
 /* What just happened, or how it ended: the corner the table leaves free. */
 .pr-replay-event,
@@ -2669,6 +2784,10 @@
   margin: 0;
 }
 .pr-replay-event {
+  padding: 5px 11px;
+  border: 1px solid var(--pr-chip-border);
+  border-radius: 10px;
+  background: var(--pr-chip);
   color: light-dark(var(--theme-muted), #b4c3aa);
   font-size: 12px;
   line-height: 1.45;
