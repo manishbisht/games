@@ -69,9 +69,12 @@ _Board ms_ is when the first `<canvas>` appeared (not when it first drew). _Tier
   and borderline for Gambit and Prism (2.3–2.7 s). Both paint their largest element late — check which element
   the LCP entry names on a real device (Performance panel → LCP marker) before optimising.
 - **Turns hold 60 fps at the median** in every game; the tail differs. Prism is the smoothest (p99 16.8 ms).
-- **Wildrise is the outlier on both runs**: the only game whose stage stepped down — all the way to tier 0
-  (no shadows, DPR 1) within one turn — with 2–4× the long frames of the others and a ~50 MB heap against
-  11–18 MB elsewhere. Worth a profile by its owner: something allocates heavily or keeps large buffers alive.
+- **Wildrise was the outlier on both runs** above: the only game whose stage stepped down — all the way to
+  tier 0 (no shadows, DPR 1) within one turn — with 2–4× the long frames of the others and a ~50 MB heap.
+  The cause was ~1,070 draw calls a frame (≈560 meshes, each also drawn into the shadow map), whose WebGL
+  uniform uploads allocate. Baking small parts into vertex-coloured meshes and instancing tiles and snake
+  stripes brought it to ~136 draws (e87d91b). Re-measured on the same setup, two runs: heap 17.0 / 16.8 MB,
+  tier held at 2, frames > 33 ms 5 / 8, p95 16.8 ms.
 - What this cannot show: the phone's GPU. WebGL here ran on the M3's GPU through ANGLE/Metal, so fill-rate
   and shader cost (pixel ratio 2.6, shadows) are much cheaper than on a Mali/Adreno mid-ranger, and frame
   numbers are an optimistic CPU story. That is what the real-device checklist is for; expect the tier to drop

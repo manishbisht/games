@@ -25,22 +25,22 @@ screen's full result as JSON.
 - **Keyboard:** all five games can be set up, started and given a first move with the keyboard alone (Tab to
   reach, Enter to act; chess's board by arrows). Those five tests pass and run in CI.
 
-| Screen         | Light      | Dark       | Owner                                                      |
-| -------------- | ---------- | ---------- | ---------------------------------------------------------- |
-| Home page      | 24 — fails | 14 — fails | shell (`pages/HomePage.css`)                               |
-| Your profile   | 1 — fails  | clean      | shell (`pages/ProfilePage.css`)                            |
-| Player profile | 1 — fails  | clean      | shell (`pages/ProfilePage.css`)                            |
-| Room waiting   | clean      | clean      | shell (`online/online.css`, `reactions.css`, `notify.css`) |
-| Gambit setup   | 27 — fails | clean      | chess (`games/chess/ChessGame.css`)                        |
-| Gambit game    | 32 — fails | clean      | chess                                                      |
-| Hearth setup   | 26 — fails | clean      | hearth (`games/hearth/HearthGame.css`)                     |
-| Hearth game    | 26 — fails | 4 — fails  | hearth                                                     |
-| Estate setup   | clean      | 1 — fails  | estate (`games/monopoly/…`)                                |
-| Estate game    | clean      | 2 — fails  | estate                                                     |
-| Prism setup    | clean      | clean      | prism                                                      |
-| Prism game     | clean      | clean      | prism                                                      |
-| Wildrise setup | 19 — fails | clean      | wildrise (`games/wildrise/WildriseGame.css`)               |
-| Wildrise game  | 17 — fails | 2 — fails  | wildrise                                                   |
+| Screen         | Light | Dark  | Owner                                                      |
+| -------------- | ----- | ----- | ---------------------------------------------------------- |
+| Home page      | fixed | fixed | shell (`pages/HomePage.css`)                               |
+| Your profile   | fixed | clean | shell (`pages/ProfilePage.css`)                            |
+| Player profile | fixed | clean | shell (`pages/ProfilePage.css`)                            |
+| Room waiting   | clean | clean | shell (`online/online.css`, `reactions.css`, `notify.css`) |
+| Gambit setup   | fixed | clean | chess (`games/chess/ChessGame.css`)                        |
+| Gambit game    | fixed | clean | chess                                                      |
+| Hearth setup   | fixed | clean | hearth (`games/hearth/HearthGame.css`)                     |
+| Hearth game    | fixed | fixed | hearth                                                     |
+| Estate setup   | clean | fixed | estate (`games/monopoly/…`)                                |
+| Estate game    | clean | fixed | estate                                                     |
+| Prism setup    | clean | clean | prism                                                      |
+| Prism game     | clean | clean | prism                                                      |
+| Wildrise setup | fixed | clean | wildrise (`games/wildrise/WildriseGame.css`)               |
+| Wildrise game  | fixed | fixed | wildrise                                                   |
 
 The theme control (Appearance select, Motion button) was checked as part of every screen and has no
 violation.
@@ -52,6 +52,7 @@ violation.
    theme token (which passes) and the light half is a lighter, hand-picked grey that does not. The site-wide
    token `--theme-muted` (`theme/theme.css:8`, `#66735e`) is ≈ 4.8 : 1 on `#faf9f5` and passes.
    - Home: `pages/HomePage.css:41, 105, 127, 159, 354, 379, 394` and the plain `#838979` at `:414`.
+     **Fixed:** each light grey is now `#6b7263` (4.7 : 1 on the page, 4.9 on a card), dark unchanged.
    - Gambit: `--ch-muted: light-dark(#7d8376, …)` (`games/chess/ChessGame.css:4`).
    - Hearth: `--hh-muted: light-dark(#85897e, …)` (`games/hearth/HearthGame.css:3`, again at `:1217`).
    - Wildrise: `--wr-muted: light-dark(#7c8273, …)` (`games/wildrise/WildriseGame.css:3`).
@@ -68,13 +69,16 @@ violation.
 
 3. **Profiles.** `.profile-result` (`pages/ProfilePage.css:292`) is `--theme-muted` on the chip's `#eef0e7`
    fill — 4.36 : 1; the _win_ and _draw_ variants override it and pass. Darken the base chip text or lighten
-   its fill.
+   its fill. **Fixed:** the base chip's light text is `#5f6c58` (4.8 : 1); the replay page's speed buttons,
+   the same pair, likewise.
 
 4. **Dark-mode specifics.**
    - Home: the player-count line on every card, `#66745e` on `#202c24` (2.9 : 1) — the light-mode grey is
      used in dark mode (`pages/HomePage.css:404-414`, `.collection-player-info`). Prism's preview card
      (`.collection-preview-caption`, `.collection-preview-note`, `HomePage.css:193, 201`, and the
-     `#fff3d6` on `#579975` card face at `:655`).
+     `#fff3d6` on `#579975` card face at `:655`). **Fixed:** the player-count line uses the theme token in
+     dark; the previews' caption and note are at 0.85 opacity (4.9 : 1 on Prism's felt); the green card is
+     `#44775b` (4.7 : 1) in `PrismPreview.css`.
    - Hearth game: the current player's row (`#a8b5a0` on `#444941`, 4.3 : 1) and the roll button's `SPACE`
      hint (`kbd`, 3.45 : 1, `HearthGame.css:810`).
    - Wildrise game: the active player's info line, `#d86b4e` on `#6b6c64` (1.55 : 1,
@@ -97,7 +101,7 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 
 ## Every violation, by screen
 
-### home — light
+### home — light (fixed)
 
 | Element                                                                                      | Ratio | Text on background | Size |
 | -------------------------------------------------------------------------------------------- | ----- | ------------------ | ---- |
@@ -126,7 +130,7 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 | `footer > span:nth-child(1)`                                                                 | 3.13  | #89907f on #faf9f5 | 10px |
 | `footer > span:nth-child(2)`                                                                 | 3.13  | #89907f on #faf9f5 | 8px  |
 
-### home — dark
+### home — dark (fixed)
 
 | Element                                                                                                     | Ratio | Text on background | Size |
 | ----------------------------------------------------------------------------------------------------------- | ----- | ------------------ | ---- |
@@ -145,19 +149,21 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 | `.collection-card-wildrise … .collection-card-footer > .collection-player-info > span:nth-child(2)`         | 2.91  | #66745e on #202c24 | 11px |
 | `.collection-card-wildrise … .collection-card-footer > .collection-player-info > span:nth-child(2) > small` | 4.02  | #838979 on #202c24 | 9px  |
 
-### me — light
+### me — light (fixed)
 
 | Element                | Ratio | Text on background | Size |
 | ---------------------- | ----- | ------------------ | ---- |
 | `.profile-result-loss` | 4.36  | #66735e on #eef0e7 | 11px |
 
-### player — light
+### player — light (fixed)
 
 | Element                | Ratio | Text on background | Size |
 | ---------------------- | ----- | ------------------ | ---- |
 | `.profile-result-loss` | 4.36  | #66735e on #eef0e7 | 11px |
 
 ### chess-setup — light
+
+**Fixed.** Every light-mode text grey in `games/chess/ChessGame.css` and `ChessLobby.css` under 4.5 : 1 was darkened, hue and saturation kept, to ≥ 4.6 : 1 on the page (`#f8f7f2`) — or on the tinted fill it sits on where that is darker (the online badge, the clock choice, the lobby's heading tag). Large decorative type (the edition numeral, the empty-history glyph, the rules' piece glyphs) only needed 3 : 1. Out of `KNOWN`; the Settings, How to play, Resign and result dialogs were also checked and pass in both appearances.
 
 | Element                                      | Ratio | Text on background | Size |
 | -------------------------------------------- | ----- | ------------------ | ---- |
@@ -190,6 +196,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 | `footer > span:nth-child(2)`                 | 2.79  | #929786 on #f8f7f2 | 10px |
 
 ### chess-game — light
+
+**Fixed** with the same greys: the player cards and their tags, the untimed clocks (now ≥ 4.6 : 1 on the active clock's `#e7ecde`), the session panel and history, the "little space to think" card and the footer. An away tag is now set apart by a dashed outline instead of `opacity: 0.6`. Out of `KNOWN`.
 
 | Element                                                              | Ratio | Text on background | Size |
 | -------------------------------------------------------------------- | ----- | ------------------ | ---- |
@@ -228,6 +236,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 
 ### hearth-setup — light
 
+**Fixed.** Every light-mode grey in `games/hearth/HearthGame.css` that sat under 4.5 : 1 was darkened, hue kept, to ≥ 4.6 : 1 on the darkest cream it is drawn on (`#f4f3ec`); `--hh-muted` is now `#6b6f65`. The screen is out of `KNOWN` and passes.
+
 | Element                                             | Ratio | Text on background | Size |
 | --------------------------------------------------- | ----- | ------------------ | ---- |
 | `.hh-brand > span > small`                          | 3.23  | #898d7d on #faf9f5 | 8px  |
@@ -258,6 +268,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 | `.hh-game-picker > button`                          | 2.95  | #8b967d on #faf9f5 | 9px  |
 
 ### hearth-game — light
+
+**Fixed** with the same greys as the setup screen — the turn panel, the player cards (current and not), the event log and the footer all pass now. Out of `KNOWN`.
 
 | Element                                                                    | Ratio | Text on background | Size |
 | -------------------------------------------------------------------------- | ----- | ------------------ | ---- |
@@ -290,6 +302,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 
 ### hearth-game — dark
 
+**Fixed.** The current player's card redefines `--theme-muted` to `#c2ccbb` in dark mode, so the quiet text on its tinted fill clears 5.4 : 1 for every colour; the roll button's `SPACE` hint is `#d2ddcb` in both appearances (5.3 : 1 on the green). Out of `KNOWN`.
+
 | Element                                              | Ratio | Text on background | Size |
 | ---------------------------------------------------- | ----- | ------------------ | ---- |
 | `kbd`                                                | 3.45  | #a8b5a0 on #435b48 | 7px  |
@@ -299,11 +313,16 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 
 ### estate-setup — dark
 
+**Fixed:** the footnote's dark grey is now `#8291a4` (4.9 : 1); `estate-setup/dark` is checked in CI again.
+
 | Element            | Ratio | Text on background | Size |
 | ------------------ | ----- | ------------------ | ---- |
 | `.dialog-footnote` | 4.49  | #7b8a9d on #1a2330 | 9px  |
 
 ### estate-game — dark
+
+**Fixed:** `.now-label` is now `#7f8ca0` (4.9 : 1) and the activity footer `#8592a5` (5.3 : 1), both in
+`games/monopoly/styles/activity.css`; `estate-game/dark` is checked in CI again.
 
 | Element                   | Ratio | Text on background | Size |
 | ------------------------- | ----- | ------------------ | ---- |
@@ -311,6 +330,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 | `.activity-footer > span` | 3.9   | #6f7c8e on #171f2b | 8px  |
 
 ### wildrise-setup — light
+
+**Fixed.** Every light-mode text grey in `games/wildrise/WildriseGame.css` under 4.5 : 1 was darkened, hue and saturation kept, to ≥ 4.6 : 1 on the fill it is actually drawn on — the header and sidebar creams, the segmented control's `#f1f2e9`, the setup cards' `#f6f7ee`, and the table's own `#e9e5d8` for the subtitle, badge, camera hint and board footer; `--wr-muted` is now `#6f7467`. Out of `KNOWN`; the guide, How to play and win dialogs were also checked and pass in both appearances.
 
 | Element                                      | Ratio | Text on background | Size |
 | -------------------------------------------- | ----- | ------------------ | ---- |
@@ -336,6 +357,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 
 ### wildrise-game — light
 
+**Fixed** with the same greys — the player cards, seat badges, roll panel, event log and footer. The current player's line is the player's colour deepened (mixed 40 % with `#24301f`), ≥ 4.8 : 1 for all four colours, and the roll button's `SPACE` hint is `#eef2e6` (5.4 : 1 on the green). Out of `KNOWN`.
+
 | Element                                                            | Ratio | Text on background | Size |
 | ------------------------------------------------------------------ | ----- | ------------------ | ---- |
 | `a > span`                                                         | 4.25  | #737b69 on #fcfbf5 | 11px |
@@ -357,6 +380,8 @@ elements), focus visibility on the canvases, live-region announcements of the bo
 | `footer > span:nth-child(2)`                                       | 2.87  | #91957f on #f8f7f0 | 10px |
 
 ### wildrise-game — dark
+
+**Fixed.** In the dark the current player's card is washed with a deep share of the player's colour instead of its pale (which greyed the card out to `#6b6c64`), and its line is the colour lifted 55 % toward white — ≥ 5.6 : 1 for every colour, with the card's quiet text still ≥ 4.5 : 1; the `SPACE` hint is `#eef2e6` in both appearances. Out of `KNOWN`.
 
 | Element                                      | Ratio | Text on background | Size |
 | -------------------------------------------- | ----- | ------------------ | ---- |

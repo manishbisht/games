@@ -41,22 +41,7 @@ const FINDINGS = 'Known violations: see docs/a11y-findings-2026-10.md'
  * Screens that currently fail, by `<screen>/<theme>`. Remove an entry when its
  * finding is fixed — a fixed screen that stays listed is simply not checked.
  */
-const KNOWN = new Set<string>([
-  'home/light',
-  'home/dark',
-  'me/light',
-  'player/light',
-  'chess-setup/light',
-  'chess-game/light',
-  'hearth-setup/light',
-  'hearth-game/light',
-  'hearth-game/dark',
-  'estate-setup/dark',
-  'estate-game/dark',
-  'wildrise-setup/light',
-  'wildrise-game/light',
-  'wildrise-game/dark',
-])
+const KNOWN = new Set<string>([])
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 const FAILING = new Set(['serious', 'critical'])
