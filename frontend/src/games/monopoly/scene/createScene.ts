@@ -8,8 +8,7 @@ import { createStage, onTap } from '../../../motion/stage'
 import { createCameraRig } from '../../../motion/camera'
 import { createDieThrow } from '../../../motion/dice'
 import type { DieThrow } from '../../../motion/dice'
-import { createParticles } from '../../../motion/particles'
-import type { Burst } from '../../../motion/particles'
+import { createParticles, qualityDensity } from '../../../motion/particles'
 import { createQueue, createTweens } from '../../../motion/tween'
 import type { Beat, Tween } from '../../../motion/tween'
 import {
@@ -93,8 +92,6 @@ const THROW_MS = 960
 const DICE_MS = THROW_MS + 70 + 150
 /** A beat the page only learns of this late is joined where it already is, not played from the top. */
 const JOIN_AFTER_MS = 150
-/** How much of the decoration each quality tier keeps: dust, sparks, confetti and coins. */
-const DENSITY = [0.4, 0.65, 1]
 const ORIGIN = new THREE.Vector3(0, 0.05, 0)
 const HOME = new THREE.Vector3(12, 18, 20)
 const TILE_Y = 0.17
@@ -140,17 +137,14 @@ export function createScene(
   const onControlsChange = () => stage.invalidate()
   controls.addEventListener('change', onControlsChange)
   const rig = createCameraRig(camera, controls)
+  // Behind by snapshots, not beats: one roll's dice, walk and card is a story, not a backlog.
   const tweens = createTweens(),
-    queue = createQueue({ catchUpAfter: 3, catchUpSpeed: 2.5 })
+    queue = createQueue({ countBy: 'push', catchUpAfter: 3, catchUpSpeed: 2.5 })
   const particles = createParticles(scene, { max: 520, floor: 0.232 })
-  /** Bursts thinned to the stage's quality tier; a slow device keeps the moment, with less in the air. */
-  const effects = {
-    burst: (burst: Burst) =>
-      particles.burst({
-        ...burst,
-        count: Math.max(1, Math.round((burst.count ?? 40) * DENSITY[stage.quality])),
-      }),
-  }
+  // Dust, sparks, confetti — and the coins, which read this too — thin to the
+  // quality tier: a slow device keeps the moment, with less in the air.
+  particles.density = qualityDensity(stage.quality)
+  stage.onQuality((tier) => (particles.density = qualityDensity(tier)))
   const screen = new THREE.Vector2()
   /** Where on the board, left to right, a sound happened. */
   const panOf = (at: THREE.Vector3) =>
@@ -447,7 +441,7 @@ export function createScene(
     kit,
     tiles: tileGroups,
     tweens,
-    particles: effects,
+    particles,
     ring: ringBurst,
     onBuild: () => cue({ type: 'sound', sound: 'build' }),
   })
@@ -542,7 +536,7 @@ export function createScene(
       seed: i ? 7 : 1,
       onContact: (strength) => {
         if (strength > 0.3)
-          effects.burst({
+          particles.burst({
             origin: die.position,
             kind: 'dust',
             count: Math.round(7 * strength),
@@ -740,7 +734,7 @@ export function createScene(
               })
               if (position === 0) passGo(player)
               if (last && !gentle)
-                effects.burst({
+                particles.burst({
                   origin: token.group.position,
                   kind: 'dust',
                   count: 9,
@@ -770,12 +764,7 @@ export function createScene(
   function throwCoins(from: THREE.Vector3, to: THREE.Vector3, amount: number) {
     coinFrom.set(from.x, from.y + (from === bankAt ? 0 : 0.45), from.z)
     coinTo.set(to.x, to.y + 0.03, to.z)
-    coins.fly(
-      coinFrom,
-      coinTo,
-      Math.max(2, Math.round(coinCount(amount) * DENSITY[stage.quality])),
-      COIN_STAGGER,
-    )
+    coins.fly(coinFrom, coinTo, Math.max(2, Math.round(coinCount(amount) * particles.density)), COIN_STAGGER)
   }
   const anchor = (player: number) => (player === BANK ? bankAt : (tokens[player]?.group.position ?? bankAt))
 
@@ -788,7 +777,7 @@ export function createScene(
     if (token) throwCoins(bankAt, token.group.position, 200)
     const at = tileCentre(0, goAt)
     ringBurst(at, '#f4c96b', 1.6)
-    effects.burst({
+    particles.burst({
       origin: at.setY(0.5),
       kind: 'spark',
       count: 26,
@@ -843,7 +832,7 @@ export function createScene(
             token.group.position.copy(end)
             dip(JAIL, 0.06)
             rig.shake(0.07, 240)
-            effects.burst({
+            particles.burst({
               origin: end,
               kind: 'dust',
               count: 12,
@@ -1031,7 +1020,7 @@ export function createScene(
       duration: 1,
       update: () => {},
       done: () =>
-        effects.burst({
+        particles.burst({
           origin: token.group.position,
           kind: 'dust',
           count: 10,
@@ -1104,7 +1093,7 @@ export function createScene(
         duration: 1,
         update: () => {},
         done: () =>
-          effects.burst({
+          particles.burst({
             origin: new THREE.Vector3(at.x, 2.4, at.z),
             kind: 'confetti',
             count: 110,
@@ -1380,7 +1369,11 @@ export function createScene(
   })
 
   stage.onFrame((dt, now) => {
-    const ms = dt * 1000
+    // Long frames the stage capped (shaders compiling just after a join, a
+    // stalled thread) left a story that keeps time with the room behind it:
+    // play that time forward too, so the token lands when everyone else's does.
+    const drift = stage.takeDrift(),
+      ms = dt * 1000 + (queue.busy ? drift : 0)
     tweens.speed = queue.speed
     let moving = tweens.step(ms)
     if (queue.step(ms)) moving = true
@@ -1389,9 +1382,9 @@ export function createScene(
       shaking = false
       throws.forEach((t, i) => t.throw(state.dice[i], 520))
     }
-    for (const t of throws) if (t.step(dt * tweens.speed)) moving = true
+    for (const t of throws) if (t.step((ms / 1000) * tweens.speed)) moving = true
     if (particles.step(dt)) moving = true
-    if (coins.step(dt * 1000)) moving = true
+    if (coins.step(ms)) moving = true
     // The ring stays under its token, and breathes for a few seconds after a turn changes hands.
     const owner = tokens[ringPlayer]
     if (owner) ring.position.set(owner.group.position.x, 0.258, owner.group.position.z)

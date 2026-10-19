@@ -1,7 +1,7 @@
 import type { EstateOnlineAction } from '@games/shared/estate/online'
 import type { GameAction, GameState } from '@games/shared/estate/types'
-import type { BeatTiming, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
-import type { RoomApi } from '../../../online/useRoom'
+import type { BeatTiming, SeatId } from '@games/shared/protocol'
+import type { RoomViewProps } from '../../../online/games'
 
 export interface EstateSeatPlayer {
   name: string
@@ -30,12 +30,26 @@ export interface OnlineEstateSession {
   timing?: BeatTiming
   /** When this browser received the snapshot, on its `performance.now()` clock. */
   receivedAt: number
+  /**
+   * Every recent state the room sent, in arrival order, newest last (`state`).
+   * A burst of messages renders once; the board plays each state it has not
+   * seen yet, so a roll and the walk after it are both told.
+   */
+  recent: EstateArrival[]
   send: {
     action: (action: EstateOnlineAction) => void
     rematch: () => void
     claim: () => void
   }
   leave: () => void
+}
+
+/** One state as it arrived: `seq` counts up in arrival order, `receivedAt` is `performance.now()`. */
+export interface EstateArrival {
+  seq: number
+  state: GameState
+  timing?: BeatTiming
+  receivedAt: number
 }
 
 /**
@@ -132,12 +146,14 @@ export function claimTarget(session: OnlineEstateSession): EstateSeatPlayer | nu
   return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
 }
 
-export function estateSession(
-  snapshot: RoomSnapshot,
-  you: YouInfo,
-  api: RoomApi,
-  leave: () => void,
-): OnlineEstateSession {
+export function estateSession({
+  snapshot,
+  receivedAt,
+  recent,
+  you,
+  api,
+  leave,
+}: RoomViewProps): OnlineEstateSession {
   // Safe by construction: this only runs for an estate room with a live game.
   const state = snapshot.gameState as GameState
   const indexOf = (seat: SeatId) => snapshot.seatIds.indexOf(seat)
@@ -174,7 +190,10 @@ export function estateSession(
       theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
     },
     timing: snapshot.timing,
-    receivedAt: performance.now(),
+    receivedAt,
+    recent: recent.flatMap(({ seq, snapshot: { gameState, timing }, receivedAt }) =>
+      gameState ? [{ seq, state: gameState as GameState, timing, receivedAt }] : [],
+    ),
     send: {
       action: (action) => api.action(action),
       rematch: api.rematch,

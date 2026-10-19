@@ -36,7 +36,7 @@ export interface LotsOptions {
   kit: LotKit
   tiles: Map<number, THREE.Group>
   tweens: Tweens
-  /** Where the dust and sparks go; the scene thins them to its quality tier. */
+  /** Where the dust and sparks go; its `density` thins them to the quality tier. */
   particles: Pick<Particles, 'burst'>
   /** A burst of a ring in the owner's colour where a deed changes hands. */
   ring: (at: THREE.Vector3, color: THREE.ColorRepresentation) => void

@@ -596,6 +596,7 @@ function MonopolyGame({ online }: { online?: OnlineEstateSession }) {
                 ref={board}
                 state={live}
                 sync={online && { elapsed: beatElapsed(online.timing), at: online.receivedAt }}
+                recent={online?.recent}
                 selected={selected}
                 onSelect={setSelected}
                 onCue={onCue}

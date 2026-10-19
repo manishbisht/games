@@ -4,11 +4,11 @@ import MonopolyGame from '../MonopolyGame'
 import { estateSession } from './session'
 
 /** Estate's half of a room: the room's snapshot becomes the table's session. */
-export default function EstateRoomView({ snapshot, you, api, leave }: RoomViewProps) {
+export default function EstateRoomView({ snapshot, receivedAt, recent, you, api, leave }: RoomViewProps) {
   const session = useMemo(
-    () => estateSession(snapshot, you, api, leave),
+    () => estateSession({ snapshot, receivedAt, recent, you, api, leave }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snapshot, you, api],
+    [snapshot, receivedAt, recent, you, api],
   )
   return <MonopolyGame online={session} />
 }

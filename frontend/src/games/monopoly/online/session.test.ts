@@ -3,6 +3,7 @@ import { createGame, gameReducer } from '@games/shared/estate'
 import type { GameState, Trade } from '@games/shared/estate/types'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
+import type { RoomViewProps } from '../../../online/games'
 import type { RoomApi } from '../../../online/useRoom'
 import {
   allowed,
@@ -25,6 +26,16 @@ const api = (): RoomApi => ({
   addBot: vi.fn(),
   removeBot: vi.fn(),
   dismissError: vi.fn(),
+})
+
+/** A room view's props for a snapshot that has just arrived, as the only one so far. */
+const arrived = (snapshot: RoomSnapshot, you: YouInfo, api: RoomApi, leave: () => void): RoomViewProps => ({
+  snapshot,
+  receivedAt: 1_000,
+  recent: [{ seq: 1, snapshot, receivedAt: 1_000 }],
+  you,
+  api,
+  leave,
 })
 
 const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
@@ -59,7 +70,7 @@ function room(
     gameState: { ...table(['Ann', 'Ben', 'Cai']), ...state },
   }
   const info: YouInfo = { id: 'ann', seat: 'p0', isHost: true, ...you }
-  return estateSession(snapshot, info, api(), () => {})
+  return estateSession(arrived(snapshot, info, api(), () => {}))
 }
 
 const seated = { p0: seat('Ann'), p1: seat('Ben'), p2: seat('Cai') }
@@ -230,6 +241,43 @@ describe('the estate session', () => {
     expect(room(all).rematch).toEqual({ mine: true, theirs: true })
   })
 
+  it('times the table from when each snapshot arrived, and keeps every state of a burst in order', () => {
+    const rolled = table(['Ann', 'Ben', 'Cai']),
+      walked = { ...rolled, eventId: rolled.eventId + 1 },
+      timing = { now: 5_400, since: 5_000 }
+    const snapshot = (gameState: GameState | null): RoomSnapshot => ({
+      protocol: PROTOCOL_VERSION,
+      code: 'ABC234',
+      game: 'estate',
+      visibility: 'private',
+      status: gameState ? 'playing' : 'open',
+      seatIds: ['p0', 'p1', 'p2'],
+      seats: seated,
+      gameState,
+      timing,
+    })
+    const lobby = snapshot(null),
+      roll = snapshot(rolled),
+      walk = snapshot(walked)
+    const session = estateSession({
+      ...arrived(walk, { id: 'ann', seat: 'p0', isHost: true }, api(), () => {}),
+      receivedAt: 2_500,
+      recent: [
+        { seq: 7, snapshot: lobby, receivedAt: 2_000 },
+        { seq: 8, snapshot: roll, receivedAt: 2_400 },
+        { seq: 9, snapshot: walk, receivedAt: 2_500 },
+      ],
+    })
+    expect(session.receivedAt).toBe(2_500)
+    expect(session.timing).toEqual(timing)
+    // The lobby before the game is not a state of it.
+    expect(session.recent.map((e) => [e.seq, e.state, e.receivedAt])).toEqual([
+      [8, rolled, 2_400],
+      [9, walked, 2_500],
+    ])
+    expect(session.recent.at(-1)!.state).toBe(session.state)
+  })
+
   it('forwards the room’s own messages untouched', () => {
     const wire = api()
     const snapshot: RoomSnapshot = {
@@ -243,7 +291,7 @@ describe('the estate session', () => {
       gameState: table(['Ann', 'Ben']),
     }
     const leave = vi.fn()
-    const session = estateSession(snapshot, { id: 'ann', seat: 'p0', isHost: true }, wire, leave)
+    const session = estateSession(arrived(snapshot, { id: 'ann', seat: 'p0', isHost: true }, wire, leave))
     session.send.action({ type: 'ROLL' })
     session.send.rematch()
     session.send.claim()
