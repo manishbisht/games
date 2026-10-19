@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot } from '@games/shared/protocol'
-import { initialRoomState, isFatal, presenceEvents, roomReducer } from './roomState'
+import { initialRoomState, isFatal, presenceEvents, RECENT_SNAPSHOTS, roomReducer } from './roomState'
 
 const snapshot: RoomSnapshot = {
   protocol: PROTOCOL_VERSION,
@@ -16,6 +16,21 @@ const snapshot: RoomSnapshot = {
 const you = { id: 'guest:abc', seat: null, isHost: true }
 
 describe('roomReducer', () => {
+  it('keeps every snapshot of a burst, in order, stamped with when it arrived', () => {
+    let state = initialRoomState
+    for (let i = 0; i < RECENT_SNAPSHOTS + 3; i++)
+      state = roomReducer(state, {
+        type: 'message',
+        message: { type: 'room', snapshot: { ...snapshot, status: i ? 'playing' : 'open' }, you },
+        receivedAt: 1000 + i,
+      })
+    expect(state.recent).toHaveLength(RECENT_SNAPSHOTS)
+    expect(state.recent.at(-1)!.seq).toBe(RECENT_SNAPSHOTS + 3)
+    expect(state.recent.at(-1)!.snapshot).toBe(state.snapshot)
+    expect(state.receivedAt).toBe(1000 + RECENT_SNAPSHOTS + 2)
+    expect(state.recent.map((e) => e.seq)).toEqual(Array.from({ length: RECENT_SNAPSHOTS }, (_, i) => i + 4))
+  })
+
   it('stores snapshots and clears stale errors', () => {
     const errored = roomReducer(initialRoomState, {
       type: 'message',

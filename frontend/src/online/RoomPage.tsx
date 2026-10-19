@@ -267,7 +267,14 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
             </RoomFrame>
           }
         >
-          <RoomView snapshot={snapshot} you={you} api={api} leave={leave} />
+          <RoomView
+            snapshot={snapshot}
+            receivedAt={room.receivedAt ?? 0}
+            recent={room.recent}
+            you={you}
+            api={api}
+            leave={leave}
+          />
         </Suspense>
         {toastStack}
       </>

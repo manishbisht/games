@@ -3,22 +3,43 @@ import type { ErrorCode, RoomSnapshot, SeatId, ServerMessage, YouInfo } from '@g
 
 export type RoomPhase = 'connecting' | 'connected' | 'reconnecting' | 'notfound' | 'full' | 'expired'
 
+/** One snapshot as it arrived: `seq` counts up for the life of the room page, `receivedAt` is `performance.now()`. */
+export interface SnapshotEntry {
+  seq: number
+  snapshot: RoomSnapshot
+  receivedAt: number
+}
+
+/**
+ * How many recent snapshots the client keeps. React commits a burst of socket
+ * messages as one render, so a game reading only `snapshot` would never see
+ * the states in between; `recent` keeps them, in order, for a board that wants
+ * to present each one.
+ */
+export const RECENT_SNAPSHOTS = 24
+
 export interface RoomClientState {
   phase: RoomPhase
   snapshot: RoomSnapshot | null
+  /** When `snapshot` arrived, by `performance.now()` — not when it rendered. */
+  receivedAt: number | null
+  /** The last few snapshots in arrival order; the newest is `snapshot`. */
+  recent: SnapshotEntry[]
   you: YouInfo | null
   error: { code: ErrorCode; message: string } | null
 }
 
 export type RoomClientEvent =
   | { type: 'open' }
-  | { type: 'message'; message: ServerMessage }
+  | { type: 'message'; message: ServerMessage; receivedAt?: number }
   | { type: 'close'; code: number }
   | { type: 'dismiss-error' }
 
 export const initialRoomState: RoomClientState = {
   phase: 'connecting',
   snapshot: null,
+  receivedAt: null,
+  recent: [],
   you: null,
   error: null,
 }
@@ -28,14 +49,21 @@ export function roomReducer(state: RoomClientState, event: RoomClientEvent): Roo
     case 'open':
       return { ...state, phase: 'connected' }
     case 'message':
-      if (event.message.type === 'room')
+      if (event.message.type === 'room') {
+        const receivedAt = event.receivedAt ?? performance.now(),
+          seq = (state.recent.at(-1)?.seq ?? 0) + 1
         return {
           ...state,
           phase: 'connected',
           snapshot: event.message.snapshot,
+          receivedAt,
+          recent: [...state.recent, { seq, snapshot: event.message.snapshot, receivedAt }].slice(
+            -RECENT_SNAPSHOTS,
+          ),
           you: event.message.you,
           error: null,
         }
+      }
       if (event.message.code === 'ROOM_NOT_FOUND') return { ...state, phase: 'notfound' }
       if (event.message.code === 'ROOM_FULL') return { ...state, phase: 'full' }
       return { ...state, error: { code: event.message.code, message: event.message.message } }

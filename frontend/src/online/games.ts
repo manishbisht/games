@@ -3,6 +3,7 @@ import type { GameId, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protoc
 import { games } from '../games/catalog'
 import { lazyWithPreload } from '../lazyPreload'
 import type { RoomApi } from './useRoom'
+import type { SnapshotEntry } from './roomState'
 
 /**
  * What a game gets once the room is live: the authoritative snapshot, who this
@@ -11,6 +12,14 @@ import type { RoomApi } from './useRoom'
  */
 export interface RoomViewProps {
   snapshot: RoomSnapshot
+  /** When `snapshot` arrived (`performance.now()`), for syncing to its `timing`. */
+  receivedAt: number
+  /**
+   * Recent snapshots in arrival order, newest last (`snapshot` itself). A burst
+   * of messages renders once; a board that presents every state reads the
+   * entries whose `seq` it has not seen yet.
+   */
+  recent: SnapshotEntry[]
   you: YouInfo
   api: RoomApi
   leave: () => void

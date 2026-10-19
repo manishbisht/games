@@ -74,18 +74,18 @@ export function useRoom(
      * or more later. Whatever arrives meanwhile is held and committed with it,
      * so a later snapshot can never land before the one it follows.
      */
-    let held: ServerMessage[] | null = null
-    const deliver = (message: ServerMessage) => {
-      if (held) return void held.push(message)
+    let held: { message: ServerMessage; receivedAt: number }[] | null = null
+    const deliver = (message: ServerMessage, receivedAt: number) => {
+      if (held) return void held.push({ message, receivedAt })
       const nowPlaying = message.type === 'room' ? message.snapshot.gameState !== null : playing.current
-      if (nowPlaying === playing.current) return dispatch({ type: 'message', message })
+      if (nowPlaying === playing.current) return dispatch({ type: 'message', message, receivedAt })
       playing.current = nowPlaying
       held = []
       viewTransition(
         'swap',
         () => {
-          dispatch({ type: 'message', message })
-          for (const next of held ?? []) dispatch({ type: 'message', message: next })
+          dispatch({ type: 'message', message, receivedAt })
+          for (const next of held ?? []) dispatch({ type: 'message', ...next })
           held = null
         },
         {
@@ -149,6 +149,8 @@ export function useRoom(
         flushOutbox(ws)
       }
       ws.onmessage = (event) => {
+        // Stamped on arrival: a game syncing to the room's clock counts from here, not from its render.
+        const receivedAt = performance.now()
         if (event.data === 'pong') {
           missedPongs = 0
           return
@@ -159,7 +161,7 @@ export function useRoom(
         } catch {
           return // Not our protocol; nothing sensible to do with an unparseable frame.
         }
-        deliver(message)
+        deliver(message, receivedAt)
       }
       ws.onclose = (event) => {
         clearInterval(heartbeat)
