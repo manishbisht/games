@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import { ROOM_CODE_ALPHABET } from '@games/shared/protocol/codes'
 import type { Env } from '../src/env'
-import { connect, createRoom } from './helpers'
+import { connect, createRoom, WAIT } from './helpers'
 
 const testEnv = env as unknown as Env
 
@@ -259,5 +259,18 @@ describe('joining and seats', () => {
     await client.expectError('BAD_MESSAGE')
     client.send({ type: 'join', protocol: 99, name: 'Ann', guestId: crypto.randomUUID() })
     await client.expectError('PROTOCOL_MISMATCH')
+  })
+
+  it('answers frames that are JSON but not an object, rather than throwing', async () => {
+    const { code } = await createRoom()
+    const client = await connect(code)
+    for (const frame of ['null', '7', '"sit"', '[]']) client.ws.send(frame)
+    await vi.waitFor(() => {
+      const errors = client.messages.filter((m) => m.type === 'error' && m.code === 'BAD_MESSAGE')
+      expect(errors).toHaveLength(4)
+    }, WAIT)
+    // The socket survived all four and still joins.
+    client.join('Ann')
+    await client.waitRoom(() => true)
   })
 })

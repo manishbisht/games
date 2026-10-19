@@ -16,6 +16,21 @@ function json(data: unknown, status: number, origin: string | null): Response {
   return new Response(JSON.stringify(data), { status, headers })
 }
 
+/**
+ * A request body as a JSON object, or null. `null`, `[]` and `"x"` all parse,
+ * and reading a field off the first would throw and answer 500 rather than 400.
+ */
+async function readObject(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const body: unknown = await request.json()
+    return typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -26,12 +41,8 @@ export default {
     if (url.pathname === '/health') return json({ ok: true }, 200, origin)
 
     if (url.pathname === '/api/rooms' && request.method === 'POST') {
-      let body: Record<string, unknown>
-      try {
-        body = await request.json()
-      } catch {
-        return json({ error: 'invalid JSON' }, 400, origin)
-      }
+      const body = await readObject(request)
+      if (!body) return json({ error: 'invalid JSON' }, 400, origin)
       // A game is bookable exactly when its adapter is registered — having a
       // name in `GameId` is not enough.
       const game = resolveGame(body.game)
@@ -89,12 +100,8 @@ export default {
     }
 
     if (url.pathname === '/api/presence' && request.method === 'POST') {
-      let body: Record<string, unknown>
-      try {
-        body = await request.json()
-      } catch {
-        return json({ error: 'invalid JSON' }, 400, origin)
-      }
+      const body = await readObject(request)
+      if (!body) return json({ error: 'invalid JSON' }, 400, origin)
       const clientId = validPresenceId(body.clientId)
       const tabId = validPresenceId(body.tabId)
       const game = resolvePresenceGame(body.game)

@@ -458,6 +458,10 @@ export class RoomDO extends DurableObject<Env> {
     } catch {
       return this.fail(ws, 'BAD_MESSAGE', 'Messages must be JSON.')
     }
+    // `null`, `3` and `[]` are all valid JSON, and reading `.type` off the
+    // first would throw inside the Durable Object instead of answering.
+    if (typeof message !== 'object' || message === null || Array.isArray(message))
+      return this.fail(ws, 'BAD_MESSAGE', 'Messages must be JSON objects.')
     // No TTL refresh here: `save()` re-arms the alarm on every mutation, and a
     // room whose only traffic is non-mutating messages has nothing worth keeping.
     if (message.type === 'join') return this.handleJoin(ws, record, message)

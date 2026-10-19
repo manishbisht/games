@@ -25,6 +25,18 @@ describe('worker routing', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
 
+  it('answers 400, not 500, to bodies that are JSON but not an object', async () => {
+    for (const path of ['/api/rooms', '/api/presence'])
+      for (const body of ['null', '[]', '"room"']) {
+        const res = await SELF.fetch(`https://api.test${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+        })
+        expect(res.status).toBe(400)
+      }
+  })
+
   it('404s unknown routes', async () => {
     const res = await SELF.fetch('https://api.test/nope')
     expect(res.status).toBe(404)
