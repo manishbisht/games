@@ -89,6 +89,7 @@ export function viewTransition(
   // A transition interrupted by the next one rejects these; the DOM update
   // itself still happens, so there is nothing to report.
   vt.ready.catch(() => {})
+  vt.updateCallbackDone.catch(() => {})
   vt.finished
     .catch(() => {})
     .finally(() => {

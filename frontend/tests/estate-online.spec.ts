@@ -43,6 +43,11 @@ async function step(page: Page) {
     rollButton(page),
     page.getByRole('button', { name: /^(End turn|Roll again)$/ }),
   ]
+  // The board presents a beat before the page offers its decision (a drawn card
+  // lifts off its deck before its dialog opens), so wait for an offer to appear.
+  await expect(offers.reduce((any, offer) => any.or(offer)).first())
+    .toBeVisible({ timeout: 20000 })
+    .catch(() => {})
   for (const offer of offers) {
     if (!(await offer.count())) continue
     await expect(offer).toBeEnabled()

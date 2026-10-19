@@ -18,15 +18,18 @@ function revealTheme(from: HTMLElement, apply: () => void) {
     x = box.left + box.width / 2,
     y = box.top + box.height / 2,
     radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
-  viewTransition('theme', apply)?.ready.then(() =>
-    document.documentElement.animate(
-      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
-      {
-        duration: 620,
-        easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
-        pseudoElement: '::view-transition-new(root)',
-      },
-    ),
+  viewTransition('theme', apply)?.ready.then(
+    () =>
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        {
+          duration: 620,
+          easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
+          pseudoElement: '::view-transition-new(root)',
+        },
+      ),
+    // A quick second change skips this one; the new theme is already applied.
+    () => {},
   )
 }
 
