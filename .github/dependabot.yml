@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # One lockfile at the root serves all three workspaces (frontend, backend,
+  # shared), so one npm entry covers every package.json in the repo.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      # Minor and patch bumps land together, one PR a week per kind; a major
+      # version still gets a PR of its own so its changelog is read on its own.
+      npm-development:
+        dependency-type: development
+        update-types: [minor, patch]
+        # Its own PR: the e2e job's container image (deploy.yml) and the
+        # visual baselines (scripts/visual-baselines.sh) move with it.
+        exclude-patterns: ['@playwright/test', 'playwright', 'playwright-core']
+      npm-production:
+        dependency-type: production
+        update-types: [minor, patch]
+    ignore:
+      # Pinned on purpose: frontend/src/navigation.ts builds the router's hash
+      # history on `UNSAFE_createHashHistory`, an export React Router does not
+      # treat as public. Any minor can change it; bump by hand and run
+      # tests/routing.spec.ts (see the checklist in that file).
+      - dependency-name: react-router
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      # Three.js majors rename and remove API the stage, rig and every scene
+      # use; upgrade deliberately, together with @types/three. Three is still
+      # 0.x, where each monthly release (r186 = 0.186.0) is a semver *minor* —
+      # that is its major, so both are held back; patches still come through.
+      - dependency-name: three
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: '@types/three'
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  # The workflow pins every action by commit SHA; Dependabot keeps the SHA and
+  # its `# vN` comment current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        update-types: [minor, patch]
