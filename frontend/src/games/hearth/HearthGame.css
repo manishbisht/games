@@ -250,24 +250,13 @@
 .hh-canvas {
   position: absolute;
   inset: 39px 0 56px;
-  touch-action: none;
 }
+/* The canvas's touch-action is the scene's: `allowPageScroll` hands vertical swipes back to the page. */
 .hh-canvas canvas {
   width: 100%;
   height: 100%;
   display: block;
-  touch-action: none;
   outline: none;
-}
-/*
- * On a touch screen the board is most of the page, so a vertical swipe over it
- * scrolls the page; a sideways drag still turns the table.
- */
-@media (pointer: coarse) {
-  .hh-canvas,
-  .hh-canvas canvas {
-    touch-action: pan-y;
-  }
 }
 .hh-board-signature {
   position: absolute;

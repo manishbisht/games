@@ -30,7 +30,7 @@ import { estateGame, hearthGame } from '../catalog'
 import { HOME, PALETTES } from '@games/shared/hearth/board'
 import { createGame, progressFor } from '@games/shared/hearth'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
-import { createAudio } from './game/audio'
+import { feelCue, playCue, soundCheck } from './game/audio'
 import type { GameConfig, GameState, Player } from '@games/shared/hearth/types'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
@@ -261,7 +261,6 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     [winDismissed, setWinDismissed] = useState(false),
     [gameMenu, setGameMenu] = useState(false)
   const [motion, setMotion] = useMotionPreference()
-  const [audio] = useState(createAudio)
   const board = useRef<BoardControls>(null)
   const sound = useRef(!muted)
   useEffect(() => {
@@ -282,12 +281,11 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   const active = started && !dialog
   const roll = useCallback(() => {
     if (active && state.phase === 'roll' && myTurn) {
-      if (!muted) audio.unlock()
       // The die starts rattling now; the room's answer decides where it lands.
       board.current?.roll()
       online?.send.roll()
     }
-  }, [active, state.phase, myTurn, muted, audio, online])
+  }, [active, state.phase, myTurn, online])
   const select = useCallback(
     (pieceId: string) => {
       if (!active || !myTurn) return
@@ -295,18 +293,16 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     },
     [active, myTurn, online],
   )
-  /** Sounds follow the board's own animation, so each plays once, when it happens. */
-  const onCue = useCallback(
-    (cue: Cue) => {
-      if (!sound.current) return
-      if (cue.kind === 'dice') audio.play('land', { gain: 0.35 + cue.strength * 0.65 })
-      else if (cue.kind === 'step') audio.play('step', { pitch: 1 + Math.min(cue.index, 8) * 0.045 })
-      else audio.play(cue.kind)
-    },
-    [audio],
-  )
+  /**
+   * Sounds follow the board's own animation, so each plays once, when it
+   * happens. The few that are felt follow the site's haptics setting rather
+   * than this table's sound switch.
+   */
+  const onCue = useCallback((cue: Cue) => {
+    feelCue(cue)
+    if (sound.current) playCue(cue)
+  }, [])
 
-  useEffect(() => () => audio.dispose(), [audio])
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
@@ -322,7 +318,6 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   }, [roll])
   const room = useBotRoom('hearth', hearthGame.path)
   function start(next: GameConfig) {
-    if (!muted) audio.unlock()
     setConfig(next)
     const count = Math.max(2, Math.min(4, next.playerCount ?? 4))
     void room.start({
@@ -336,10 +331,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     setConfig(next)
   }
   function toggleSound() {
-    if (muted) {
-      audio.unlock()
-      audio.play('step')
-    } else audio.stop()
+    if (muted) soundCheck()
     setMuted(!muted)
   }
   const status = !started
@@ -467,6 +459,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
               state={dealt}
               seat={online?.mySeat ?? null}
               live={started}
+              elapsed={online?.elapsed}
               onSelect={select}
               onPresent={setShown}
               onCue={onCue}

@@ -1,6 +1,7 @@
 import { PLAYER_IDS } from '@games/shared/hearth/board'
 import type { HearthOnlineAction } from '@games/shared/hearth/online'
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
+import { beatElapsed } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 
@@ -22,6 +23,11 @@ export interface HearthSeatPlayer {
  */
 export interface OnlineHearthSession {
   state: GameState
+  /**
+   * How far into `state`'s beat the room already was when it sent it, in ms —
+   * so a board that arrives mid-walk takes the walk up where the room is.
+   */
+  elapsed: number
   /** The colour this browser plays, or `null` for someone watching. */
   mySeat: PlayerId | null
   players: Partial<Record<PlayerId, HearthSeatPlayer>>
@@ -84,6 +90,7 @@ export function hearthSession(
   )
   return {
     state,
+    elapsed: beatElapsed(snapshot.timing),
     mySeat: (you.seat && colourOf(you.seat)) || null,
     players,
     rematch: {

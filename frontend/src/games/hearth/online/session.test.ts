@@ -25,7 +25,11 @@ const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
 })
 
 /** A three-seat table mid-game, with whatever the test wants true of its seats. */
-function table(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = {}) {
+function table(
+  seats: Partial<Record<string, SeatInfo>>,
+  you: Partial<YouInfo> = {},
+  timing?: RoomSnapshot['timing'],
+) {
   const snapshot: RoomSnapshot = {
     protocol: PROTOCOL_VERSION,
     code: 'ABC234',
@@ -35,6 +39,7 @@ function table(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> =
     seatIds: ['p0', 'p1', 'p2'],
     seats,
     gameState: createGame({ playerCount: 3, names: ['Ann', 'Ben', 'Cai'] }),
+    ...(timing ? { timing } : {}),
   }
   const info: YouInfo = { id: 'ann', seat: 'p0', isHost: true, ...you }
   return hearthSession(snapshot, info, api(), () => {})
@@ -54,6 +59,12 @@ describe('hearthSession', () => {
     expect(session.players.blue?.name).toBe('Ben')
     expect(session.players.green?.name).toBe('Cai')
     expect(session.players.yellow).toBeUndefined()
+  })
+
+  it('says how far into its beat the table already was, by the server’s clock', () => {
+    expect(table(seated, {}, { now: 50_900, since: 50_000, due: 51_400 }).elapsed).toBe(900)
+    // An older server sends no timing: the beat is taken to start on arrival.
+    expect(table(seated).elapsed).toBe(0)
   })
 
   it('carries a seat’s presence and abandonment through to the table', () => {

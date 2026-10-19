@@ -11,6 +11,8 @@ interface Props {
   seat: PlayerId | null
   /** False for the preview behind the setup panel. */
   live: boolean
+  /** How far into `state`'s beat the room already was when it sent it, in ms. */
+  elapsed?: number
   onSelect: (id: string) => void
   /** The table as the board is showing it, which trails `state` while a move plays out. */
   onPresent: (state: GameState) => void
@@ -18,12 +20,12 @@ interface Props {
 }
 
 const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
-  { state, seat, live, onSelect, onPresent, onCue },
+  { state, seat, live, elapsed = 0, onSelect, onPresent, onCue },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
-  const initial = useRef({ state, seat, live }),
+  const initial = useRef({ state, seat, live, elapsed }),
     hooks = useRef({ onSelect, onPresent, onCue })
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -42,7 +44,7 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
   )
   useEffect(() => {
     if (!container.current) return
-    const { state, seat, live } = initial.current
+    const { state, seat, live, elapsed } = initial.current
     try {
       scene.current = createScene(
         container.current,
@@ -54,6 +56,7 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
         },
         seat,
         live,
+        elapsed,
       )
     } catch (error) {
       console.error('Hearth & Home could not initialize WebGL.', error)
@@ -65,10 +68,10 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
     }
   }, [])
   useEffect(() => {
-    if (scene.current) scene.current.update(state, seat, live)
+    if (scene.current) scene.current.update(state, seat, live, elapsed)
     // Without a board there is nothing to wait for: the HUD takes the room's state as it comes.
     else if (failed) hooks.current.onPresent(state)
-  }, [state, seat, live, failed])
+  }, [state, seat, live, elapsed, failed])
   return (
     <div className="hh-canvas" ref={container}>
       {failed && (
