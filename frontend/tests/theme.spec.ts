@@ -128,3 +128,35 @@ for (const mode of ['light', 'dark'] as const) {
     }
   })
 }
+
+test('vibration is a switch in the Motion popover, only where the device can buzz', async ({
+  page,
+  browser,
+}) => {
+  // A desktop pointer cannot vibrate, so there is nothing to offer.
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Motion:/ }).click()
+  await expect(page.getByRole('radio', { name: /Full/ })).toBeVisible()
+  await expect(page.getByRole('switch', { name: /Vibration/ })).toHaveCount(0)
+
+  // A phone can. On by default; off is remembered across a reload.
+  const phone = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  })
+  const mobile = await phone.newPage()
+  await mobile.goto('/')
+  await mobile.getByRole('button', { name: /^Motion:/ }).click()
+  const vibration = mobile.getByRole('switch', { name: /Vibration/ })
+  await expect(vibration).toBeChecked()
+  await mobile.screenshot({ path: 'test-results/motion-popover-vibration.png' })
+  // The label is what a thumb lands on; the checkbox inside it is invisible.
+  await mobile.getByText('Vibration', { exact: true }).click()
+  await expect(vibration).not.toBeChecked()
+  expect(await mobile.evaluate(() => localStorage.getItem('games-haptics'))).toBe('off')
+  await mobile.reload()
+  await mobile.getByRole('button', { name: /^Motion:/ }).click()
+  await expect(mobile.getByRole('switch', { name: /Vibration/ })).not.toBeChecked()
+  await phone.close()
+})

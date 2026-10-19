@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
 import { Check, Feather, Monitor, Moon, Sparkles, Sun } from 'lucide-react'
+import { canVibrate, useHaptics } from '../motion/haptics'
 import { useMotionPreference, useReducedMotion } from '../motion/preference'
 import type { MotionPreference } from '../motion/preference'
 import { viewTransition } from '../navigation'
@@ -73,9 +74,14 @@ const MOTION_OPTIONS: { value: MotionPreference; label: string; hint: string }[]
  * The site-wide motion setting, beside Appearance in every header. A button
  * and a popover rather than a second select: headers are already tight on a
  * phone, and the options need a word of explanation each.
+ *
+ * Vibration lives here too, because it is the same kind of choice — how much a
+ * moment lands on you — and only on a device that can buzz at all.
  */
 function MotionControl() {
   const [preference, setPreference] = useMotionPreference()
+  const [haptics, setHaptics] = useHaptics()
+  const vibrates = canVibrate()
   const reduced = useReducedMotion()
   const id = useId()
   const button = useRef<HTMLButtonElement>(null)
@@ -131,6 +137,21 @@ function MotionControl() {
             </label>
           ))}
         </fieldset>
+        {vibrates && (
+          <label className="motion-option motion-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={haptics}
+              onChange={(event) => setHaptics(event.target.checked)}
+            />
+            <span>
+              <strong>Vibration</strong>
+              <small>A buzz when a die lands or a piece is taken</small>
+            </span>
+            <span className="motion-switch-track" aria-hidden="true" />
+          </label>
+        )}
       </div>
     </>
   )
