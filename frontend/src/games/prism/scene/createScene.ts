@@ -1,11 +1,10 @@
 import * as THREE from 'three'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { Card, Color, GameEvent, GameState } from '@games/shared/prism/types'
 import { COLOR_HEX } from '@games/shared/prism/types'
 import { createStage } from '../../../motion/stage'
 import type { QualityTier } from '../../../motion/stage'
 import { createCameraRig } from '../../../motion/camera'
-import { createParticles } from '../../../motion/particles'
+import { createParticles, qualityDensity } from '../../../motion/particles'
 import { createQueue, createTweens } from '../../../motion/tween'
 import type { Beat } from '../../../motion/tween'
 import { clamp01, damp, hash01, hashString, inOutCubic, lerp, outCubic, smooth } from '../../../motion/ease'
@@ -88,8 +87,6 @@ const MAX_FAN = 11,
   MAX_PILE = 5,
   MAX_DECK = 12
 const deckLayers = (cards: number) => Math.min(MAX_DECK, Math.ceil(cards / 6))
-/** How much faster the table tells its stories while another snapshot waits behind the current one. */
-const CATCH_UP = 2.6
 /**
  * A snapshot whose state began longer ago than this was not watched live: the
  * page reconnected or fell behind, and the beat is picked up part-way. A live
@@ -141,12 +138,9 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   camera.position.set(0, 13, 15)
   camera.lookAt(0, 0, 0)
   stage.setCamera(camera)
-  // The table never orbits; the rig only needs controls for the target they
-  // hold. Connected so they can be disposed like any others, then disconnected
-  // at once: the canvas neither answers the pointer nor blocks a phone's scroll.
-  const controls = new OrbitControls(camera, stage.canvas)
-  controls.disconnect()
-  const rig = createCameraRig(camera, controls)
+  // The table never orbits: the rig only needs the point it looks at, and the
+  // canvas neither answers the pointer nor blocks a phone's scroll.
+  const rig = createCameraRig(camera, { target: new THREE.Vector3() })
   stage.onResize((width, height) => {
     const aspect = width / height,
       span = width < 650 ? 6.8 : Math.max(5.8, 9.7 / aspect)
@@ -158,9 +152,10 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   })
 
   // A snapshot is told as several beats (a play, its effect, the draws it
-  // causes), so the backlog is counted in stories, not beats: see `tell`.
+  // causes), so the backlog is counted in stories — one push each — not beats:
+  // while another story waits behind the one being told, it is told faster.
   const tweens = createTweens(),
-    queue = createQueue({ catchUpAfter: Infinity })
+    queue = createQueue({ countBy: 'push', catchUpAfter: 1, catchUpSpeed: 2.6 })
   const table = createTable(scene, tweens, initial.game.activeColor)
   const particles = createParticles(scene, { max: 700, floor: FELT_Y + 0.02 })
   const layer = new THREE.Group()
@@ -176,7 +171,6 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     rosette = false,
     thinker = -1,
     thinkingSince = 0,
-    stories = 0,
     quiet = false,
     tier: QualityTier = stage.quality,
     penalty: { player: number; count: number; landed: number } | null = null
@@ -360,12 +354,13 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   function hear(sound: SoundKind, x = 0) {
     cue({ kind: 'sound', sound, pan: THREE.MathUtils.clamp(x / 7, -0.8, 0.8) })
   }
-  /** Fewer particles on a device the stage has had to step down for. */
-  const many = (count: number) => Math.round(count * (tier === 2 ? 1 : tier === 1 ? 0.6 : 0.35))
-  // A device that was slow on the last board starts this one stepped down.
+  // A device that was slow on the last board starts this one stepped down,
+  // with fewer particles in every burst.
+  particles.density = qualityDensity(tier)
   table.thin(tier === 0)
   stage.onQuality((next) => {
     tier = next
+    particles.density = qualityDensity(next)
     table.thin(next === 0)
   })
 
@@ -474,7 +469,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
       particles.burst({
         origin: pileTop(),
         kind: 'spark',
-        count: many(card.isWild ? 34 : 18),
+        count: card.isWild ? 34 : 18,
         colors: card.isWild ? FOUR : [tone, '#f4dda4'],
         speed: 4.4,
         spread: 0.95,
@@ -686,7 +681,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
         particles.burst({
           origin: pileTop(),
           kind: 'spark',
-          count: many(26),
+          count: 26,
           colors: [COLOR_HEX[chosen], '#fff3d0'],
         })
         punch(0.03)
@@ -734,7 +729,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     particles.burst({
       origin: new THREE.Vector3(x, 0.6, z),
       kind: 'spark',
-      count: many(22),
+      count: 22,
       colors: ['#f4dda4', '#fff6dc'],
       speed: 3.6,
     })
@@ -793,14 +788,14 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
         particles.burst({
           origin: pileTop().setY(1.2),
           kind: 'confetti',
-          count: many(150),
+          count: 150,
           colors: FOUR,
           speed: 7.5,
         })
         particles.burst({
           origin: new THREE.Vector3(x, 0.8, z),
           kind: 'confetti',
-          count: many(70),
+          count: 70,
           colors: FOUR,
           speed: 6,
         })
@@ -869,7 +864,6 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   function reset() {
     queue.clear()
     tweens.finishAll()
-    stories = 0
     penalty = null
     inFlight.length = 0
   }
@@ -896,19 +890,11 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   }
 
   /**
-   * One snapshot's story onto the queue, closed by the beat that settles the
-   * table to that snapshot. While another story waits behind the one being
-   * told, the table tells it faster.
+   * One snapshot's story onto the queue as a single push, closed by the beat
+   * that settles the table to that snapshot.
    */
   function tell(beats: Beat[], game: GameState) {
-    stories++
-    queue.push(...beats, {
-      label: 'settle',
-      run: () => {
-        stories--
-        return reconcile(game)
-      },
-    })
+    queue.push(...beats, { label: 'settle', run: () => reconcile(game) })
   }
 
   /**
@@ -1174,7 +1160,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
       tell(beatsFor(fresh, [...drawn]), game)
       emit()
       // A backlog this long is a page that fell behind: show where things stand.
-      if (stories > 4) catchUp()
+      if (queue.backlog > 4) catchUp()
     },
     zoom(amount) {
       zoom = THREE.MathUtils.clamp(zoom + amount, 0.85, 1.25)
@@ -1187,7 +1173,6 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
       queue.clear()
       tweens.cancelAll()
       rig.dispose()
-      controls.dispose()
       particles.dispose()
       table.dispose()
       stage.dispose()
@@ -1205,7 +1190,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   }
   /** A tab that comes back with a long story to tell skips to the end of it. */
   function onVisible() {
-    if (!document.hidden && stories > 2) catchUp()
+    if (!document.hidden && queue.backlog > 2) catchUp()
   }
   document.addEventListener('visibilitychange', onVisible)
 
@@ -1213,12 +1198,11 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   /** One frame of everything the table animates; also how `skip` plays a beat forward. */
   function advance(dt: number, now: number) {
     clock = now
-    // The queue's own catch-up counts beats; this counts stories (see `tell`).
-    const ms = dt * 1000,
-      pace = stories > 1 ? CATCH_UP : 1
-    tweens.speed = pace
+    // The queue holds its beats at its own catch-up speed; the tweens follow it.
+    const ms = dt * 1000
+    tweens.speed = queue.speed
     let moving = tweens.step(ms)
-    queue.step(ms * pace)
+    queue.step(ms)
     // Whoever is on turn leans in toward the pile once the table has caught up.
     const playing = !state.menu && latest.status === 'playing' && !queue.busy && !view.dealing
     const next = playing && !inDom(view.game.currentPlayer) ? view.game.currentPlayer : -1
@@ -1249,7 +1233,14 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     moving = rig.step(dt) || moving
     return moving || queue.busy
   }
-  stage.onFrame(advance)
+  stage.onFrame((dt, now) => {
+    // Long frames the stage capped (shaders compiling just after a join, a
+    // stalled thread) left a table that keeps time with the room behind it:
+    // play that time forward too, so it lands when everyone else's does.
+    const drift = stage.takeDrift()
+    if (drift && state.since !== undefined) skip(drift)
+    return advance(dt, now)
+  })
 
   // First look. A round only just dealt is dealt again in front of the viewer,
   // from the deck — whole for the page that started it, which arrives within

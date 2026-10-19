@@ -39,7 +39,7 @@ function room(seats: Partial<Record<string, SeatInfo>>, you: Partial<YouInfo> = 
     gameState: dealt(['Ann', 'Ben', 'Cai']),
   }
   const info: YouInfo = { id: 'ann', seat: 'p0', isHost: true, ...you }
-  return prismSession(snapshot, info, api(), () => {})
+  return prismSession(snapshot, 0, info, api(), () => {})
 }
 
 const seated = { p0: seat('Ann'), p1: seat('Ben'), p2: seat('Cai') }
@@ -105,8 +105,7 @@ describe('prismSession', () => {
     expect(all.rematch).toEqual({ mine: false, theirs: true })
   })
 
-  it('says when the state began on this page’s clock, from how long ago the server says it did', () => {
-    const now = vi.spyOn(performance, 'now').mockReturnValue(50_000)
+  it('says when the state began on this page’s clock, counted back from when the snapshot arrived', () => {
     const snapshot: RoomSnapshot = {
       protocol: PROTOCOL_VERSION,
       code: 'ABC234',
@@ -120,8 +119,12 @@ describe('prismSession', () => {
       timing: { now: 1_700_000_001_200, since: 1_700_000_000_000 },
     }
     const you = { id: 'ann', seat: 'p0' as const, isHost: true }
-    expect(prismSession(snapshot, you, api(), () => {}).since).toBe(48_800)
-    expect(prismSession({ ...snapshot, timing: undefined }, you, api(), () => {}).since).toBeUndefined()
+    // Rendered well after it arrived: the arrival is what counts.
+    const now = vi.spyOn(performance, 'now').mockReturnValue(90_000)
+    expect(prismSession(snapshot, 50_000, you, api(), () => {}).since).toBe(48_800)
+    expect(
+      prismSession({ ...snapshot, timing: undefined }, 50_000, you, api(), () => {}).since,
+    ).toBeUndefined()
     now.mockRestore()
   })
 
@@ -137,7 +140,7 @@ describe('prismSession', () => {
       gameState: dealt(['Ann', 'Ben']),
     }
     const wire = api()
-    const session = prismSession(snapshot, { id: 'ann', seat: 'p0', isHost: true }, wire, () => {})
+    const session = prismSession(snapshot, 0, { id: 'ann', seat: 'p0', isHost: true }, wire, () => {})
     session.send.command({ type: 'play', player: 0, cardId: 'prism-12' })
     session.send.command({ type: 'catch', player: 0, target: 1 })
     expect(wire.action).toHaveBeenNthCalledWith(1, { kind: 'play', cardId: 'prism-12' })

@@ -30,8 +30,10 @@ export interface OnlinePrismSession {
   rematch: { mine: boolean; theirs: boolean }
   /**
    * When this state began at the room, on this browser's `performance.now()`
-   * clock: the server says how long ago, by its own clock, so the two clocks
-   * never have to agree. A browser that arrives mid-beat starts it part-way in.
+   * clock: the server says how long before the snapshot left it, by its own
+   * clock, and that is counted back from when the snapshot arrived — not from
+   * when it rendered — so the two clocks never have to agree. A browser that
+   * arrives mid-beat starts it part-way in.
    */
   since?: number
   send: {
@@ -71,6 +73,7 @@ export function claimTarget(session: OnlinePrismSession): PrismSeatPlayer | null
 
 export function prismSession(
   snapshot: RoomSnapshot,
+  receivedAt: number,
   you: YouInfo,
   api: RoomApi,
   leave: () => void,
@@ -107,7 +110,7 @@ export function prismSession(
       // only deals once the whole table has asked for it.
       theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
     },
-    ...(snapshot.timing ? { since: performance.now() - beatElapsed(snapshot.timing) } : {}),
+    ...(snapshot.timing ? { since: receivedAt - beatElapsed(snapshot.timing) } : {}),
     send: {
       command: (command) => api.action(wireAction(command)),
       rematch: api.rematch,
