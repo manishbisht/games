@@ -44,6 +44,15 @@ describe('the board’s story of a turn', () => {
     // Tokens appear where the beat starts, so the ride carries on from the ladder's foot.
     const arrive = joined.beats[1]
     expect(arrive.kind === 'arrive' && arrive.moves.map((m) => m.to)).toEqual([4, 10])
+    // The ride is the beat the room is in the middle of; the rest is history.
+    expect(joined.playing).toBe(joined.beats[3])
+  })
+
+  it('names the beat each state is in, and none for a state that waits', () => {
+    expect(plan(ready, squares, rolling, false).playing).toMatchObject({ kind: 'roll', value: 3 })
+    expect(plan(null, {}, moving, false).playing).toMatchObject({ kind: 'walk', path: [2, 3, 4] })
+    expect(plan(transporting, { red: 25, blue: 10 }, settling, false).playing).toBeNull()
+    expect(plan(null, {}, ready, false).playing).toBeNull()
   })
 
   it('brings a token that skipped beats to its square before the next beat', () => {

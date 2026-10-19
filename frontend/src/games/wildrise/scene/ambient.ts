@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { hash01 } from '../../../motion/ease'
+import type { QualityTier } from '../../../motion/stage'
 import { canvasTexture } from './models'
 
 /**
@@ -65,17 +66,34 @@ export function createAmbient(
     return { mesh, origin: plant.group.position, size: plant.group.scale.x }
   })
 
+  let on = true,
+    motesShown = MOTES,
+    steamShown = steam.length,
+    leavesShown = leaves.length
+  function apply() {
+    motes.visible = on
+    moteGeometry.setDrawRange(0, motesShown)
+    steam.forEach((sprite, i) => (sprite.visible = on && i < steamShown))
+    leaves.forEach((leaf, i) => (leaf.mesh.visible = on && i < leavesShown))
+    if (!on) for (const plant of plants) plant.crown.rotation.set(0, 0, 0)
+  }
+
   return {
-    set visible(on: boolean) {
-      motes.visible = on
-      for (const sprite of steam) sprite.visible = on
-      for (const leaf of leaves) leaf.mesh.visible = on
-      if (!on) for (const plant of plants) plant.crown.rotation.set(0, 0, 0)
+    set visible(next: boolean) {
+      on = next
+      apply()
+    },
+    /** Thinner on a device the stage has stepped down: about half the pollen, less steam, one leaf. */
+    density(tier: QualityTier) {
+      motesShown = tier === 2 ? MOTES : 12
+      steamShown = tier === 2 ? steam.length : 2
+      leavesShown = tier === 2 ? leaves.length : 1
+      apply()
     },
     /** `now` in ms of scene clock. */
     step(now: number) {
       const t = now / 1000
-      for (let i = 0; i < MOTES; i++) {
+      for (let i = 0; i < motesShown; i++) {
         const a = hash01(i * 3 + 1),
           b = hash01(i * 3 + 2),
           c = hash01(i * 3 + 3)

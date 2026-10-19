@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { BeatTiming } from '@games/shared/protocol'
 import type { GameState } from '@games/shared/wildrise/types'
 import type { Cue } from '../game/audio'
 import { createScene } from './createScene'
@@ -9,10 +10,12 @@ export type BoardControls = Pick<SceneApi, 'reset' | 'top' | 'rotate' | 'zoom' |
 
 interface Props {
   state: GameState
+  /** The room's word on how far into `state` it already is. */
+  timing?: BeatTiming
   running: boolean
   canRoll: boolean
   onRoll: () => void
-  onCue: (cue: Cue, n?: number) => void
+  onCue: (cue: Cue, n?: number, pan?: number) => void
   onPositions: (squares: Squares) => void
   /** The 3D view could not start; the table's text has to carry the game alone. */
   onFailure: () => void
@@ -24,12 +27,12 @@ interface Props {
  * it is played onto the same scene rather than tearing WebGL down and up.
  */
 export default forwardRef<BoardControls, Props>(function BoardScene(
-  { state, running, canRoll, onRoll, onCue, onPositions, onFailure },
+  { state, timing, running, canRoll, onRoll, onCue, onPositions, onFailure },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
-  const initial = useRef(state),
+  const initial = useRef({ state, timing }),
     handlers = useRef({ onRoll, onCue, onPositions, onFailure })
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -48,11 +51,16 @@ export default forwardRef<BoardControls, Props>(function BoardScene(
   )
   useEffect(() => {
     try {
-      scene.current = createScene(container.current!, initial.current, {
-        onRoll: () => handlers.current.onRoll(),
-        onCue: (cue, n) => handlers.current.onCue(cue, n),
-        onPositions: (squares) => handlers.current.onPositions(squares),
-      })
+      scene.current = createScene(
+        container.current!,
+        initial.current.state,
+        {
+          onRoll: () => handlers.current.onRoll(),
+          onCue: (cue, n, pan) => handlers.current.onCue(cue, n, pan),
+          onPositions: (squares) => handlers.current.onPositions(squares),
+        },
+        initial.current.timing,
+      )
     } catch (error) {
       console.error('Wildrise could not initialize the 3D board.', error)
       handlers.current.onFailure()
@@ -63,9 +71,11 @@ export default forwardRef<BoardControls, Props>(function BoardScene(
       scene.current = null
     }
   }, [])
+  // A snapshot that changes nothing on the table (someone came or went) is a
+  // no-op for the scene, so following `timing` as well costs nothing.
   useEffect(() => {
-    scene.current?.update(state)
-  }, [state])
+    scene.current?.update(state, timing)
+  }, [state, timing])
   useEffect(() => {
     scene.current?.setRunning(running)
   }, [running])

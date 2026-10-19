@@ -1,7 +1,7 @@
 import { PLAYER_IDS } from '@games/shared/wildrise/board'
 import type { WildriseOnlineAction } from '@games/shared/wildrise/online'
 import type { GameState, PlayerId } from '@games/shared/wildrise/types'
-import type { RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
+import type { BeatTiming, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
 
 export interface WildriseSeatPlayer {
@@ -22,6 +22,11 @@ export interface WildriseSeatPlayer {
  */
 export interface OnlineWildriseSession {
   state: GameState
+  /**
+   * How far into `state` the room already was when it sent it, by the room's
+   * clock — what lets a browser that joins mid-walk pick the walk up in step.
+   */
+  timing?: BeatTiming
   /** The colour this browser plays, or `null` for someone watching. */
   mySeat: PlayerId | null
   players: Partial<Record<PlayerId, WildriseSeatPlayer>>
@@ -83,6 +88,7 @@ export function wildriseSession(
   )
   return {
     state,
+    timing: snapshot.timing,
     mySeat: (you.seat && colourOf(you.seat)) || null,
     players,
     rematch: {

@@ -12,6 +12,33 @@ import type { Page } from '@playwright/test'
 
 const rollButton = (page: Page) => page.getByRole('button', { name: 'Roll dice', exact: true })
 
+/**
+ * Where the scene says its die is resting on screen. It only says so while the
+ * camera is still — it follows each walk and drifts home afterwards — so this
+ * waits until the spot has held for a moment before trusting it.
+ */
+async function restingDie(page: Page) {
+  const container = page.locator('.wr-canvas')
+  const read = () =>
+    container.evaluate((el) =>
+      el.dataset.dieX === undefined ? null : `${el.dataset.dieX},${el.dataset.dieY}`,
+    )
+  let seen: string | null = null
+  await expect
+    .poll(
+      async () => {
+        const before = seen
+        seen = await read()
+        return seen !== null && seen === before
+      },
+      { intervals: [800], timeout: 30000 },
+    )
+    .toBe(true)
+  const box = (await page.locator('.wr-canvas canvas').boundingBox())!
+  const [x, y] = seen!.split(',').map(Number)
+  return { x: box.x + x, y: box.y + y }
+}
+
 /** Set a table up and let the server deal it. */
 async function startBotGame(page: Page, players?: number, name = 'Robin') {
   await page.goto('/#/wildrise')
@@ -119,8 +146,12 @@ test('the physical die rolls on click in the normally rendered scene', async ({ 
   await page.getByLabel('Your name', { exact: true }).fill('Robin')
   await page.getByRole('button', { name: 'Start game', exact: true }).click()
   await expect(rollButton(page)).toBeEnabled({ timeout: 30000 })
-  // The die is visible in its tray at this location in the default 1440×960 camera.
-  await page.mouse.click(798, 680)
+  const die = await restingDie(page)
+  // The pointer is over the 3D die itself: the scene's own pick says so.
+  await page.mouse.move(die.x, die.y)
+  await expect(page.locator('.wr-canvas canvas')).toHaveCSS('cursor', 'pointer')
+  // And a tap on it — not the button — asks the room for the roll.
+  await page.mouse.click(die.x, die.y)
   await expect(rollButton(page)).toBeDisabled()
   await expect(page.locator('.wr-events')).toContainText('rolled', { timeout: 30000 })
 })

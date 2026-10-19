@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { beatElapsed } from '@games/shared/protocol'
+import type { BeatTiming } from '@games/shared/protocol'
 import { PALETTES, PLAYER_IDS, spaceCoordinates } from '@games/shared/wildrise/board'
 import type { GameState, PlayerId } from '@games/shared/wildrise/types'
 import { createCameraRig } from '../../../motion/camera'
@@ -20,7 +22,8 @@ import {
 } from '../../../motion/ease'
 import { createParticles } from '../../../motion/particles'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
-import { createStage, onTap } from '../../../motion/stage'
+import { allowPageScroll, createStage, onTap } from '../../../motion/stage'
+import type { QualityTier } from '../../../motion/stage'
 import { createQueue, createTweens } from '../../../motion/tween'
 import type { Cue } from '../game/audio'
 import { createAmbient } from './ambient'
@@ -44,12 +47,14 @@ import type { Beat, Squares } from './story'
 
 export interface SceneHandlers {
   onRoll: () => void
-  onCue: (cue: Cue, n?: number) => void
+  /** `pan` is where on screen it happened, -1 left to 1 right. */
+  onCue: (cue: Cue, n?: number, pan?: number) => void
   /** Where each token stands on screen, every time one lands somewhere new. */
   onPositions: (squares: Squares) => void
 }
 export interface SceneApi {
-  update: (state: GameState) => void
+  /** `timing` is the room's word on how far into `state` it already is. */
+  update: (state: GameState, timing?: BeatTiming) => void
   setRunning: (running: boolean) => void
   /** Whether a tap on the die would roll it: it lifts and glows under the pointer. */
   setCanRoll: (can: boolean) => void
@@ -115,7 +120,20 @@ interface Token {
   presence: ReturnType<typeof spring>
 }
 
-export function createScene(container: HTMLElement, initial: GameState, handlers: SceneHandlers): SceneApi {
+/**
+ * How a beat is played: `live` at the table's pace; `catch-up` quickly, for a
+ * story whose timing the room didn't give; `past` landed at once, because the
+ * room is already beyond it.
+ */
+type Pace = 'live' | 'catch-up' | 'past'
+
+export function createScene(
+  container: HTMLElement,
+  initial: GameState,
+  handlers: SceneHandlers,
+  timing?: BeatTiming,
+): SceneApi {
+  const born = performance.now()
   const stage = createStage(container, {
     label:
       'Wildrise 3D board with 100 numbered spaces. Drag to rotate, pinch or scroll to zoom. Use Roll dice or press Space to play.',
@@ -125,6 +143,10 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   })
   const { scene, renderer } = stage
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  /** The camera or the canvas changed: where the die sits on screen needs saying again. */
+  let markDie = true,
+    tier: QualityTier = stage.quality,
+    silent = false
 
   // ── Camera ──────────────────────────────────────────────────────────────
   const camera = new THREE.OrthographicCamera(-9, 9, 8, -8, 0.1, 100)
@@ -143,8 +165,10 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   controls.maxZoom = 2.4
   controls.rotateSpeed = 0.5
   controls.zoomSpeed = 0.65
+  allowPageScroll(stage.canvas)
   const rig = createCameraRig(camera, controls)
   stage.onResize((w, h) => {
+    markDie = true
     const aspect = w / h,
       halfH = Math.max(6.65, 7.35 / aspect)
     camera.left = -halfH * aspect
@@ -236,11 +260,13 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     rest: dieRest,
     face: dieQuaternion,
     size: 0.86,
-    // Lifted just above the tray and tossed back in: the tray is barely wider
-    // than the die, so every bounce has to land on its felt.
-    release: new THREE.Vector3(-0.72, 1.9, 0.78),
+    // Tossed in from the player's side of the tray. The toss rises from
+    // wherever the die was let go, so it can start high for a real arc; it is
+    // the first bounce, ~28% of the way back, that has to land on the felt —
+    // the tray is barely wider than the die.
+    release: new THREE.Vector3(-0.4, 2.5, 0.95),
     onContact: (strength) => {
-      cue('die', strength)
+      cue('die', strength, die.position)
       if (strength > 0.5) puff(die.position.x, -0.33, die.position.z, 7, 0.7)
     },
   })
@@ -284,16 +310,18 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   targetRing.rotation.x = -Math.PI / 2
   targetRing.visible = false
   scene.add(targetRing)
-  const confetti = createParticles(scene, { max: 360, floor: BOARD_Y + 0.02 })
-  const dust = createParticles(scene, { max: 160 })
+  // Confetti settles on the board; dust rises off whatever it was kicked up from.
+  const particles = createParticles(scene, { max: 520 })
   const DUST = ['#efe4cb', '#dccba6', '#f6efe0']
   const origin = new THREE.Vector3()
+  /** Fewer particles on a device the stage has found slow. */
+  const thin = (count: number) => Math.max(1, Math.round(count * [0.4, 0.65, 1][tier]))
   function puff(x: number, y: number, z: number, count: number, size = 1) {
-    if (reduced) return
-    dust.burst({
+    if (reduced || silent) return
+    particles.burst({
       origin: origin.set(x, y, z),
       kind: 'dust',
-      count,
+      count: thin(count),
       colors: DUST,
       speed: 1.5,
       size: size * 0.85,
@@ -317,7 +345,15 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   const tweens = createTweens(),
     queue = createQueue({ catchUpAfter: 2, catchUpSpeed: 2.5 })
   const press = new Float32Array(101)
-  const cue = (kind: Cue, n?: number) => handlers.onCue(kind, n)
+  const heard = new THREE.Vector2()
+  /** A sound is placed where it happened on screen, a little: never hard left or right. */
+  const cue = (kind: Cue, n?: number, at?: THREE.Vector3) => {
+    if (silent) return
+    const width = stage.size.width
+    const pan =
+      at && width ? THREE.MathUtils.clamp((stage.toScreen(at, heard).x / width) * 2 - 1, -1, 1) * 0.6 : 0
+    handlers.onCue(kind, n, pan)
+  }
   const emit = () => handlers.onPositions({ ...shown })
 
   /** A token's resting place on `square`, fanned out among whoever else stands there. */
@@ -424,17 +460,31 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   }
 
   // ── Beats ───────────────────────────────────────────────────────────────
-  function arrive(beat: Extract<Beat, { kind: 'arrive' }>) {
+  /**
+   * Brings every token to the square the state says it starts this beat on.
+   * When the room is already beyond it (`past`), nobody re-hops a walk the
+   * table has seen: the token about to move is put straight on its square, so
+   * its beat starts from the right place, and the rest glide there.
+   */
+  function arrive(beat: Extract<Beat, { kind: 'arrive' }>, past: boolean) {
     for (const id of beat.gone) {
       const token = tokens.get(id)!
       token.presence.target = 0
       delete shown[id]
     }
     // Everyone new takes their square first, so the fan-out on a shared one is final.
-    for (const { id, from, to } of beat.moves) if (from === undefined) shown[id] = to
+    for (const { id, from, to } of beat.moves) if (from === undefined || past) shown[id] = to
+    const mover = state.players[state.currentPlayer].id
     beat.moves.forEach(({ id, from, to }, order) => {
       const token = tokens.get(id)!
       token.presence.target = 1
+      if (past && from !== undefined) {
+        if (id === mover && !token.driven) {
+          slot(id, to, token.group.position)
+          token.ground = token.group.position.y
+        }
+        return
+      }
       if (from === undefined) {
         // A new token appears in its place with a pop rather than sliding in from nowhere.
         slot(id, to, token.group.position)
@@ -500,7 +550,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
           if (hopIndex >= 0) {
             hop(token, from, to, 1, 0)
             land(token, path[hopIndex], 0.35)
-            cue('step', hopIndex)
+            cue('step', hopIndex, token.group.position)
           }
           begin(hopIndex + 1)
         }
@@ -513,8 +563,8 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
         const last = path[path.length - 1]
         token.driven = false
         land(token, last, 1)
-        cue('step', path.length - 1)
-        cue('land')
+        cue('step', path.length - 1, to)
+        cue('land', 0, to)
         puff(to.x, BOARD_Y + 0.02, to.z, 9)
         const snake = snakes.get(last)
         if (snake) alert(snake)
@@ -564,7 +614,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     top.y += 0.045
     let rung = -1
     follow(token, 1.32)
-    cue('ladder')
+    cue('ladder', 0, start)
     token.yawGoal = turnToward(token.yaw, ladder.yaw)
     tweens.add({
       duration: beat.ms,
@@ -594,7 +644,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
           ladder.group.position.y = -0.012 * Math.max(0, 1 - u * 3)
           if (k !== rung) {
             rung = k
-            cue('rung', k)
+            cue('rung', k, g.position)
           }
           return
         }
@@ -610,7 +660,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
         land(token, beat.to, 1.2)
         if (!reduced) token.wobble.velocity -= 1.5
         puff(end.x, BOARD_Y + 0.02, end.z, 10)
-        cue('land')
+        cue('land', 0, end)
       },
     })
   }
@@ -624,10 +674,11 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
       tangent = new THREE.Vector3(),
       tail = curve.getPointAt(1, new THREE.Vector3())
     let bitten = false,
+      slid = false,
       flicked = false
     riding = snake
     follow(token, 1.26)
-    cue('snake')
+    cue('snake', 0, start)
     snake.skin.emissiveIntensity = snake.body.emissiveIntensity = 0.18
     const onBody = (r: number, out: THREE.Vector3) => {
       curve.getPointAt(r, out)
@@ -672,8 +723,8 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
           } else {
             if (!bitten) {
               bitten = true
-              cue('bite')
-              if (!reduced) rig.shake(0.1, 240)
+              cue('bite', 0, start)
+              if (!reduced && !silent) rig.shake(0.1, 240)
               follow(token, 1.4)
             }
             hop(token, start, onBody(0, point), (t - 0.16) / 0.04, 0.12)
@@ -682,6 +733,10 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
           return
         }
         if (t < 0.88) {
+          if (!slid) {
+            slid = true
+            cue('slide', ((0.88 - t) * beat.ms) / Math.max(0.01, tweens.speed * boost), g.position)
+          }
           const r = inOutSine((t - 0.2) / 0.68)
           motion.wave = reduced ? 0 : 0.055 * Math.sin(Math.min(1, (t - 0.2) / 0.1) * (Math.PI / 2))
           motion.bulge = reduced ? 0 : 0.06
@@ -707,7 +762,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
         const u = (t - 0.88) / 0.12
         if (!flicked) {
           flicked = true
-          cue('tumble')
+          cue('tumble', 0, g.position)
         }
         motion.wave *= 0.9
         motion.bulge = 0
@@ -730,8 +785,8 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
         targetRing.visible = false
         land(token, beat.to, 1.3)
         puff(end.x, BOARD_Y + 0.02, end.z, 14, 1.2)
-        if (!reduced) rig.shake(0.06, 180)
-        cue('land')
+        if (!reduced && !silent) rig.shake(0.06, 180)
+        cue('land', 0, end)
       },
     })
   }
@@ -740,7 +795,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   function nope(beat: Extract<Beat, { kind: 'nope' }>) {
     const token = tokens.get(beat.id)!,
       base = token.group.position.clone()
-    cue('nope')
+    cue('nope', 0, base)
     if (reduced) return
     token.driven = true
     token.yawGoal = REST_YAW
@@ -767,8 +822,8 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     const changed = id !== active
     active = id
     if (!changed || !live || reduced) return
-    cue('turn')
     const token = tokens.get(id)!
+    cue('turn', 0, token.group.position)
     if (token.driven) return
     // A small "my go" hop, so the eye knows where to look.
     const base = new THREE.Vector3()
@@ -799,10 +854,11 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     if (reduced) return
     const top = slot(id, 100, new THREE.Vector3())
     const burst = (count: number, speed: number) =>
-      confetti.burst({
+      particles.burst({
         origin: origin.set(top.x, top.y + 0.7, top.z),
         kind: 'confetti',
-        count,
+        floor: BOARD_Y + 0.02,
+        count: thin(count),
         speed,
         spread: 0.6,
         life: 2.8,
@@ -852,18 +908,24 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     })
   }
 
-  function run(beat: Beat, live: boolean): number {
-    boost = live || reduced ? 1 : 3
+  function run(beat: Beat, pace: Pace): number {
+    const live = pace === 'live',
+      past = pace === 'past'
+    boost = pace === 'catch-up' && !reduced ? 3 : 1
     idleSince = Infinity
+    container.dataset.beat = beat.kind
     switch (beat.kind) {
       case 'turn':
         turn(beat.id, live)
         break
       case 'arrive':
-        arrive(beat)
+        arrive(beat, past)
         break
       case 'roll':
-        roll(beat.value, beat.ms)
+        if (past) {
+          dieValue = beat.value
+          dieThrow.settle(beat.value)
+        } else roll(beat.value, beat.ms)
         break
       case 'walk':
         walk(beat)
@@ -878,7 +940,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
         win(beat.id, live)
         break
     }
-    return beat.ms
+    return past ? 0 : beat.ms
   }
   // The camera waits a moment before handing the board back: the next beat of
   // the same turn (a ladder after the walk) usually arrives within it.
@@ -886,28 +948,62 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   queue.onIdle(() => {
     boost = 1
     idleSince = stage.now
+    container.dataset.beat = 'idle'
   })
 
-  /** Lands everything queued on its final frame: a hidden tab, a long backlog, reduced motion switched on. */
+  /**
+   * Lands everything queued on its final frame, quietly: a hidden tab, a long
+   * backlog, reduced motion switched on, a table the room has moved past.
+   */
   function flush() {
+    silent = true
     queue.flush()
     tweens.finishAll()
-    confetti.clear()
-    dust.clear()
+    silent = false
+    particles.clear()
     dieThrow.settle(dieValue)
     shakingUntil = 0
     stage.invalidate()
   }
 
-  function update(next: GameState) {
+  /**
+   * Plays `ms` of the beat just started in one go, without its sounds, dust or
+   * camera shake — the part of it the rest of the table has already watched.
+   */
+  function skip(ms: number) {
+    if (ms <= 0) return
+    silent = true
+    tweens.speed = queue.speed
+    tweens.step(ms)
+    dieThrow.step(ms / 1000)
+    queue.step(ms)
+    silent = false
+  }
+
+  function update(next: GameState, timing?: BeatTiming, late = 0) {
     const story_ = plan(previous, story, next, reduced)
     previous = next
     state = next
     story = story_.squares
     if (!story_.beats.length) return
     if (next.phase !== 'won') winner = null
-    if (queue.length > 3) flush()
-    queue.push(...story_.beats.map((beat) => ({ run: () => run(beat, story_.live), label: beat.kind })))
+    const { live, playing } = story_
+    // Joining or reconnecting mid-turn, the room says how far into its beat it
+    // already is: what came before lands at once, and this beat starts at that
+    // point, so the token arrives when it does for everyone else at the table.
+    // Without the room's word, a story that didn't follow on plays quickly.
+    const synced = !live && timing !== undefined && !reduced
+    if (synced || queue.length > 3) flush()
+    queue.push(
+      ...story_.beats.map((beat) => ({
+        run: () => run(beat, live ? 'live' : !synced ? 'catch-up' : beat === playing ? 'live' : 'past'),
+        label: beat.kind,
+      })),
+    )
+    if (synced && playing) {
+      skip(beatElapsed(timing) + late)
+      catchingUp = { wall: performance.now(), scene: stage.now }
+    }
     if (document.hidden) flush()
     stage.invalidate()
   }
@@ -929,16 +1025,55 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
   }
   stage.canvas.addEventListener('pointermove', onMove)
   stage.canvas.addEventListener('pointerleave', onLeave)
+  // The idle table is the first thing to go on a device the stage finds slow:
+  // thinner at the lower tier, and gone — with the idle tick that draws it — at
+  // the lowest, so a waiting board costs nothing at all.
+  const showAmbient = () => {
+    ambient.visible = !reduced && tier > 0
+    ambient.density(tier)
+  }
   const offMotion = onMotionChange(() => {
     reduced = reducedMotion()
     if (reduced) flush()
-    ambient.visible = !reduced
+    showAmbient()
     stage.invalidate()
   })
-  ambient.visible = !reduced
+  const offQuality = stage.onQuality((next) => {
+    tier = next
+    showAmbient()
+    stage.invalidate()
+  })
+  showAmbient()
   const offChange = () => controls.removeEventListener('change', invalidate)
-  const invalidate = () => stage.invalidate()
+  const invalidate = () => {
+    markDie = true
+    stage.invalidate()
+  }
   controls.addEventListener('change', invalidate)
+
+  /**
+   * Where the die rests on screen, in CSS pixels from the canvas's corner,
+   * written on the container as `data-die-x`/`data-die-y` while the camera is
+   * still (and taken off while it moves) — so a browser test can tap the real
+   * die wherever the layout and the camera have put it.
+   */
+  const dieOnScreen = new THREE.Vector2()
+  function sayWhereTheDieIs(cameraMoving: boolean) {
+    const data = container.dataset
+    if (cameraMoving || !stage.size.width) {
+      if (data.dieX !== undefined) {
+        delete data.dieX
+        delete data.dieY
+      }
+      markDie = true
+      return
+    }
+    if (!markDie) return
+    markDie = false
+    stage.toScreen(dieRest, dieOnScreen)
+    data.dieX = String(Math.round(dieOnScreen.x))
+    data.dieY = String(Math.round(dieOnScreen.y))
+  }
 
   // ── The frame ───────────────────────────────────────────────────────────
   const place = new THREE.Vector3()
@@ -1004,28 +1139,33 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
       halo.position.lerp(haloAt, dampFactor(token.driven ? 60 : 12, dt))
       moving = true
     }
-    const color = COLORS[active]
-    if (!haloMaterial.color.equals(color)) {
-      haloMaterial.color.lerp(color, dampFactor(8, dt))
+    // Eased, then snapped: a lerp only ever gets within a rounding error of
+    // the colour, and an exact comparison would keep the board drawing forever.
+    const color = COLORS[active],
+      shade = haloMaterial.color
+    if (Math.abs(shade.r - color.r) + Math.abs(shade.g - color.g) + Math.abs(shade.b - color.b) > 2e-3) {
+      shade.lerp(color, dampFactor(8, dt))
       moving = true
-    }
+    } else shade.copy(color)
     haloMaterial.opacity = 0.85 * haloShown
     halo.scale.setScalar((reduced ? 1 : 1 + Math.sin(now / 320) * 0.05) * (0.6 + 0.4 * haloShown))
     return moving
   }
 
+  /** The die's "roll me" breathing, drawn on the idle tick rather than every frame. */
+  let diePulse = 0
   function poseDie(dt: number, now: number) {
     if (shakingUntil && now > shakingUntil) {
       shakingUntil = 0
       dieThrow.settle(dieValue)
     }
     let moving = dieThrow.step(dt * boost * queue.speed)
-    const glowGoal = canRoll ? (hovered ? 0.4 : 0.1 + (reduced ? 0 : Math.sin(now / 380) * 0.06)) : 0
+    const glowGoal = canRoll ? (hovered ? 0.4 : 0.1) : 0
     if (Math.abs(dieGlow - glowGoal) > 1e-3) {
       dieGlow = damp(dieGlow, glowGoal, 10, dt)
       moving = true
-    }
-    dieBody.material.emissiveIntensity = dieGlow
+    } else dieGlow = glowGoal
+    dieBody.material.emissiveIntensity = dieGlow + diePulse
     if (!dieThrow.busy) {
       const liftGoal = canRoll && hovered && !reduced ? 0.14 : 0
       if (Math.abs(dieLift - liftGoal) > 1e-4) {
@@ -1061,8 +1201,27 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     if (riding) riding.apply()
   }
 
+  /**
+   * A beat just picked up mid-way must not lose time to the board's first
+   * frames, which are slow (shaders compiling, textures uploading) and which
+   * the stage clamps. For a moment after, any wall time the scene clock didn't
+   * see is played straight through.
+   */
+  let catchingUp: { wall: number; scene: number } | null = null
+  function keepUp(now: number) {
+    if (!catchingUp) return
+    const wall = performance.now() - catchingUp.wall
+    if (wall > 600) return void (catchingUp = null)
+    const owed = wall - (now - catchingUp.scene)
+    if (owed > 20) {
+      skip(owed)
+      catchingUp.scene -= owed
+    }
+  }
+
   stage.onFrame((dt, now) => {
     if (disposed) return false
+    keepUp(now)
     const ms = dt * 1000 * boost
     queue.step(ms)
     tweens.speed = queue.speed
@@ -1070,16 +1229,17 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     if (poseTokens(dt)) moving = true
     if (poseHalo(dt, now)) moving = true
     if (poseDie(dt, now)) moving = true
-    if (confetti.step(dt)) moving = true
-    if (dust.step(dt)) moving = true
-    const idle = !reduced && now - lastAmbient >= 50
+    if (particles.step(dt)) moving = true
+    // The idle table ticks at ~20Hz, slower on a slow device, not at all on the slowest.
+    const idle = !reduced && tier > 0 && now - lastAmbient >= (tier === 2 ? 50 : 80)
     if (moving || idle) {
       lastAmbient = now
       poseSnakes(now)
       for (let s = 1; s <= 100; s++) board.tiles[s - 1].position.y = 0.187 - press[s]
       const near = state.players.some((p) => (shown[p.id] ?? 0) >= 94) && !winner
       finish.emissiveIntensity = near ? (reduced ? 0.3 : 0.28 + Math.sin(now / 260) * 0.2) : 0
-      if (!reduced) {
+      diePulse = canRoll && !hovered && !reduced && tier > 0 ? Math.sin(now / 380) * 0.06 : 0
+      if (!reduced && tier > 0) {
         ambient.step(now)
         const token = tokens.get(active)!
         if (!token.driven && !winner && token.wobble.value === 1 && !token.wobble.velocity) {
@@ -1090,12 +1250,16 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
       if (idle) moving = true
     }
     if (followFrom && !winner && now - idleSince > 650) release()
-    if (controls.update()) moving = true
-    if (rig.step(dt)) moving = true
+    const turning = controls.update(),
+      swinging = rig.step(dt)
+    if (turning || swinging) moving = true
+    sayWhereTheDieIs(turning || swinging)
     return moving
   })
   stage.start()
-  update(initial)
+  // The table is a few hundred milliseconds old by the time it can play:
+  // that much more of the room's beat has gone by.
+  update(initial, timing, performance.now() - born)
 
   return {
     update,
@@ -1108,7 +1272,7 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
     rolling() {
       if (reduced || dieThrow.busy) return
       dieThrow.shake()
-      cue('shake')
+      cue('shake', 0, die.position)
       shakingUntil = stage.now + 4000
       stage.invalidate()
     },
@@ -1135,13 +1299,13 @@ export function createScene(container: HTMLElement, initial: GameState, handlers
       queue.clear()
       offTap()
       offMotion()
+      offQuality()
       offChange()
       stage.canvas.removeEventListener('pointermove', onMove)
       stage.canvas.removeEventListener('pointerleave', onLeave)
       rig.dispose()
       controls.dispose()
-      confetti.dispose()
-      dust.dispose()
+      particles.dispose()
       ambient.dispose()
       stage.dispose()
     },

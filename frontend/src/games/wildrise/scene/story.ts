@@ -29,6 +29,13 @@ export interface Plan {
    * rather than replayed at length, since the server is already further on.
    */
   live: boolean
+  /**
+   * The beat the state is itself in the middle of — the throw while `rolling`,
+   * the walk while `moving`, the ride while `transporting`, the head-shake of
+   * a wasted roll — which began when the room entered the state. Everything
+   * before it in `beats` is history the board only needs to be brought up to.
+   */
+  playing: Beat | null
 }
 
 const NEXT: Record<GameState['phase'], GameState['phase'][]> = {
@@ -74,11 +81,13 @@ function unchanged(prev: GameState, next: GameState) {
  * says is first brought there, and then the phase's own beat plays from it.
  */
 export function plan(prev: GameState | null, squares: Squares, next: GameState, reduced: boolean): Plan {
-  if (prev && unchanged(prev, next)) return { beats: [], squares, live: true }
+  if (prev && unchanged(prev, next)) return { beats: [], squares, live: true, playing: null }
   const live = prev !== null && follows(prev, next)
   const time = (phase: GameState['phase']) => phaseDuration({ ...next, phase }, reduced)
   const beats: Beat[] = []
   const after: Squares = {}
+  let playing: Beat | null = null
+  const play = (beat: Beat) => beats.push((playing = beat))
   const player = next.players[next.currentPlayer]
   beats.push({ kind: 'turn', id: player.id, ms: 0 })
 
@@ -99,19 +108,19 @@ export function plan(prev: GameState | null, squares: Squares, next: GameState, 
   const motion = next.motion
   switch (next.phase) {
     case 'rolling':
-      if (next.dice) beats.push({ kind: 'roll', value: next.dice, ms: time('rolling') })
+      if (next.dice) play({ kind: 'roll', value: next.dice, ms: time('rolling') })
       break
     case 'moving':
       roll()
       if (motion) {
-        beats.push({ kind: 'walk', id: player.id, from: motion.from, path: motion.path, ms: time('moving') })
+        play({ kind: 'walk', id: player.id, from: motion.from, path: motion.path, ms: time('moving') })
         after[player.id] = motion.to
       }
       break
     case 'transporting':
       roll()
       if (motion && motion.kind !== 'walk') {
-        beats.push({
+        play({
           kind: 'ride',
           id: player.id,
           type: motion.kind,
@@ -127,12 +136,12 @@ export function plan(prev: GameState | null, squares: Squares, next: GameState, 
       const event = next.events[0]
       const fresh = !prev || event.id > prev.eventSequence
       if (event.kind === 'wait' && event.turn === next.turn && fresh)
-        beats.push({ kind: 'nope', id: player.id, needs: 100 - player.position, ms: time('settling') })
+        play({ kind: 'nope', id: player.id, needs: 100 - player.position, ms: time('settling') })
       break
     }
     case 'won':
       if (next.winner) beats.push({ kind: 'win', id: next.winner, ms: 0 })
       break
   }
-  return { beats, squares: after, live }
+  return { beats, squares: after, live, playing }
 }
