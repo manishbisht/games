@@ -1699,3 +1699,269 @@
   font: inherit;
   cursor: pointer;
 }
+
+/*
+ * Reactions. Each rises from the avatar of the seat that sent it — or, for
+ * anyone watching, from the stands at the foot of the board — on a spring, and
+ * fades as it drifts up. The row to send them sits on the table's control
+ * strip, folding behind one button where the strip is too narrow for it.
+ */
+.ch-player {
+  position: relative;
+}
+.ch-reaction {
+  position: absolute;
+  left: calc(31px + var(--jitter) * 18px);
+  bottom: 40%;
+  z-index: 8;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  translate: -50% 0;
+  pointer-events: none;
+  animation:
+    ch-reaction-pop var(--motion-slow) var(--ease-spring) both,
+    ch-reaction-rise 2600ms var(--ease-out) both;
+}
+.ch-reaction-emoji {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50% 50% 50% 9px;
+  background: light-dark(#fffdf6, var(--theme-surface));
+  border: 1px solid light-dark(#e2dfd0, var(--theme-border));
+  box-shadow: 0 8px 22px light-dark(#3b43291f, #0007);
+  font-size: 24px;
+  line-height: 1;
+}
+.ch-reaction-label {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.ch-stands {
+  position: absolute;
+  left: 50%;
+  bottom: 74px;
+  z-index: 3;
+  pointer-events: none;
+}
+.ch-stands .ch-reaction {
+  left: calc(var(--jitter) * 70px);
+  bottom: 0;
+}
+@keyframes ch-reaction-pop {
+  from {
+    scale: 0.3;
+    rotate: calc(var(--jitter) * 50deg);
+  }
+}
+@keyframes ch-reaction-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  8% {
+    opacity: 1;
+  }
+  40% {
+    transform: translate(calc(var(--jitter) * 16px), -52px);
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--jitter) * -10px), -96px);
+  }
+}
+@keyframes ch-reaction-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+}
+:root[data-motion='reduced'] .ch-reaction {
+  animation: ch-reaction-fade 2600ms linear both !important;
+}
+
+.ch-table {
+  container-type: inline-size;
+}
+.ch-table-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ch-react {
+  position: relative;
+  display: flex;
+}
+.ch-react .reaction-bar {
+  pointer-events: auto;
+  padding: 2px;
+  border-radius: 9px;
+}
+.ch-react .reaction-bar button.reaction-bar-button {
+  width: 32px;
+  height: 31px;
+  border-radius: 7px;
+  font-size: 17px;
+}
+.ch-react-toggle {
+  display: none;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border: 1px solid light-dark(#d7d8c9, var(--theme-border));
+  border-radius: 7px;
+  color: light-dark(#77816a, var(--theme-muted));
+  background: light-dark(#f8f7eeeb, color-mix(in srgb, var(--theme-inset) 92%, transparent));
+  pointer-events: auto;
+}
+.ch-react-open .ch-react-toggle {
+  color: light-dark(#38452f, var(--theme-text));
+  background: light-dark(#e7ecde, var(--theme-inset));
+}
+@container (max-width: 640px) {
+  .ch-react-toggle {
+    display: grid;
+  }
+  .ch-react .reaction-bar {
+    display: none;
+  }
+  .ch-react-open .reaction-bar {
+    display: inline-flex;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    animation: motion-enter var(--motion-slow) var(--ease-spring) both;
+  }
+  .ch-react .reaction-bar button.reaction-bar-button {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+}
+@media (max-width: 700px) {
+  .ch-react-toggle {
+    height: 41px;
+    width: 41px;
+  }
+}
+
+/*
+ * The first-game guide: a ring round the real thing on screen and a card
+ * beside it. Nothing here takes a click — the table underneath stays playable.
+ */
+.ch-guide-spot {
+  position: fixed;
+  z-index: 40;
+  border-radius: 16px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px light-dark(#7f935e, #a9bd86),
+    0 0 0 9999px light-dark(#28301c29, #0000004d);
+  transition:
+    top var(--motion-slow) var(--ease-out),
+    left var(--motion-slow) var(--ease-out),
+    width var(--motion-slow) var(--ease-out),
+    height var(--motion-slow) var(--ease-out);
+  animation: ch-fade-in var(--motion-base) var(--ease-out) both;
+}
+.ch-guide-card {
+  position: fixed;
+  z-index: 41;
+  padding: 18px 20px 14px;
+  border-radius: 14px;
+  border: 1px solid light-dark(#dce1d0, var(--theme-border));
+  background: light-dark(#fcfbf5, var(--theme-surface));
+  color: light-dark(#44523b, var(--theme-text));
+  box-shadow: 0 18px 50px #24351a33;
+  transition:
+    top var(--motion-slow) var(--ease-out),
+    left var(--motion-slow) var(--ease-out);
+}
+.ch-guide-card:focus {
+  outline: none;
+}
+.ch-guide-step {
+  animation: motion-enter var(--motion-slow) var(--ease-spring) both;
+}
+.ch-guide-card h2 {
+  font:
+    400 22px/1.15 Georgia,
+    serif;
+  letter-spacing: -0.5px;
+  margin: 8px 0 6px;
+}
+.ch-guide-card p:not(.ch-eyebrow) {
+  color: light-dark(#6f7a63, var(--theme-muted));
+  font-size: 12px;
+  line-height: 1.65;
+}
+.ch-guide-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+.ch-guide-dots {
+  display: flex;
+  gap: 5px;
+  margin-right: auto;
+}
+.ch-guide-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: light-dark(#d9dccd, var(--theme-border));
+  transition:
+    width var(--motion-base) var(--ease-out),
+    background var(--motion-base) var(--ease-out);
+}
+.ch-guide-dots i.on {
+  width: 16px;
+  background: #7f935e;
+}
+.ch-guide-skip,
+.ch-guide-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+.ch-guide-skip {
+  background: transparent;
+  color: light-dark(#81896f, var(--theme-muted));
+}
+.ch-guide-next {
+  color: #faf9ef;
+  background: #516647;
+  border: 1px solid #4f6346;
+}
+.ch-guide-skip:focus-visible,
+.ch-guide-next:focus-visible {
+  outline: 2px solid #7f935e;
+  outline-offset: 2px;
+}
+.ch-dialog .ch-guide-again {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 24px;
+}
+.ch-dialog .ch-guide-again + .ch-primary {
+  margin-top: 10px;
+}

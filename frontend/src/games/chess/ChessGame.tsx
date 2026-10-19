@@ -41,26 +41,45 @@ import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type { Color, GameState, Preferences, Square } from '@games/shared/chess/types'
 import { useHeld } from '../../motion/hooks'
 import { setMotionPreference, useReducedMotion } from '../../motion/preference'
+import { setSoundOn, useSound } from '../../motion/sound'
+import { claimTarget } from '../../online/session'
+import type { ReactionEntry } from '../../online/roomState'
 import type { OnlineChessSession } from './online/session'
+import Guide from './components/Guide'
+import { guideSeen, guideSteps, rememberGuide } from './game/guide'
+import { ReactionBubbles, TableReactions } from './components/Reactions'
+import { reactionMeta, useLiveReactions } from './game/reactions'
 import './ChessGame.css'
 
 // Preferences only. The game itself lives in its room, which is what makes a
 // chess table resumable from its link rather than from this browser. Motion is
-// the site's one preference (`motion/preference`), not a chess setting.
+// the site's one preference (`motion/preference`), not a chess setting, and
+// sound is remembered per game the way every game remembers it (`motion/sound`).
 const PREFS = 'gambit-preferences-v1'
 type Dialog = 'settings' | 'help' | 'resign' | null
-function storedPreferences(): Preferences {
-  const defaults: Preferences = { sound: true, highContrast: false, theme: 'walnut' }
+type TablePreferences = Omit<Preferences, 'sound'>
+function storedPreferences(): TablePreferences {
+  const defaults: TablePreferences = { highContrast: false, theme: 'walnut' }
   try {
     const data = JSON.parse(localStorage.getItem(PREFS) || '{}')
     return {
-      sound: typeof data.sound === 'boolean' ? data.sound : defaults.sound,
       highContrast: data.highContrast === true,
       theme: data.theme === 'marble' ? 'marble' : 'walnut',
     }
   } catch {
     return defaults
   }
+}
+// Sound used to live in these preferences: a table muted there stays muted. Once,
+// as the module loads, and only while the per-game setting has never been made.
+try {
+  if (
+    localStorage.getItem('games-sound-chess') === null &&
+    JSON.parse(localStorage.getItem(PREFS) || '{}').sound === false
+  )
+    setSoundOn('chess', false)
+} catch {
+  /* Nothing to carry over. */
 }
 const endings: Record<string, string> = {
   checkmate: 'Checkmate.',
@@ -92,6 +111,8 @@ function PlayerCard({
   bot,
   timing,
   onTick,
+  reactions,
+  guide,
 }: {
   color: Color
   game: GameState
@@ -104,14 +125,19 @@ function PlayerCard({
   bot?: boolean
   timing?: HeldTiming
   onTick?: () => void
+  /** Reactions this seat has sent, rising from its avatar. */
+  reactions: ReactionEntry[]
+  /** Marks the card the first-game guide points at. */
+  guide?: string
 }) {
   const captures = game.captured[color],
     shown = captures.slice(0, shownCaptures)
   return (
-    <div className={`ch-player ${active ? 'ch-player-active' : ''}`}>
+    <div className={`ch-player ${active ? 'ch-player-active' : ''}`} data-guide={guide}>
       <div className={`ch-player-avatar ch-avatar-${color}`} aria-hidden="true">
         {GLYPHS[color].k}
       </div>
+      <ReactionBubbles entries={reactions} />
       <div className="ch-player-details">
         <div>
           <strong>{label ?? COLOR_NAMES[color]}</strong>
@@ -206,6 +232,8 @@ function AbandonmentNotice({
   )
 }
 
+const NO_REACTIONS: ReactionEntry[] = []
+
 /**
  * A chess table. Always a room's: Gambit is reached through its lobby, which
  * makes one either against a bot or against whoever has the link, so there is
@@ -214,11 +242,16 @@ function AbandonmentNotice({
 export default function ChessGame({ online }: { online: OnlineChessSession }) {
   const game = online.state,
     seat = online.myColor
-  const [preferences, setPreferences] = useState(storedPreferences)
+  const [preferences, setPreferences] = useState(storedPreferences),
+    [soundOn, setSound] = useSound('chess', true)
   const reduced = useReducedMotion()
   const [dialog, setDialog] = useState<Dialog>(null),
     [selected, setSelected] = useState<Square | null>(null)
   const [promotion, setPromotion] = useState<{ from: Square; to: Square; color: Color } | null>(null)
+  /** The first-game guide's step; null once it is put away, and from the start for anyone watching. */
+  const [guide, setGuide] = useState<number | null>(() =>
+    seat !== null && game.status === 'playing' && !guideSeen() ? 0 : null,
+  )
   /** A move sent to the room that has not come back in a snapshot yet. */
   const [sent, setSent] = useState<{ from: Square; to: Square } | null>(null)
   const [black, setBlack] = useState(() => seat === 'b')
@@ -287,6 +320,12 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
     ],
   )
   const isOver = game.status !== 'playing'
+  const steps = useMemo(
+    () => guideSteps(game.options.clock, game.options.increment),
+    [game.options.clock, game.options.increment],
+  )
+  // Out of the way of any dialog, and of the result; never for someone watching.
+  const guideStep = guide !== null && seat !== null && !isOver && !dialog && !promotion ? guide : null
   const control = TIME_CONTROLS.find(
     (c) => c.minutes === game.options.clock && c.increment === (game.options.increment ?? 0),
   )
@@ -300,6 +339,12 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
       /* Preferences remain available for this visit. */
     }
   }, [preferences])
+  // Seen once is enough: it stays away on later games unless asked for from How to play.
+  useEffect(() => {
+    if (guideStep !== null) rememberGuide()
+  }, [guideStep])
+  // Each reaction lands with a soft pop; its bubble rises from the seat that sent it.
+  const reactions = useLiveReactions(online.reactions ?? NO_REACTIONS, () => sound('reaction'))
   useEffect(() => {
     // The room re-validates every move; if one never comes back, put the piece down again.
     if (!sent) return
@@ -312,20 +357,27 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
   useEffect(() => {
     if (heardStatus.current === game.status) return
     heardStatus.current = game.status
-    if (game.status === 'timeout' && preferences.sound) playChessSound('flag')
-  }, [game.status, preferences.sound])
+    if (game.status === 'timeout' && soundOn) playChessSound('flag')
+  }, [game.status, soundOn])
   useEffect(() => {
     historyEnd.current?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' })
   }, [game.history.length, reduced])
 
   function sound(kind: ChessSound, detail?: SoundDetail) {
-    if (preferences.sound) playChessSound(kind, detail)
+    if (soundOn) playChessSound(kind, detail)
   }
   /** Sounds come from the board, so they land with the piece rather than with the snapshot. */
   function onImpact(kind: Impact, detail: SoundDetail) {
     sound(kind, detail)
   }
   const onTick = () => sound('tick')
+  /** A guide step about an action moves on when the player takes it. */
+  function guideDid(action: 'select' | 'move') {
+    const at = guide === null ? undefined : steps[guide]?.id
+    if (action === 'select' && at === 'select') setGuide((guide ?? 0) + 1)
+    else if (action === 'move' && (at === 'select' || at === 'move'))
+      setGuide(steps.findIndex((s) => s.id === 'move') + 1)
+  }
 
   function selectSquare(square: Square) {
     if (!enabled) return
@@ -343,6 +395,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
       }
       setSelected(null)
       setNotice('')
+      guideDid('move')
       return
     }
     const piece = game.pieces.find((p) => p.square === square)
@@ -350,6 +403,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
       sound('lift')
       setSelected(square)
       setNotice('')
+      guideDid('select')
     } else if (selected) setNotice('That square isn’t a legal move. Choose a marked destination.')
   }
   /** Only a seated player may resign, and only their own seat. */
@@ -357,8 +411,13 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
   // The result meta credits whoever is across the board, falling back to the
   // plain word if we never saw their name.
   const onlineOpponent = (seat ? online.players[opposite(seat)]?.name : undefined) || 'opponent'
-  const onlineAway = seat && game.status === 'playing' ? online.players[opposite(seat)] : undefined
-  const botSkill = online.players.w?.bot ?? online.players.b?.bot
+  // Chess claims against whoever is across the board, on either player's move.
+  const away = claimTarget(online.players, seat && opposite(seat), seat, isOver)
+  const botSkill = online.players.w?.bot?.skill ?? online.players.b?.bot?.skill
+  const nameOf = (entry: ReactionEntry) =>
+    entry.seat
+      ? online.players[entry.seat as Color]?.name || COLOR_NAMES[entry.seat as Color]
+      : 'Someone watching'
   const turnStatus = isOver
     ? game.winner
       ? `${COLOR_NAMES[game.winner]} wins.`
@@ -387,6 +446,8 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
     shownCaptures: Math.min(game.captured[color].length, graves ? graves[opposite(color)] : Infinity),
     timing: online.timing,
     onTick,
+    reactions: reactions.filter((entry) => entry.seat === color),
+    guide: seat === color ? 'you' : undefined,
   })
 
   return (
@@ -408,7 +469,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
             <ArrowLeft size={15} /> All games
           </Link>
           <span className="ch-header-line" />
-          <button onClick={() => setDialog('help')}>
+          <button onClick={() => setDialog('help')} aria-label="How to play">
             <BookOpen size={16} />
             <span>How to play</span>
           </button>
@@ -439,7 +500,16 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
         <div className="ch-layout">
           <section className="ch-board-column" aria-label="Chess table">
             <PlayerCard color={far} game={game} active={game.turn === far} {...seatProps(far)} />
-            <div className="ch-table">
+            {guideStep !== null && (
+              <Guide
+                steps={steps}
+                step={guideStep}
+                keep='[data-guide="board"]'
+                onNext={() => setGuide(guideStep + 1)}
+                onClose={() => setGuide(null)}
+              />
+            )}
+            <div className="ch-table" data-guide="board">
               <div className="ch-table-caption">
                 <span>
                   <i /> {isOver ? 'A GAME WELL PLAYED' : 'AT THE TABLE'}
@@ -456,6 +526,12 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                 onGraves={setGraves}
                 timing={online.timing}
               />
+              <div className="ch-stands">
+                <ReactionBubbles
+                  entries={reactions.filter((entry) => entry.seat === null)}
+                  label="Watching"
+                />
+              </div>
               <div className="ch-table-controls">
                 <div className="ch-view-controls">
                   <button onClick={() => setBlack((v) => !v)} aria-label="Flip board">
@@ -477,13 +553,16 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                     <RotateCw size={15} />
                   </button>
                 </div>
-                <button
-                  className="ch-sound"
-                  aria-label={preferences.sound ? 'Mute sound' : 'Enable sound'}
-                  onClick={() => setPreferences((p) => ({ ...p, sound: !p.sound }))}
-                >
-                  {preferences.sound ? <Volume2 size={16} /> : <VolumeX size={16} />}
-                </button>
+                <div className="ch-table-end">
+                  <TableReactions onReact={online.send.react} watching={seat === null} />
+                  <button
+                    className="ch-sound"
+                    aria-label={soundOn ? 'Mute sound' : 'Enable sound'}
+                    onClick={() => setSound(!soundOn)}
+                  >
+                    {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                  </button>
+                </div>
               </div>
             </div>
             <PlayerCard color={near} game={game} active={game.turn === near} {...seatProps(near)} />
@@ -501,7 +580,11 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                 <p className="ch-eyebrow">ONLINE MATCH</p>
                 <span className={`ch-live-dot ${isOver ? 'ended' : ''}`} />
               </div>
-              <h2 key={turnStatus} className={game.check && !isOver ? 'ch-check-text' : ''}>
+              <h2
+                key={turnStatus}
+                className={game.check && !isOver ? 'ch-check-text' : ''}
+                data-guide="status"
+              >
                 {turnStatus}
               </h2>
               <p className="ch-panel-copy" aria-live="polite">
@@ -563,7 +646,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                 )}
               </div>
               <div className="ch-game-actions">
-                <button disabled={isOver || !seat} onClick={() => setDialog('resign')}>
+                <button disabled={isOver || !seat} onClick={() => setDialog('resign')} data-guide="resign">
                   <Flag size={15} />
                   Resign
                 </button>
@@ -608,6 +691,11 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
         <div className="sr-only" role="status" aria-live="polite">
           {turnStatus} {game.history.at(-1) ? `Last move: ${game.history.at(-1)!.san}.` : ''}
         </div>
+        <div className="sr-only" aria-live="polite">
+          {reactions.map((entry) => (
+            <p key={entry.id}>{`${nameOf(entry)}: ${reactionMeta(entry.reaction)?.label ?? ''}`}</p>
+          ))}
+        </div>
       </main>
       <footer className="ch-footer">
         <span>Less scrolling. More thinking.</span>
@@ -642,8 +730,8 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
         <Toggle
           label="Sound effects"
           description="A soft note with every move."
-          checked={preferences.sound}
-          onChange={() => setPreferences((p) => ({ ...p, sound: !p.sound }))}
+          checked={soundOn}
+          onChange={() => setSound(!soundOn)}
         />
         <Toggle
           label="Reduced motion"
@@ -724,6 +812,17 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
             your room link to reconnect to the same game.
           </p>
         </details>
+        {seat && !isOver && (
+          <button
+            className="ch-secondary ch-guide-again"
+            onClick={() => {
+              setDialog(null)
+              setGuide(0)
+            }}
+          >
+            Show the guide again
+          </button>
+        )}
         <button className="ch-primary" onClick={() => setDialog(null)}>
           Back to the board <ArrowRight size={16} />
         </button>
@@ -774,10 +873,10 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
           />
         )}
       </Modal>
-      {onlineAway && !onlineAway.connected && (
+      {away && (
         <AbandonmentNotice
-          name={onlineAway.name}
-          awaySince={onlineAway.awaySince}
+          name={away.name}
+          awaySince={away.awaySince}
           onClaim={() => online.send.claimWin()}
         />
       )}

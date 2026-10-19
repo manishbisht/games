@@ -23,6 +23,8 @@ export type ChessSound =
   | 'tick'
   /** A clock that has run out. */
   | 'flag'
+  /** Someone at the table (or watching) reacting: a small, quick pop. */
+  | 'reaction'
 
 export interface SoundDetail {
   /** -1 left … 1 right, from where it happened on screen. */
@@ -89,6 +91,9 @@ export function playChessSound(kind: ChessSound, { pan = 0, strength = 1 }: Soun
       sounds.chime([587, 440, 349], 0.16, 0.7)
       sounds.thud(0.3, 1.2)
       haptic([20, 50, 20])
+      break
+    case 'reaction':
+      sounds.pop(1.15 * vary, 0.5, pan)
       break
   }
 }

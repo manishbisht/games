@@ -116,6 +116,8 @@ test('a bot added to a chess room answers your move on the server', async ({ pag
     localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false }))
     // Motion is the site's one preference now, not a chess setting.
     localStorage.setItem('games-motion', 'reduced')
+    // The first-game guide has its own spec (chess-guide.spec.ts).
+    localStorage.setItem('games-guide-chess', 'done')
   })
   await page.goto('/#/chess')
   await page.getByLabel('Your name', { exact: true }).fill('Robin')

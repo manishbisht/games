@@ -17,6 +17,8 @@ import { createParticles, qualityDensity } from '../../../motion/particles'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
 import { createStage, disposeTree } from '../../../motion/stage'
 import { createQueue, createTweens } from '../../../motion/tween'
+import { unseenBeats } from '../../../online/session'
+import type { RoomBeat } from '../../../online/session'
 import { serverNow } from '../components/clock'
 import type { HeldTiming } from '../components/clock'
 import type { ChessSound, SoundDetail } from '../game/audio'
@@ -49,9 +51,9 @@ export interface SceneState {
   /** The seat at this browser; the winner's confetti falls for them (and for spectators). */
   seat?: Color | null
   /** The room's recent states, newest last (`game`); see `OnlineChessSession.recent`. */
-  recent?: { seq: number; state: GameState }[]
+  recent?: RoomBeat<GameState>[]
 }
-export type Impact = Exclude<ChessSound, 'lift' | 'tick' | 'flag'>
+export type Impact = Exclude<ChessSound, 'lift' | 'tick' | 'flag' | 'reaction'>
 export interface SceneEvents {
   select: (square: Square) => void
   /** A sound-worthy moment, timed to the board rather than to the snapshot. */
@@ -559,12 +561,9 @@ export function createScene(
    * bigger than `recent` holds is told by its newest state, as a reconnect is.
    */
   function unseen({ game, recent = [] }: SceneState) {
-    const told = presented,
-      fresh = recent.filter((entry) => entry.seq > told)
-    presented = recent.at(-1)?.seq ?? told
-    return fresh[0]?.seq === told + 1 && fresh.at(-1)!.state === game
-      ? fresh.map((entry) => entry.state)
-      : [game]
+    const { beats } = unseenBeats(recent, presented)
+    presented = recent.at(-1)?.seq ?? presented
+    return beats.at(-1)?.state === game ? beats.map((beat) => beat.state) : [game]
   }
 
   let wasBusy = false

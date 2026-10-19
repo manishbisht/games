@@ -29,6 +29,8 @@ async function newPlayer(browser: Browser, errors: string[]) {
     localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false }))
     localStorage.setItem('games-motion', 'full')
     localStorage.setItem('games-test-clock', 'on')
+    // The first-game guide has its own spec (chess-guide.spec.ts).
+    localStorage.setItem('games-guide-chess', 'done')
   })
   return page
 }

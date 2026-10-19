@@ -1,4 +1,7 @@
 import type { Color, GameState, PromotionPiece, Square } from '@games/shared/chess/types'
+import type { ReactionId } from '@games/shared/protocol'
+import type { ReactionEntry } from '../../../online/roomState'
+import type { RoomBeat, SeatPlayer } from '../../../online/session'
 import type { HeldTiming } from '../components/clock'
 
 export interface OnlineChessSession {
@@ -6,31 +9,23 @@ export interface OnlineChessSession {
   /** When the snapshot's state began and was sent, by the server's clock; what the clocks count from. */
   timing?: HeldTiming
   /**
-   * The room's recent states in arrival order, newest last (`state` itself),
-   * numbered by `seq`. A burst of snapshots renders once; the board reads the
-   * ones it has not presented so a rematch and the move straight after it are
-   * both told, not just where they ended up.
+   * The room's recent states, oldest first, ending with `state` (`roomBeats`).
+   * A burst of snapshots renders once; the board reads the ones it has not
+   * presented so a rematch and the move straight after it are both told, not
+   * just where they ended up.
    */
-  recent?: { seq: number; state: GameState }[]
+  recent?: RoomBeat<GameState>[]
   myColor: Color | null
-  players: Partial<
-    Record<
-      Color,
-      {
-        name: string
-        connected: boolean
-        awaySince?: number
-        /** The skill of the bot the room plays this seat with; absent for a person. */
-        bot?: string
-      }
-    >
-  >
+  players: Partial<Record<Color, SeatPlayer>>
   rematch: { mine: boolean; theirs: boolean }
+  /** Recent reactions, oldest first; each floats up from the card of the seat that sent it. */
+  reactions?: ReactionEntry[]
   send: {
     move: (from: Square, to: Square, promotion?: PromotionPiece) => void
     resign: () => void
     rematch: () => void
     claimWin: () => void
+    react?: (reaction: ReactionId) => void
   }
   leave: () => void
 }
