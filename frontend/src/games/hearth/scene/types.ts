@@ -23,6 +23,8 @@ export interface SceneHooks {
   /** The table as the board is showing it right now — the HUD follows this, not the room. */
   present: (state: GameState) => void
   cue: (cue: Cue) => void
+  /** Once, after the board's first frame is on screen. */
+  rendered?: () => void
 }
 
 export interface SceneApi {
@@ -33,6 +35,17 @@ export interface SceneApi {
    * joins mid-walk picks the walk up where the room is.
    */
   update: (state: GameState, seat: PlayerId | null, live: boolean, elapsed?: number) => void
+  /**
+   * Put the board straight on `state`, as it stands — no rattle, no walk, no
+   * fanfare. A replay's scrub or step lands here; the next `update` plays on
+   * from it.
+   */
+  land: (state: GameState) => void
+  /**
+   * How fast the board's own animations run: the die, the walks, the dust.
+   * 1 is the room's pace; a replay at 2× sets 2. The camera keeps its own.
+   */
+  pace: (rate: number) => void
   /** The player asked to roll: rattle the die now, before the room answers. */
   roll: () => void
   focus: (pieceId: string | null) => void
@@ -56,6 +69,8 @@ export interface SceneContext {
   stage: Stage
   scene: THREE.Scene
   tweens: Tweens
+  /** The board's playback rate (see `SceneApi.pace`): every beat's clock runs this much faster. */
+  rate: number
   /**
    * Set while the board lands something it is skipping over — a backlog, or
    * the part of a walk that had already played before this browser arrived.

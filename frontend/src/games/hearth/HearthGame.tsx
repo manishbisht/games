@@ -9,6 +9,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  Clapperboard,
   CircleHelp,
   Dices,
   Flag,
@@ -231,6 +232,10 @@ function Victory({
                 : 'Rematch'}
             <RotateCcw size={16} />
           </button>
+          <Link className="hh-replay-link" to={online.replay}>
+            <Clapperboard size={15} aria-hidden="true" />
+            Watch the replay
+          </Link>
           <button className="hh-text-button" onClick={online.leave}>
             Leave room
           </button>

@@ -1,6 +1,6 @@
 .hh-app {
   --hh-ink: light-dark(#303c35, var(--theme-text));
-  --hh-muted: light-dark(#85897e, var(--theme-muted));
+  --hh-muted: light-dark(#6b6f65, var(--theme-muted));
   --hh-line: light-dark(#e4e5db, var(--theme-border));
   --hh-green: #435b48;
   --hh-paper: light-dark(#faf9f5, var(--theme-page));
@@ -18,6 +18,7 @@
 .hh-app button:focus-visible,
 .hh-app a:focus-visible,
 .hh-dialog button:focus-visible,
+.hh-dialog a:focus-visible,
 .hh-app input:focus-visible,
 .hh-app select:focus-visible,
 .hh-dialog input:focus-visible,
@@ -50,7 +51,7 @@
 .hh-brand em {
   font-size: 22px;
   font-weight: 400;
-  color: light-dark(#8c947f, var(--theme-muted));
+  color: light-dark(#69705e, var(--theme-muted));
 }
 .hh-brand small {
   display: block;
@@ -59,7 +60,7 @@
     sans-serif;
   letter-spacing: 2.1px;
   margin-top: 8px;
-  color: light-dark(#898d7d, var(--theme-muted));
+  color: light-dark(#6b6e61, var(--theme-muted));
 }
 .hh-nav {
   display: flex;
@@ -75,7 +76,7 @@
   gap: 7px;
   font-weight: 500;
   font-size: 12px;
-  color: light-dark(#828879, var(--theme-muted));
+  color: light-dark(#6a6e62, var(--theme-muted));
   position: relative;
 }
 .hh-nav button.active {
@@ -100,7 +101,7 @@
 }
 .hh-local-badge {
   font-size: 10px;
-  color: light-dark(#7e8577, var(--theme-muted));
+  color: light-dark(#6a6f64, var(--theme-muted));
   margin-right: 14px;
   display: flex;
   align-items: center;
@@ -123,7 +124,7 @@
   height: 36px;
   border: 1px solid transparent;
   border-radius: 50%;
-  color: light-dark(#6c7769, var(--theme-muted)) !important;
+  color: light-dark(#667063, var(--theme-muted)) !important;
 }
 .hh-icon-button:hover {
   background: light-dark(#eaece2, var(--theme-inset));
@@ -148,7 +149,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: light-dark(#8d927f, var(--theme-muted));
+  color: light-dark(#6a6e5e, var(--theme-muted));
   line-height: 1.5;
 }
 .hh-page-heading h1 {
@@ -166,7 +167,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  color: light-dark(#8b907f, var(--theme-muted));
+  color: light-dark(#6b6f60, var(--theme-muted));
   font-size: 9px;
   letter-spacing: 1.2px;
 }
@@ -227,7 +228,7 @@
   border-radius: 6px;
   padding: 8px 11px;
   font-size: 10px;
-  color: light-dark(#6e7964, var(--theme-muted));
+  color: light-dark(#66715d, var(--theme-muted));
 }
 .hh-tiny-star {
   font-size: 14px;
@@ -244,7 +245,7 @@
 .hh-turn-count {
   font-size: 8px;
   letter-spacing: 1.3px;
-  color: light-dark(#8e9582, var(--theme-muted));
+  color: light-dark(#6a705f, var(--theme-muted));
   font-weight: 500;
 }
 .hh-canvas {
@@ -265,7 +266,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: light-dark(#8d967f, var(--theme-muted));
+  color: light-dark(#68705c, var(--theme-muted));
   opacity: 0.7;
   pointer-events: none;
 }
@@ -300,7 +301,7 @@
   width: 31px;
   height: 31px;
   border-radius: 4px;
-  color: light-dark(#6b7960, var(--theme-muted));
+  color: light-dark(#637059, var(--theme-muted));
 }
 .hh-camera-toolbar button:hover {
   background: light-dark(#dfe5d4, var(--theme-inset));
@@ -315,7 +316,7 @@
   position: absolute;
   right: 24px;
   bottom: 82px;
-  color: light-dark(#9aa18c, var(--theme-muted));
+  color: light-dark(#69705c, var(--theme-muted));
   font-size: 9px;
   pointer-events: none;
 }
@@ -336,7 +337,7 @@
   justify-content: center;
   gap: 9px;
   text-align: center;
-  color: light-dark(#737e67, var(--theme-muted));
+  color: light-dark(#67715d, var(--theme-muted));
   font-size: 11px;
   backdrop-filter: blur(12px);
   line-height: 1.45;
@@ -366,7 +367,7 @@
 }
 .hh-setup-intro {
   font-size: 11px;
-  color: light-dark(#929385, var(--theme-muted));
+  color: light-dark(#6c6d61, var(--theme-muted));
   margin-top: 9px;
   line-height: 1.5;
 }
@@ -380,7 +381,7 @@
 }
 .hh-field-title > span {
   font-size: 9px;
-  color: light-dark(#b1b3a6, var(--theme-muted));
+  color: light-dark(#6c6e5e, var(--theme-muted));
   font-weight: 400;
   letter-spacing: 1px;
 }
@@ -399,7 +400,7 @@
   background: light-dark(#fbfaf6, var(--theme-surface));
   border-radius: 7px;
   font-size: 10px;
-  color: light-dark(#828877, var(--theme-muted));
+  color: light-dark(#696e60, var(--theme-muted));
 }
 .hh-mode-options button:hover {
   background: light-dark(#eff0e7, var(--theme-inset));
@@ -411,7 +412,7 @@
 }
 .hh-field-note {
   font-size: 9px;
-  color: light-dark(#9a9e8c, var(--theme-muted));
+  color: light-dark(#6b6e5d, var(--theme-muted));
   line-height: 1.6;
   margin-top: 10px;
 }
@@ -430,7 +431,7 @@
   border-radius: 4px;
   padding: 7px 0;
   font-size: 10px;
-  color: light-dark(#999d8e, var(--theme-muted));
+  color: light-dark(#6b6f60, var(--theme-muted));
 }
 .hh-player-count button[aria-pressed='true'] {
   background: light-dark(#fffef9, var(--theme-surface));
@@ -459,7 +460,7 @@
   height: 25px;
   display: inline-block;
   position: relative;
-  color: var(--player-color, light-dark(#607e64, var(--theme-muted)));
+  color: var(--player-color, light-dark(#58745c, var(--theme-muted)));
   flex-shrink: 0;
   filter: drop-shadow(0 2px 1px #55552212);
 }
@@ -516,7 +517,7 @@
   border: 0;
   border-left: 1px solid light-dark(#e7e7dc, var(--theme-border));
   padding: 5px 0 5px 7px;
-  color: light-dark(#8d9382, var(--theme-muted));
+  color: light-dark(#6a7060, var(--theme-muted));
   font-size: 9px;
   background: none;
   cursor: pointer;
@@ -564,7 +565,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: light-dark(#9da18f, var(--theme-muted));
+  color: light-dark(#6b6f5d, var(--theme-muted));
   font-size: 9px;
   margin-top: 14px;
 }
@@ -581,7 +582,7 @@
   align-items: center;
   justify-content: space-between;
   font-size: 10px;
-  color: light-dark(#79846d, var(--theme-muted));
+  color: light-dark(#67705d, var(--theme-muted));
   min-height: 30px;
   gap: 10px;
 }
@@ -595,7 +596,7 @@
 .hh-settings-list .hh-motion-select {
   border: 1px solid light-dark(#dbe0d1, var(--theme-border));
   background: light-dark(#f6f7ef, var(--theme-inset));
-  color: light-dark(#6d7a5e, var(--theme-muted));
+  color: light-dark(#657157, var(--theme-muted));
   border-radius: 4px;
   font-size: 10px;
   padding: 4px 5px;
@@ -620,7 +621,7 @@
 }
 .hh-time {
   font-size: 9px;
-  color: light-dark(#a2a594, var(--theme-muted));
+  color: light-dark(#6b6e5d, var(--theme-muted));
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.6px;
 }
@@ -644,7 +645,7 @@
 }
 .hh-turn-subtitle {
   font-size: 10px;
-  color: light-dark(#949887, var(--theme-muted));
+  color: light-dark(#6b6f5f, var(--theme-muted));
   margin-top: 8px;
   line-height: 1.5;
   min-height: 15px;
@@ -817,11 +818,12 @@
   border: 1px solid light-dark(#ffffff35, color-mix(in srgb, var(--theme-border) 21%, transparent));
   border-radius: 3px;
   padding: 2px 4px;
-  color: light-dark(#d2ddcb, var(--theme-muted));
+  /* The button is the same deep green in both appearances, so the hint is too. */
+  color: #d2ddcb;
   letter-spacing: 0.5px;
 }
 .hh-roll-hint {
-  color: light-dark(#a0a390, var(--theme-muted));
+  color: light-dark(#6c6f5c, var(--theme-muted));
   font-size: 9px;
   text-align: center;
   margin-top: 13px;
@@ -830,10 +832,10 @@
 }
 .hh-roll-hint strong {
   font-weight: 600;
-  color: light-dark(#8c957b, var(--theme-muted));
+  color: light-dark(#686f59, var(--theme-muted));
 }
 .hh-piece-choices > p {
-  color: light-dark(#9a9e8b, var(--theme-muted));
+  color: light-dark(#6b6e5c, var(--theme-muted));
   font-size: 9px;
   text-align: center;
   margin: 12px 0 9px;
@@ -881,7 +883,7 @@
 .hh-section-title > span {
   font-size: 7px;
   letter-spacing: 1.1px;
-  color: light-dark(#a0a590, var(--theme-muted));
+  color: light-dark(#6a6f5a, var(--theme-muted));
 }
 .hh-player-list {
   display: flex;
@@ -906,6 +908,8 @@
 .hh-player-card.current {
   border-color: color-mix(in srgb, var(--player-color) 40%, light-dark(#e7e8df, var(--theme-border)));
   background: color-mix(in srgb, var(--player-light) 17%, light-dark(#fcfbf7, var(--theme-surface)));
+  /* In dark mode the turn's tint lifts the card, so its quiet text lifts with it. */
+  --theme-muted: light-dark(#66735e, #c2ccbb);
 }
 /* One marker for the whole list, sliding from card to card as the turn passes. */
 .hh-player-list {
@@ -960,7 +964,7 @@
 .hh-ai-badge {
   font-size: 6px !important;
   letter-spacing: 0.4px;
-  color: light-dark(#9aa38d, var(--theme-muted));
+  color: light-dark(#68715b, var(--theme-muted));
   border: 1px solid light-dark(#dde2d2, var(--theme-border));
   border-radius: 3px;
   padding: 1px 3px;
@@ -973,13 +977,13 @@
 .hh-player-info > small {
   display: block;
   font-size: 8px;
-  color: light-dark(#a0a290, var(--theme-muted));
+  color: light-dark(#6d6f5d, var(--theme-muted));
   margin-top: 5px;
   white-space: nowrap;
 }
 .hh-player-info > small > span {
   margin: 0 3px;
-  color: light-dark(#b4b7a7, var(--theme-muted));
+  color: light-dark(#6b6f5b, var(--theme-muted));
 }
 .hh-player-progress {
   min-width: 48px;
@@ -997,11 +1001,11 @@
 }
 .hh-player-progress small {
   font-size: 9px;
-  color: light-dark(#a0a38e, var(--theme-muted));
+  color: light-dark(#6c6e5a, var(--theme-muted));
 }
 .hh-player-progress svg {
   margin-left: 3px;
-  color: light-dark(#a5aa96, var(--theme-muted));
+  color: light-dark(#6b705b, var(--theme-muted));
 }
 .hh-player-progress > div {
   display: flex;
@@ -1074,7 +1078,7 @@
 }
 .hh-event p {
   font-size: 9px;
-  color: light-dark(#929883, var(--theme-muted));
+  color: light-dark(#6a6f5d, var(--theme-muted));
   flex: 1;
 }
 .hh-event:first-child p {
@@ -1082,7 +1086,7 @@
 }
 .hh-event > small {
   font-size: 8px;
-  color: light-dark(#b0b5a0, var(--theme-muted));
+  color: light-dark(#6a6f57, var(--theme-muted));
   flex-shrink: 0;
 }
 .hh-below-table {
@@ -1097,7 +1101,7 @@
   align-items: center;
   gap: 24px;
   font-size: 9px;
-  color: light-dark(#929982, var(--theme-muted));
+  color: light-dark(#6a705c, var(--theme-muted));
 }
 .hh-legend > span,
 .hh-legend > button {
@@ -1110,7 +1114,7 @@
 .hh-game-actions > button {
   background: none;
   padding: 0;
-  color: light-dark(#89937c, var(--theme-muted));
+  color: light-dark(#68705d, var(--theme-muted));
   font-size: 9px;
   display: flex;
   align-items: center;
@@ -1135,7 +1139,7 @@
 }
 .hh-below-table > p {
   font-size: 9px;
-  color: light-dark(#a3a993, var(--theme-muted));
+  color: light-dark(#6a7059, var(--theme-muted));
 }
 .hh-game-actions {
   display: flex;
@@ -1154,13 +1158,13 @@
   justify-content: space-between;
   align-items: center;
   gap: 20px;
-  color: light-dark(#9b9f8e, var(--theme-muted));
+  color: light-dark(#6a6e5e, var(--theme-muted));
 }
 .hh-footer > span:first-child {
   font:
     italic 12px Georgia,
     serif;
-  color: light-dark(#909a80, var(--theme-muted));
+  color: light-dark(#68715a, var(--theme-muted));
 }
 .hh-footer > span:nth-child(2) {
   font-size: 7px;
@@ -1181,7 +1185,7 @@
   align-items: center;
   gap: 9px;
   font-size: 9px;
-  color: light-dark(#8b967d, var(--theme-muted));
+  color: light-dark(#67715b, var(--theme-muted));
   background: none;
 }
 .hh-game-picker > div {
@@ -1214,7 +1218,7 @@
 }
 .hh-dialog {
   --hh-ink: light-dark(#303c35, var(--theme-text));
-  --hh-muted: light-dark(#85897e, var(--theme-muted));
+  --hh-muted: light-dark(#6b6f65, var(--theme-muted));
   --hh-line: light-dark(#e4e5db, var(--theme-border));
   --hh-green: #435b48;
   color: light-dark(#303c35, var(--theme-text));
@@ -1284,7 +1288,7 @@
   height: 37px;
   border-radius: 9px;
   flex-shrink: 0;
-  color: light-dark(#7f906c, var(--theme-muted));
+  color: light-dark(#647155, var(--theme-muted));
 }
 .hh-rule h3 {
   font-size: 12px;
@@ -1294,7 +1298,7 @@
 .hh-rule p {
   font-size: 11px;
   line-height: 1.8;
-  color: light-dark(#8a9380, var(--theme-muted));
+  color: light-dark(#686f5f, var(--theme-muted));
   margin-top: 4px;
 }
 .hh-settings-list {
@@ -1316,14 +1320,14 @@
 }
 .hh-settings-list small {
   display: block;
-  color: light-dark(#8c967e, var(--theme-muted));
+  color: light-dark(#676f5b, var(--theme-muted));
   font-size: 10px;
   line-height: 1.6;
   margin-top: 4px;
 }
 .hh-settings-list svg {
   flex-shrink: 0;
-  color: light-dark(#8a9879, var(--theme-muted));
+  color: light-dark(#657157, var(--theme-muted));
 }
 .hh-victory {
   text-align: center;
@@ -1340,7 +1344,7 @@
 }
 .hh-victory > p {
   font-size: 11px;
-  color: light-dark(#919981, var(--theme-muted));
+  color: light-dark(#69705b, var(--theme-muted));
   margin-top: 12px;
 }
 .hh-victory-icon {
@@ -1389,7 +1393,7 @@
 .hh-victory-stats span {
   font-size: 7px;
   letter-spacing: 1px;
-  color: light-dark(#979f87, var(--theme-muted));
+  color: light-dark(#69705a, var(--theme-muted));
   display: block;
   margin-top: 7px;
 }
@@ -1412,14 +1416,32 @@
   font-weight: 500;
 }
 .hh-final-players > div > span:not(:first-child) {
-  color: light-dark(#939c83, var(--theme-muted));
+  color: light-dark(#676f59, var(--theme-muted));
   font-size: 8px;
   min-width: 52px;
   text-align: right;
 }
+.hh-replay-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  margin-top: 10px;
+  border: 1px solid light-dark(#cfd6c6, var(--theme-border));
+  border-radius: 7px;
+  color: light-dark(#344a37, var(--theme-text));
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+.hh-replay-link:hover {
+  background: light-dark(#f1f3ea, var(--theme-inset));
+}
 .hh-text-button {
   background: none;
-  color: light-dark(#859473, var(--theme-muted)) !important;
+  color: light-dark(#657156, var(--theme-muted)) !important;
   font-size: 10px;
   margin-top: 17px;
 }
@@ -1433,7 +1455,7 @@
   padding: 40px;
   gap: 15px;
   text-align: center;
-  color: light-dark(#78876b, var(--theme-muted));
+  color: light-dark(#647059, var(--theme-muted));
 }
 .hh-webgl p {
   font-size: 12px;
@@ -2165,7 +2187,7 @@
 
 .hh-online-badge {
   font-size: 10px;
-  color: light-dark(#7e8577, var(--theme-muted));
+  color: light-dark(#6a6f64, var(--theme-muted));
   display: flex;
   align-items: center;
   gap: 7px;
@@ -2360,7 +2382,7 @@
   border: 0;
   border-radius: 50%;
   background: none;
-  color: light-dark(#85897e, var(--theme-muted));
+  color: light-dark(#6b6f65, var(--theme-muted));
   cursor: pointer;
 }
 .hh-guide-close:hover {
@@ -2414,7 +2436,7 @@
 .hh-guide .hh-guide-skip {
   border: 0;
   background: none;
-  color: light-dark(#7e8577, var(--theme-muted));
+  color: light-dark(#6a6f64, var(--theme-muted));
 }
 .hh-guide .hh-guide-next {
   border: 1px solid #435b48;

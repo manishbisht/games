@@ -49,6 +49,7 @@ export function createScene(
     stage,
     scene: stage.scene,
     tweens,
+    rate: 1,
     quiet: false,
     cue: (cue) => {
       if (!ctx.quiet) hooks.cue(cue)
@@ -93,14 +94,19 @@ export function createScene(
   )
 
   const offMotion = onMotionChange(() => stage.invalidate())
+  /** Frame callbacks run before the frame is drawn, so the second one is the first after a frame is up. */
+  let frames = 0
   stage.onFrame((dt, now) => {
+    if (frames < 2 && ++frames === 2) hooks.rendered?.()
     const reduced = reducedMotion(),
       // Idle motion — bobbing, pulsing, the winners' wave — is the first thing a struggling device gives up.
       ambient = !reduced && stage.quality > 0,
-      winner = story.shown.winner
-    let moving = story.step(dt)
-    moving = die.step(dt) || moving
-    moving = effects.step(dt) || moving
+      winner = story.shown.winner,
+      // The beats run at the board's pace; the pieces' springs, the camera and the idle bobbing keep their own.
+      paced = dt * ctx.rate
+    let moving = story.step(paced)
+    moving = die.step(paced) || moving
+    moving = effects.step(paced) || moving
     moving = director.step(dt) || moving
     moving = pieces.step(dt, now, { legal: picking.legal, winner, reduced, ambient }) || moving
     moving = picking.step(dt, now, reduced, ambient) || moving
@@ -121,6 +127,10 @@ export function createScene(
 
   return {
     update: story.update,
+    land: story.land,
+    pace(rate) {
+      ctx.rate = rate
+    },
     roll: story.roll,
     focus: picking.focus,
     anchor(colour) {

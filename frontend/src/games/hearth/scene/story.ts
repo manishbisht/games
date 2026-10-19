@@ -90,9 +90,12 @@ export function createStory(
   const roomNow = () => stage.now + drifted
   /** How far behind the room's clock a beat that began at `beatAt` (`roomNow` time) is starting. */
   const lateBy = (beatAt: number) => {
-    const late = roomNow() - beatAt
+    // In the beat's own time: at a replay's 2× the board covers twice the beat in the same wall time.
+    const late = (roomNow() - beatAt) * ctx.rate
     return late > LATE_SLACK_MS ? late : 0
   }
+  /** When a beat `elapsed` ms in (its own time) began, on `roomNow`'s clock. */
+  const beganAt = (elapsed: number) => roomNow() - elapsed / ctx.rate
 
   function present(state: GameState) {
     shown = state
@@ -147,7 +150,7 @@ export function createStory(
     }
     pieces.layout()
     pieces.seat()
-    const beatAt = roomNow() - elapsed,
+    const beatAt = beganAt(elapsed),
       value = state.dice || state.lastDice || 1,
       tossing =
         state.dice !== null && (state.phase === 'choose' || state.phase === 'pass') && elapsed < THROW_MS
@@ -190,7 +193,7 @@ export function createStory(
       tweens.finishAll()
       ctx.quiet = false
     }
-    const beatAt = roomNow() - elapsed
+    const beatAt = beganAt(elapsed)
     const beats: Beat[] = []
     if (next.phase === 'rolling' && shakenTurn !== next.turn) {
       shakenTurn = next.turn
@@ -256,6 +259,18 @@ export function createStory(
       if (next !== target) plan(next, elapsed)
       if (seatChanged) present(shown)
     },
+    land(state: GameState) {
+      // Back from the finish: the camera stops watching the winners.
+      if (shown.winner && !state.winner) director.reset()
+      target = state
+      // Infinitely late: a walk or a toss the state is in the middle of has already finished.
+      ctx.quiet = true
+      snap(state, Infinity)
+      queue.flush()
+      tweens.finishAll()
+      ctx.quiet = false
+      stage.invalidate()
+    },
     /** This browser's roll: rattle now, before the room has heard of it. */
     roll() {
       if (!live || queue.busy || target.phase !== 'roll' || die.busy) return
@@ -275,9 +290,10 @@ export function createStory(
         // counted, but the room's clock did: a beat under way skips ahead, quietly, to land with everyone.
         drifted += drift
         if (queue.busy) {
-          ctx.skip(drift)
-          die.fastForward(drift)
-          queue.step(drift)
+          const ahead = drift * ctx.rate
+          ctx.skip(ahead)
+          die.fastForward(ahead)
+          queue.step(ahead)
         }
       }
       // Tweens first, so a beat's last landing has run before the queue starts the next one.

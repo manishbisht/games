@@ -3,6 +3,7 @@ import type { HearthOnlineAction } from '@games/shared/hearth/online'
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
 import type { ReactionId, SeatId } from '@games/shared/protocol'
 import type { RoomViewProps } from '../../../online/games'
+import { replayUrl } from '../../../online/games'
 import { claimTarget, rematchState, roomBeats, seatPlayers } from '../../../online/session'
 import type { RoomBeat, SeatPlayer } from '../../../online/session'
 
@@ -38,6 +39,8 @@ export interface OnlineHearthSession {
   claimable: SeatPlayer | null
   /** Recent reactions, oldest first, each placed at the colour it came from. */
   reactions: SeatReaction[]
+  /** Where this room's game plays back once it is finished (a router path). */
+  replay: string
   send: {
     roll: () => void
     move: (pieceId: string) => void
@@ -71,6 +74,7 @@ export function hearthSession({
     players,
     rematch: rematchState(snapshot, you),
     claimable: claimTarget(players, state.players[state.currentPlayer].id, mySeat, state.phase === 'won'),
+    replay: replayUrl('hearth', snapshot.code),
     reactions: reactions.map(({ id, seat, reaction, receivedAt }) => {
       const colour = colourOf(seat)
       return {
