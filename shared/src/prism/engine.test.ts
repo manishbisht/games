@@ -65,6 +65,18 @@ describe('Prism engine', () => {
     expect(next.direction).toBe(-1)
     expect(next.currentPlayer).toBe(2)
   })
+  it('marks where each command’s story starts, so a late browser can replay just that', () => {
+    const s = position([[card('red', 'draw2'), card('green', 0)], [card('yellow', 8)]])
+    const next = play(s, card('red', 'draw2'))
+    expect(next.storyFrom).toBe(s.sequence)
+    expect(next.events.filter((e) => e.id > next.storyFrom!).map((e) => e.kind)).toEqual([
+      'play',
+      'effect',
+      'draw',
+      'info',
+    ])
+    expect(act(next, { type: 'draw', player: next.currentPlayer }).storyFrom).toBe(next.sequence)
+  })
   it('applies draw-two and draw-four penalties and skips the recipient', () => {
     for (const [c, count] of [
       [card('red', 'draw2'), 2],

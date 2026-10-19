@@ -101,6 +101,7 @@ export function createGame(
     turn: 1,
     stalledTurns: 0,
     sequence: 0,
+    storyFrom: 0,
     events: [],
     rules,
   }
@@ -127,9 +128,11 @@ export function handView(state: GameState, player: number) {
   const legal = new Set(playableCards(state, player).map((c) => c.id))
   return state.players[player].hand.map((c) => ({ ...c, playable: legal.has(c.id) }))
 }
+/** Every change starts here, which is what makes it the start of a new story. */
 function copy(state: GameState): GameState {
   return {
     ...state,
+    storyFrom: state.sequence,
     players: state.players.map((p) => ({ ...p, hand: [...p.hand] })),
     drawPile: [...state.drawPile],
     discardPile: [...state.discardPile],

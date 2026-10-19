@@ -59,6 +59,13 @@ export interface GameState {
   turn: number
   stalledTurns: number
   sequence: number
+  /**
+   * The sequence the last command started from: the events after it are that
+   * command's story. A browser that arrives part-way through it can work the
+   * table back to how it stood and watch the rest land. Absent on states saved
+   * before it existed.
+   */
+  storyFrom?: number
   events: GameEvent[]
   rules: Rules
 }
