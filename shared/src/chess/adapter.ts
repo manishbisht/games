@@ -42,6 +42,42 @@ function fresh(options: unknown, now: number): GameState {
  */
 const started = clockStarted
 
+/**
+ * The same game carried by a shorter line, for the engine to replay: the line
+ * restarts from the position after the last capture or one-step pawn move, and
+ * keeps only the moves since.
+ *
+ * The engine rebuilds the board by replaying every move from `initialFen` — on
+ * each move and each bot decision — so a long game cost a room more per move
+ * the longer it went. Nothing before an irreversible move can ever be on the
+ * board again, so dropping it changes no repetition count, and the FEN carries
+ * the castling rights, fifty-move clock and move number: the shorter replay
+ * reaches the same position with the same counts, and plays out move for move
+ * the same. (Not after a two-step pawn move: its FEN may leave out an en
+ * passant square chess.js still counts in a position's identity.) Bounded by
+ * the fifty-move rule, so a move costs the same at ply 200 as at ply 20.
+ */
+function recentLine(state: GameState): GameState {
+  for (let cut = state.history.length; cut > 0; cut--) {
+    const { after, flags } = state.history[cut - 1]
+    const fields = typeof after === 'string' ? after.split(' ') : []
+    if (fields.length !== 6) return state
+    if (fields[4] === '0' && !flags.includes('b'))
+      return { ...state, initialFen: after, history: state.history.slice(cut) }
+  }
+  return state
+}
+
+/** `next`, played from `recentLine(state)`, put back onto the whole line. */
+function wholeLine(state: GameState, line: GameState, next: GameState): GameState {
+  if (line === state) return next
+  return {
+    ...next,
+    initialFen: state.initialFen,
+    history: [...state.history, ...next.history.slice(line.history.length)],
+  }
+}
+
 /** A move by the clock's rules: free until both sides have moved, flagged if it came too late. */
 function timedMove(
   state: GameState,
@@ -50,7 +86,8 @@ function timedMove(
   promotion: PromotionPiece | undefined,
   now: number,
 ) {
-  return playMove(started(state) ? state : { ...state, clockAt: now }, from, to, promotion, now)
+  const line = recentLine(started(state) ? state : { ...state, clockAt: now })
+  return wholeLine(state, line, playMove(line, from, to, promotion, now))
 }
 
 export const chessAdapter: GameAdapter<GameState, ChessAction> = {
@@ -142,7 +179,7 @@ export const chessAdapter: GameAdapter<GameState, ChessAction> = {
     thinkMs: () => 0,
     decide(state, seat, _seats, skill, ctx) {
       if (state.status !== 'playing' || state.turn !== color(seat)) return state
-      const move = chooseMove(state, skill as Difficulty, ctx.random)
+      const move = chooseMove(recentLine(state), skill as Difficulty, ctx.random)
       if (!move) return state
       // Through the engine, not `apply`: this is the room moving a piece, not a
       // seat asking whether it may.
