@@ -143,6 +143,7 @@ export function replayView(load: () => Promise<{ default: ComponentType<ReplayVi
 
 const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
   chess: {
+    anchorsReactions: true,
     minSeats: 2,
     seatLabel: (seat) => (seat === 'w' ? 'Play as White' : 'Play as Black'),
     // No `hard`: measured inside workerd it costs about 1.14s of CPU a move,
@@ -165,6 +166,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     ...roomView(() => import('../games/monopoly/online/EstateRoomView')),
   },
   hearth: {
+    anchorsReactions: true,
     minSeats: 2,
     // Colours are handed out at the start, once the room knows who turned up, so
     // a seat taken beforehand cannot promise one.
@@ -189,6 +191,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     ...roomView(() => import('../games/prism/online/PrismRoomView')),
   },
   wildrise: {
+    anchorsReactions: true,
     minSeats: 2,
     // Colours are handed out at the start, once the room knows who turned up, so
     // a seat taken beforehand cannot promise one.
