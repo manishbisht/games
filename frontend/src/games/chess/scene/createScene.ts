@@ -1,16 +1,57 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import type { GameState, Preferences, Square } from '@games/shared/chess/types'
-import { disposeObject, makeBoard, makePiece, squarePosition } from './models'
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import type { Color, GameState, MoveRecord, Preferences, Square } from '@games/shared/chess/types'
+import { createCameraRig } from '../../../motion/camera'
+import { dampFactor, inOutCubic, lerp, outCubic } from '../../../motion/ease'
+import { createParticles } from '../../../motion/particles'
+import { onMotionChange, reducedMotion } from '../../../motion/preference'
+import { createStage, disposeTree } from '../../../motion/stage'
+import { createQueue, createTweens } from '../../../motion/tween'
+import type { Tween } from '../../../motion/tween'
+import { BOARD_Y, createCast } from './actors'
+import type { Actor } from './actors'
+import {
+  fallDirection,
+  planMove,
+  returnDelay,
+  squareAt,
+  squareDistance,
+  squareXZ,
+  story,
+} from './choreography'
+import type { MovePlan } from './choreography'
+import { createHighlights } from './highlights'
+import type { HighlightSpec } from './highlights'
+import { makeBoard } from './models'
 
+export type ScenePreferences = Pick<Preferences, 'theme' | 'highContrast'>
 export interface SceneState {
   game: GameState
   selected: Square | null
   legal: { to: Square; capture: boolean }[]
   focused: Square | null
   enabled: boolean
-  preferences: Preferences
+  preferences: ScenePreferences
+  /** A move this seat has sent, or is choosing a promotion for, that the server has not played yet. */
+  pending?: { from: Square; to: Square } | null
+  /** The seat at this browser; the winner's confetti falls for them (and for spectators). */
+  seat?: Color | null
+}
+export type Impact = 'move' | 'capture' | 'check' | 'end' | 'promote'
+export interface SceneEvents {
+  select: (square: Square) => void
+  /** A sound-worthy moment, timed to the board rather than to the snapshot. */
+  impact?: (kind: Impact) => void
+  /** True while the board is still playing out moves the game has already made. */
+  presenting?: (busy: boolean) => void
+  /** How many victims of each colour have reached the trays. */
+  graves?: (counts: Record<Color, number>) => void
+}
+export interface SceneOptions {
+  black: boolean
+  /** The lobby's preview: a slow orbit while it is on screen, and nothing to play. */
+  showcase?: boolean
 }
 export interface SceneApi {
   update: (state: SceneState) => void
@@ -20,44 +61,37 @@ export interface SceneApi {
   top: () => void
   dispose: () => void
 }
-interface Actor {
-  group: THREE.Group
-  type: string
-  from: THREE.Vector3
-  to: THREE.Vector3
-  start: number
-  removing: boolean
-  knight: boolean
-}
 
+const other = (color: Color): Color => (color === 'w' ? 'b' : 'w')
+const home = (square: Square) => {
+  const { x, z } = squareXZ(square)
+  return new THREE.Vector3(x, BOARD_Y, z)
+}
+/** The pause between one move landing and the next one lifting. */
+const GAP = 150
+const VIEW = { polar: 0.88, azimuth: (black: boolean) => (black ? Math.PI + 0.24 : 0.24) }
+const TARGET = new THREE.Vector3(0, 0.2, 0)
+const RADIUS = 22
+const DRAG_LIFT = 0.5
+
+/**
+ * The chess table. The room's snapshot is the truth; this turns each new one
+ * into a presentation — moves play one after another, captures wait for
+ * contact, check and mate land after the piece does — while selection, legal
+ * marks and dragging answer the viewer immediately.
+ */
 export function createScene(
   container: HTMLElement,
   initial: SceneState,
-  onSelect: (square: Square) => void,
+  options: SceneOptions,
+  events: SceneEvents,
 ): SceneApi {
-  const scene = new THREE.Scene()
-  const renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: true,
-    powerPreference: 'high-performance',
-  })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1
-  renderer.domElement.setAttribute('aria-hidden', 'true')
-  container.appendChild(renderer.domElement)
-  const environment = new RoomEnvironment(),
-    pmrem = new THREE.PMREMGenerator(renderer)
-  const env = pmrem.fromScene(environment, 0.04)
-  scene.environment = env.texture
-  scene.environmentIntensity = 0.4
-  environment.dispose()
-  pmrem.dispose()
-
+  const stage = createStage(container, { maxPixelRatio: 2, exposure: 1, environmentIntensity: 0.4 })
+  const { scene } = stage,
+    canvas = stage.canvas
   const camera = new THREE.OrthographicCamera(-7, 7, 7, -7, 0.1, 100)
-  const controls = new OrbitControls(camera, renderer.domElement)
+  stage.setCamera(camera)
+  const controls = new OrbitControls(camera, canvas)
   controls.enableDamping = true
   controls.dampingFactor = 0.09
   controls.enablePan = false
@@ -67,39 +101,15 @@ export function createScene(
   controls.maxZoom = 1.65
   controls.rotateSpeed = 0.5
   controls.zoomSpeed = 0.6
-  controls.target.set(0, 0.2, 0)
-  let black = false,
-    angle = 0.24,
-    targetAngle = 0.24,
-    polar = 0.88,
-    targetPolar = 0.88,
-    targetZoom = 1,
-    cameraMoving = false
-  function placeCamera() {
-    camera.position.set(
-      Math.sin(angle) * Math.sin(polar) * 22,
-      Math.cos(polar) * 22,
-      Math.cos(angle) * Math.sin(polar) * 22,
-    )
-    camera.lookAt(controls.target)
-  }
-  placeCamera()
+  controls.target.copy(TARGET)
+  let black = options.black
+  // Seated as Black, the board starts from Black's side rather than sweeping round to it.
+  placeCamera(VIEW.azimuth(black), VIEW.polar)
   controls.update()
-  function manualCamera() {
-    cameraMoving = false
-  }
-  controls.addEventListener('start', manualCamera)
-  function tweenCamera(nextAngle: number, nextPolar: number, nextZoom = 1) {
-    const offset = camera.position.clone().sub(controls.target)
-    angle = Math.atan2(offset.x, offset.z)
-    polar = Math.acos(offset.y / offset.length())
-    targetAngle = nextAngle
-    while (targetAngle - angle > Math.PI) targetAngle -= Math.PI * 2
-    while (targetAngle - angle < -Math.PI) targetAngle += Math.PI * 2
-    targetPolar = nextPolar
-    targetZoom = nextZoom
-    cameraMoving = true
-  }
+  const rig = createCameraRig(camera, controls)
+  const tweens = createTweens(),
+    queue = createQueue({ catchUpAfter: 2, catchUpSpeed: 2.6 }),
+    particles = createParticles(scene, { max: 520, floor: BOARD_Y })
 
   scene.add(new THREE.HemisphereLight('#fff8e9', '#969280', 1.4))
   const key = new THREE.DirectionalLight('#fff0d9', 2.25)
@@ -125,304 +135,954 @@ export function createScene(
 
   let state = initial,
     theme = initial.preferences.theme,
-    boardData = makeBoard(theme)
-  scene.add(boardData.board)
-  const actors = new Map<string, Actor>(),
-    highlights = new THREE.Group()
-  scene.add(highlights)
-  let disposed = false,
-    frame = 0,
-    previousFen = '',
-    previousHistory = 0
-  const reduce = () => state.preferences.reducedMotion
+    board = makeBoard(theme).board
+  scene.add(board)
+  // The graveyard: a shallow tray down each side, where captured pieces come to rest.
+  const trayWood = new THREE.MeshStandardMaterial({ roughness: 0.5 }),
+    trayFelt = new THREE.MeshStandardMaterial({ roughness: 0.9 })
+  for (const side of [-1, 1]) {
+    const tray = new THREE.Mesh(new RoundedBoxGeometry(1.24, 0.06, 8.3, 2, 0.025), trayWood)
+    tray.position.set(side * 5.55, -0.245, 0)
+    tray.receiveShadow = tray.castShadow = true
+    const felt = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.012, 8.1), trayFelt)
+    felt.position.set(side * 5.55, -0.212, 0)
+    felt.receiveShadow = true
+    scene.add(tray, felt)
+  }
+  function paintTrays() {
+    trayWood.color.set(theme === 'marble' ? '#56605c' : '#5e4838')
+    trayFelt.color.set(theme === 'marble' ? '#59625e' : '#5f6651')
+  }
+  paintTrays()
 
-  function tile(square: Square, color: string, opacity: number) {
-    const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.96, 0.96),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }),
-    )
-    plane.rotation.x = -Math.PI / 2
-    plane.position.copy(squarePosition(square))
-    plane.position.y = 0.433
-    highlights.add(plane)
+  let muted = false
+  const impact = (kind: Impact) => {
+    if (!muted) events.impact?.(kind)
   }
-  function ring(square: Square, color: string, radius: number, thickness: number) {
-    const circle = new THREE.Mesh(
-      new THREE.RingGeometry(radius - thickness, radius, 48),
-      new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.94,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    )
-    circle.rotation.x = -Math.PI / 2
-    circle.position.copy(squarePosition(square))
-    circle.position.y = 0.441
-    highlights.add(circle)
+  const cast = createCast(scene, tweens, particles, { theme: () => theme, muted: () => muted })
+  const highlights = createHighlights(scene)
+  /** What stands where on the board as presented — behind the game until the queue catches up. */
+  const squares = new Map<Square, Actor>()
+  let queued = initial.game,
+    shown: { last: { from: Square; to: Square } | null; check: Square | null; threats: Square[] } = {
+      last: null,
+      check: null,
+      threats: [],
+    }
+
+  const squareOf = (actor: Actor) => {
+    for (const [square, a] of squares) if (a === actor) return square
+    return null
   }
-  function outline(square: Square, color: string) {
-    const p = squarePosition(square)
-    const points = [
-      [-0.46, -0.46],
-      [0.46, -0.46],
-      [0.46, 0.46],
-      [-0.46, 0.46],
-      [-0.46, -0.46],
-    ].map(([x, z]) => new THREE.Vector3(x + p.x, 0.446, z + p.z))
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color }),
-    )
-    highlights.add(line)
+  const kingOf = (color: Color) => {
+    for (const [square, a] of squares) if (a.type === 'k' && a.color === color) return { square, actor: a }
+    return null
   }
-  function paintHighlights() {
-    highlights.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
-        o.geometry.dispose()
-        ;(o.material as THREE.Material).dispose()
-      }
-    })
-    highlights.clear()
-    const last = state.game.history.at(-1)
-    if (last) {
-      tile(last.from, '#bfc084', 0.34)
-      tile(last.to, '#bfc084', 0.48)
-      ring(last.to, '#e5d5a1', 0.09, 0.024)
+  function emitGraves() {
+    if (!muted) events.graves?.({ w: settled('w'), b: settled('b') })
+  }
+  /** Victims that have actually arrived, not ones still on their way. */
+  const settled = (color: Color) => cast.graves[color].filter((a) => !a.graveTween).length
+  const later = (ms: number, run: () => void) =>
+    tweens.add({ duration: 1, delay: ms, update() {}, done: run })
+
+  /** Sets the table to a position with no story: on mount, and when a snapshot can't be told as moves. */
+  function build(game: GameState) {
+    for (const actor of [...cast.actors.values()]) cast.remove(actor)
+    squares.clear()
+    for (const piece of game.pieces)
+      squares.set(piece.square, cast.create(piece.id, piece.type, piece.color, home(piece.square)))
+    for (const captor of ['w', 'b'] as const)
+      game.captured[captor].forEach((type, i) => {
+        const victim = other(captor)
+        cast.bury(cast.create(`tray:${victim}:${i}`, type, victim, home('a1')), { instant: true })
+      })
+    const last = game.history.at(-1)
+    shown = { last: last ? { from: last.from, to: last.to } : null, check: game.check, threats: game.threats }
+    if (game.status !== 'playing') {
+      muted = true
+      finale(game, false)
+      tweens.finishAll()
+      particles.clear()
+      muted = false
     }
-    if (state.selected) {
-      tile(state.selected, '#f3df9d', 0.42)
-      ring(state.selected, '#fff0ba', 0.415, 0.035)
-    }
-    for (const move of state.legal) {
-      if (move.capture) {
-        ring(move.to, state.preferences.highContrast ? '#941c18' : '#a6533e', 0.455, 0.055)
-        outline(move.to, '#e1b390')
-      } else {
-        ring(move.to, state.preferences.highContrast ? '#152d22' : '#375240', 0.12, 0.085)
-        ring(move.to, '#f8f1d9', 0.14, 0.02)
-      }
-    }
-    if (state.game.check) {
-      tile(state.game.check, '#b74832', 0.42)
-      ring(state.game.check, '#f2b095', 0.45, 0.047)
-    }
-    for (const threat of state.game.threats) outline(threat, '#d98d69')
-    if (state.focused) outline(state.focused, state.preferences.highContrast ? '#000000' : '#ffffff')
+    emitGraves()
   }
 
-  function syncActors() {
-    const now = performance.now(),
-      newIds = new Set(state.game.pieces.map((p) => p.id))
-    for (const [id, actor] of actors)
-      if (!newIds.has(id) && !actor.removing) {
-        actor.removing = true
-        actor.start = now
-        actor.from.copy(actor.group.position)
-      }
-    for (const piece of state.game.pieces) {
-      let actor = actors.get(piece.id)
-      const target = squarePosition(piece.square)
-      if (actor && actor.type !== piece.type) {
-        const old = actor.group
-        const next = makePiece(piece.type, piece.color, theme)
-        next.position.copy(old.position)
-        scene.remove(old)
-        disposeObject(old)
-        scene.add(next)
-        actor.group = next
-        actor.type = piece.type
-      }
-      if (!actor) {
-        const group = makePiece(piece.type, piece.color, theme)
-        group.position.copy(target)
-        scene.add(group)
-        actor = {
-          group,
-          type: piece.type,
-          from: target.clone(),
-          to: target.clone(),
-          start: now,
-          removing: false,
-          knight: piece.type === 'n',
-        }
-        actors.set(piece.id, actor)
-      } else if (actor.to.distanceTo(target) > 0.001 || actor.removing) {
-        actor.from.copy(actor.group.position)
-        actor.to.copy(target)
-        actor.start = now
-        actor.removing = false
-        actor.group.scale.setScalar(1)
-      }
-      actor.group.userData.square = piece.square
-      actor.group.traverse((o) => {
-        o.userData.square = piece.square
+  /** One move, start to finish. Returns how long the next beat should wait. */
+  function playRecord(record: MoveRecord, final: GameState | null): number {
+    const plan = planMove(record),
+      mover = squares.get(plan.from)
+    if (!mover) return 0
+    const victim = plan.victim ? squares.get(plan.victim) : undefined,
+      rook = plan.rook ? squares.get(plan.rook.from) : undefined
+    squares.delete(plan.from)
+    if (plan.victim) squares.delete(plan.victim)
+    squares.set(plan.to, mover)
+    if (rook && plan.rook) {
+      squares.delete(plan.rook.from)
+      squares.set(plan.rook.to, rook)
+    }
+    shown.check = null
+    shown.threats = []
+    paint()
+    const knight = plan.piece === 'n'
+    let knocked = false
+    function knock() {
+      if (!victim || knocked) return
+      knocked = true
+      let dx = victim.pos.x - mover!.pos.x,
+        dz = victim.pos.z - mover!.pos.z
+      if (Math.hypot(dx, dz) < 0.05) ({ x: dx, z: dz } = mover!.leanDir)
+      const occupied = new Set<string>(squares.keys())
+      occupied.delete(plan.to)
+      impact('capture')
+      cast.topple(victim, fallDirection(plan.victim!, { x: dx, z: dz }, occupied), {
+        knock: 0.24,
+        done: () => cast.bury(victim, { delay: 60, onArrive: emitGraves }),
       })
     }
+    const duration = cast.travel(mover, home(plan.to), {
+      hop: knight,
+      face: knight,
+      onProgress: victim
+        ? (raw) => {
+            const near = Math.hypot(mover.pos.x - victim.pos.x, mover.pos.z - victim.pos.z) < 0.64
+            if ((knight ? raw > 0.78 : near) || raw > 0.9) knock()
+          }
+        : undefined,
+      onLand: () => landed(plan, mover, !!victim, final),
+    })
+    let hold = duration
+    if (rook && plan.rook)
+      // The king steps first; the rook is lifted clean over it.
+      hold = Math.max(
+        hold,
+        cast.travel(rook, home(plan.rook.to), {
+          hop: true,
+          height: 1.95,
+          duration: 640,
+          delay: duration * 0.4,
+          onLand: () => impact('move'),
+        }),
+      )
+    if (plan.promotion) hold += reducedMotion() ? 260 : 620
+    if (plan.mate) hold += reducedMotion() ? 200 : 700
+    return hold + GAP
   }
-  syncActors()
-  paintHighlights()
-  previousFen = state.game.fen
-  previousHistory = state.game.history.length
-  function resize() {
-    const { width, height } = container.getBoundingClientRect()
-    if (!width || !height) return
-    renderer.setSize(width, height)
+
+  function landed(plan: MovePlan, mover: Actor, captured: boolean, final: GameState | null) {
+    shown.last = { from: plan.from, to: plan.to }
+    if (!plan.check && !plan.promotion && !captured) impact('move')
+    const afterwards = () => {
+      if (plan.check) {
+        const king = kingOf(other(plan.color))
+        shown.check = king?.square ?? null
+        shown.threats = final?.threats ?? []
+        impact(plan.mate ? 'end' : 'check')
+        if (king && !plan.mate) cast.shudder(king.actor)
+        if (plan.mate && final) finale(final, true)
+      }
+      paint()
+    }
+    if (plan.promotion) {
+      impact('promote')
+      cast.promote(mover, plan.promotion, () => {
+        if (plan.promotion === 'n')
+          cast.travel(mover, mover.pos.clone(), { hop: true, height: 0.75, duration: 480 })
+        afterwards()
+      })
+    } else afterwards()
+    paint()
+  }
+
+  /** The end of a decided game: the losing king falls, and the winner gets their moment. */
+  function finale(game: GameState, animate: boolean) {
+    const loser = game.status === 'checkmate' ? game.turn : game.winner ? other(game.winner) : null
+    if (!loser) return 0
+    const king = kingOf(loser)
+    if (!king) return 0
+    const mate = game.status === 'checkmate',
+      at = squareXZ(king.square),
+      from = mate
+        ? squareXZ(game.threats[0] ?? game.history.at(-1)?.to ?? king.square)
+        : squareXZ(kingOf(other(loser))?.square ?? king.square)
+    let away = { x: at.x - from.x, z: at.z - from.z }
+    if (Math.hypot(away.x, away.z) < 0.01) away = { x: 0, z: loser === 'w' ? 1 : -1 }
+    const occupied = new Set<string>(squares.keys())
+    occupied.delete(king.square)
+    if (mate) cast.shudder(king.actor, 420)
+    const celebrate = animate && (state.seat == null || state.seat === game.winner)
+    cast.topple(king.actor, fallDirection(king.square, away, occupied), {
+      knock: mate ? 0.12 : 0,
+      duration: mate ? 640 : 950,
+      delay: mate ? 380 : 150,
+      onImpact: () => {
+        if (!animate) return
+        if (!mate) impact('end')
+        if (!reducedMotion()) {
+          rig.shake(mate ? 0.07 : 0.03, 300)
+          particles.burst({
+            origin: new THREE.Vector3(at.x + away.x * 0.4, BOARD_Y + 0.05, at.z + away.z * 0.4),
+            kind: 'dust',
+            count: 14,
+            speed: 1.6,
+            colors: ['#efe6d2', '#d9cdb1'],
+          })
+        }
+        if (celebrate && !reducedMotion()) confetti(mate ? 1 : 0.6)
+      },
+    })
+    if (animate && mate && !rig.userControlled)
+      orbitTo({
+        target: new THREE.Vector3(at.x * 0.45, 0.3, at.z * 0.45),
+        zoom: 1.22,
+        azimuth: spherical().azimuth + 0.3,
+        polar: 0.8,
+        ms: 1900,
+        delay: 250,
+      })
+    return mate ? 700 : 450
+  }
+
+  function confetti(amount: number) {
+    const colors = ['#f6c453', '#fff4dc', '#7f935e', '#c9a86a', '#e9706a']
+    for (const [i, x] of [-3.4, 3.4, 0].entries())
+      later(i * 220, () =>
+        particles.burst({
+          origin: new THREE.Vector3(x, BOARD_Y + 0.3, i === 2 ? 0 : x * -0.3),
+          kind: 'confetti',
+          count: Math.round((i === 2 ? 70 : 100) * amount),
+          speed: i === 2 ? 7.5 : 8.5,
+          spread: 0.35,
+          colors,
+        }),
+      )
+  }
+
+  /** A fresh game in the same room: every piece goes home, back ranks first. */
+  function rematch(game: GameState) {
+    shown = { last: null, check: null, threats: [] }
+    const spare = new Set(cast.actors.values()),
+      claims = game.pieces.map((piece) => {
+        const actor = cast.actors.get(piece.id)
+        if (actor && spare.has(actor)) {
+          spare.delete(actor)
+          return { piece, actor }
+        }
+        return { piece, actor: null as Actor | null }
+      })
+    // Tray pieces set out on mount have no id; pair them with whoever they could be.
+    for (const claim of claims) {
+      if (claim.actor) continue
+      const candidates = [...spare].filter((a) => a.color === claim.piece.color),
+        match = candidates.find((a) => a.type === claim.piece.type) ?? candidates[0]
+      if (!match) continue
+      spare.delete(match)
+      cast.actors.delete(match.id)
+      match.id = claim.piece.id
+      cast.actors.set(match.id, match)
+      claim.actor = match
+    }
+    cast.graves.w.length = 0
+    cast.graves.b.length = 0
+    emitGraves()
+    squares.clear()
+    let hold = 0
+    for (const { piece, actor } of claims) {
+      const delay = returnDelay(piece.color, piece.square),
+        to = home(piece.square)
+      if (actor) {
+        actor.graveTween?.finish()
+        actor.state = 'board'
+        actor.shake = 0
+        if (actor.type !== piece.type) later(delay + 160, () => cast.swapModel(actor, piece.type))
+        const distance = Math.hypot(actor.pos.x - to.x, actor.pos.z - to.z)
+        hold = Math.max(
+          hold,
+          distance < 0.01 && !actor.orient
+            ? 0
+            : cast.travel(actor, to, {
+                hop: true,
+                stand: true,
+                height: 0.5 + 0.09 * distance,
+                duration: 430 + 70 * Math.sqrt(distance),
+                delay,
+                quiet: true,
+              }),
+        )
+        squares.set(piece.square, actor)
+      } else {
+        const created = cast.create(piece.id, piece.type, piece.color, to)
+        hold = Math.max(hold, cast.dropIn(created, delay + 120))
+        squares.set(piece.square, created)
+      }
+    }
+    for (const actor of spare) cast.vanish(actor)
+    if (!rig.userControlled)
+      orbitTo({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 1200 })
+    paint()
+    return hold + GAP
+  }
+
+  /** After the queue runs dry, make sure the board agrees with the game; it nearly always does. */
+  function reconcile() {
+    const game = queued,
+      seen = new Set<Actor>()
+    for (const piece of game.pieces) {
+      let actor = cast.actors.get(piece.id)
+      if (!actor) {
+        actor = cast.create(piece.id, piece.type, piece.color, home(piece.square))
+        cast.dropIn(actor)
+      } else if (actor.state !== 'board' || squares.get(piece.square) !== actor) {
+        cast.graves[actor.color] = cast.graves[actor.color].filter((a) => a !== actor)
+        actor.state = 'board'
+        if (!actor.flights) cast.travel(actor, home(piece.square), { stand: true, quiet: true })
+      }
+      if (actor.type !== piece.type) cast.swapModel(actor, piece.type)
+      seen.add(actor)
+    }
+    for (const actor of cast.actors.values())
+      if (actor.state === 'board' && !seen.has(actor) && !actor.flights)
+        cast.bury(actor, { onArrive: emitGraves })
+    squares.clear()
+    for (const piece of game.pieces) squares.set(piece.square, cast.actors.get(piece.id)!)
+    const last = game.history.at(-1)
+    if (game.status === 'playing' || game.status === 'checkmate')
+      shown = {
+        last: last ? { from: last.from, to: last.to } : null,
+        check: game.check,
+        threats: game.threats,
+      }
+    paint()
+  }
+
+  /** Turns a fresh snapshot into beats. A long backlog (a reconnect) is mostly skipped to its end. */
+  function tell(next: GameState) {
+    const previous = queued,
+      told = story(previous, next)
+    if (told.kind === 'reset') {
+      queued = next
+      queue.push({ label: 'rematch', run: () => rematch(next) })
+    } else if (told.kind === 'moves') {
+      const { records } = told,
+        skip = records.length > 4 ? records.length - 2 : 0
+      if (skip) {
+        // Land whatever is still playing, then the older moves silently; only the last two are shown.
+        muted = true
+        queue.flush()
+        tweens.finishAll()
+        for (const record of records.slice(0, skip)) playRecord(record, null)
+        tweens.finishAll()
+        particles.clear()
+        muted = false
+        emitGraves()
+      }
+      queued = next
+      records.slice(skip).forEach((record, i, list) =>
+        queue.push({
+          label: record.san,
+          run: () => playRecord(record, i === list.length - 1 ? next : null),
+        }),
+      )
+    }
+    queued = next
+    const mated = told.kind === 'moves' && told.records.at(-1)?.san.endsWith('#')
+    if (next.status !== 'playing' && (previous.status === 'playing' || told.kind === 'reset') && !mated)
+      queue.push({
+        label: 'finale',
+        run: () => {
+          const hold = finale(next, true)
+          if (!hold) impact('end')
+          return hold + GAP
+        },
+      })
+    presenting()
+  }
+
+  let wasBusy = false
+  function presenting() {
+    const busy = queue.busy
+    if (busy === wasBusy) return
+    wasBusy = busy
+    events.presenting?.(busy)
+  }
+  const stopIdle = queue.onIdle(() => {
+    reconcile()
+    presenting()
+  })
+
+  // ——— highlights ———
+  let hoveredSquare: Square | null = null,
+    hoveredActor: Actor | null = null
+  function paint() {
+    const contrast = state.preferences.highContrast,
+      specs: HighlightSpec[] = []
+    if (shown.last) {
+      const { from, to } = shown.last
+      specs.push(
+        { key: `last-from:${from}`, kind: 'tile', square: from, color: '#bfc084', opacity: 0.34 },
+        { key: `last-to:${to}`, kind: 'tile', square: to, color: '#bfc084', opacity: 0.48 },
+        {
+          key: `last-mark:${to}`,
+          kind: 'mark',
+          square: to,
+          color: '#e5d5a1',
+          opacity: 0.94,
+          enter: 'pop',
+          delay: 60,
+        },
+      )
+    }
+    const selected = state.selected
+    if (selected) {
+      specs.push(
+        { key: `sel-tile:${selected}`, kind: 'tile', square: selected, color: '#f3df9d', opacity: 0.42 },
+        {
+          key: `sel-ring:${selected}`,
+          kind: 'ring',
+          square: selected,
+          color: '#fff0ba',
+          opacity: 0.94,
+          enter: 'pop',
+        },
+      )
+      for (const move of state.legal) {
+        const delay = Math.min(260, 30 + squareDistance(selected, move.to) * 34),
+          hover = hoveredSquare === move.to,
+          id = `${selected}>${move.to}`
+        if (move.capture)
+          specs.push(
+            {
+              key: `cap:${id}`,
+              kind: 'capture',
+              square: move.to,
+              color: contrast ? '#941c18' : '#a6533e',
+              opacity: 0.94,
+              enter: 'pop',
+              delay,
+              hover,
+            },
+            { key: `cap-line:${id}`, kind: 'outline', square: move.to, color: '#e1b390', opacity: 1, delay },
+          )
+        else
+          specs.push(
+            {
+              key: `dot:${id}`,
+              kind: 'dot',
+              square: move.to,
+              color: contrast ? '#152d22' : '#375240',
+              opacity: 0.94,
+              enter: 'pop',
+              delay,
+              hover,
+            },
+            {
+              key: `rim:${id}`,
+              kind: 'rim',
+              square: move.to,
+              color: '#f8f1d9',
+              opacity: 0.94,
+              enter: 'pop',
+              delay,
+              hover,
+            },
+          )
+      }
+    }
+    if (shown.check) {
+      specs.push(
+        {
+          key: `check-tile:${shown.check}`,
+          kind: 'tile',
+          square: shown.check,
+          color: '#b74832',
+          opacity: 0.42,
+        },
+        {
+          key: `check:${shown.check}`,
+          kind: 'check',
+          square: shown.check,
+          color: '#f2b095',
+          opacity: 0.94,
+          enter: 'pop',
+          pulse: true,
+        },
+      )
+      for (const threat of shown.threats)
+        specs.push({ key: `threat:${threat}`, kind: 'outline', square: threat, color: '#d98d69', opacity: 1 })
+    }
+    if (state.focused)
+      specs.push({
+        key: 'focus',
+        kind: 'outline',
+        square: state.focused,
+        color: contrast ? '#000000' : '#ffffff',
+        opacity: 1,
+        glide: true,
+      })
+    highlights.set(specs)
+    stage.invalidate()
+  }
+
+  // ——— the camera ———
+  function placeCamera(azimuth: number, polar: number) {
+    camera.position.set(
+      Math.sin(azimuth) * Math.sin(polar) * RADIUS,
+      Math.cos(polar) * RADIUS,
+      Math.cos(azimuth) * Math.sin(polar) * RADIUS,
+    )
+    camera.position.add(controls.target)
+    camera.lookAt(controls.target)
+  }
+  const offset = new THREE.Vector3()
+  function spherical() {
+    offset.subVectors(camera.position, controls.target)
+    const length = offset.length() || 1
+    return {
+      azimuth: Math.atan2(offset.x, offset.z),
+      polar: Math.acos(THREE.MathUtils.clamp(offset.y / length, -1, 1)),
+    }
+  }
+  let cameraTween: Tween | null = null,
+    cameraGoal = { zoom: 1 }
+  /**
+   * An orbiting camera move: azimuth and polar angle ease on the sphere, so a
+   * flip swings round the board instead of cutting through it. It moves the
+   * camera by the change each frame, so it composes with the rig's shake.
+   */
+  function orbitTo(goal: {
+    azimuth?: number
+    polar?: number
+    zoom?: number
+    target?: THREE.Vector3
+    swoop?: number
+    ms?: number
+    delay?: number
+  }) {
+    cameraTween?.cancel()
+    const reduced = reducedMotion(),
+      fromTarget = controls.target.clone(),
+      toTarget = (goal.target ?? fromTarget).clone(),
+      fromZoom = camera.zoom,
+      toZoom = goal.zoom ?? fromZoom,
+      last = new THREE.Vector3(),
+      desired = new THREE.Vector3()
+    cameraGoal = { zoom: toZoom }
+    let from = spherical(),
+      toAzimuth = 0
+    cameraTween = tweens.add({
+      duration: reduced ? 240 : (goal.ms ?? 950),
+      delay: goal.delay,
+      ease: inOutCubic,
+      start: () => {
+        from = spherical()
+        last.copy(camera.position)
+        toAzimuth = goal.azimuth ?? from.azimuth
+        while (toAzimuth - from.azimuth > Math.PI) toAzimuth -= Math.PI * 2
+        while (toAzimuth - from.azimuth < -Math.PI) toAzimuth += Math.PI * 2
+      },
+      update: (e, raw) => {
+        const azimuth = lerp(from.azimuth, toAzimuth, e),
+          polar =
+            lerp(from.polar, goal.polar ?? from.polar, e) -
+            (reduced ? 0 : (goal.swoop ?? 0) * Math.sin(Math.PI * raw))
+        controls.target.lerpVectors(fromTarget, toTarget, e)
+        desired
+          .set(
+            Math.sin(azimuth) * Math.sin(polar) * RADIUS,
+            Math.cos(polar) * RADIUS,
+            Math.cos(azimuth) * Math.sin(polar) * RADIUS,
+          )
+          .add(controls.target)
+        camera.position.add(offset.subVectors(desired, last))
+        last.copy(desired)
+        camera.zoom = lerp(fromZoom, toZoom, e)
+        camera.updateProjectionMatrix()
+        camera.lookAt(controls.target)
+      },
+      done: () => {
+        cameraTween = null
+      },
+    })
+  }
+  controls.addEventListener('start', () => {
+    cameraTween?.cancel()
+    cameraTween = null
+  })
+  controls.addEventListener('change', () => stage.invalidate())
+  stage.onResize((width, height) => {
     const aspect = width / height,
-      span = Math.max(4.6, 5.95 / aspect)
+      // Narrow screens pull back a little so the trays stay in frame.
+      span = Math.max(4.6, 6.6 / aspect)
     camera.left = -span * aspect
     camera.right = span * aspect
     camera.top = span
     camera.bottom = -span
     camera.updateProjectionMatrix()
-  }
-  const observer = new ResizeObserver(resize)
-  observer.observe(container)
-  resize()
-  const raycaster = new THREE.Raycaster(),
-    pointer = new THREE.Vector2()
-  let downX = 0,
-    downY = 0,
-    downTime = 0,
-    dragged = false,
-    activePointers = 0
-  function pick(event: PointerEvent): Square | undefined {
-    const rect = renderer.domElement.getBoundingClientRect()
-    pointer.set(
+  })
+
+  // ——— pointer: taps, drags and hover ———
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -BOARD_Y),
+    ray = new THREE.Raycaster(),
+    ndc = new THREE.Vector2(),
+    point = new THREE.Vector3()
+  function boardPoint(event: { clientX: number; clientY: number }, height = BOARD_Y) {
+    const rect = canvas.getBoundingClientRect()
+    ndc.set(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      (-(event.clientY - rect.top) / rect.height) * 2 + 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
     )
-    raycaster.setFromCamera(pointer, camera)
-    const pieces = [...actors.values()].filter((a) => !a.removing).map((a) => a.group)
-    return raycaster.intersectObjects([...pieces, ...boardData.squares], true)[0]?.object.userData.square
+    ray.setFromCamera(ndc, camera)
+    plane.constant = -height
+    return ray.ray.intersectPlane(plane, point)
   }
+  /** A piece first — but never one mid-flight, whose square is its destination — then the square under the pointer. */
+  function pick(event: { clientX: number; clientY: number }) {
+    const models: THREE.Object3D[] = []
+    for (const actor of cast.actors.values())
+      if (actor.state === 'board' && !actor.flights && actor !== drag?.actor && !actor.orient)
+        models.push(actor.model)
+    // The turned meshes themselves, so a click beside a queen's neck reaches the pawn behind it.
+    let object: THREE.Object3D | null = stage.pick(event, models)[0]?.object ?? null
+    while (object && !object.userData.actor) object = object.parent
+    if (object) {
+      const actor = object.userData.actor as Actor
+      return { actor, square: squareOf(actor) }
+    }
+    const at = boardPoint(event)
+    return { actor: null, square: at ? squareAt(at.x, at.z) : null }
+  }
+  const movable = (actor: Actor | null): actor is Actor =>
+    !!actor && state.enabled && actor.color === state.game.turn && actor.color === state.seat
+  const actorAt = (square: Square | null) => {
+    const id = square ? state.game.pieces.find((p) => p.square === square)?.id : undefined
+    return id ? (cast.actors.get(id) ?? null) : null
+  }
+
+  let pointers = 0,
+    press: {
+      x: number
+      y: number
+      time: number
+      actor: Actor | null
+      square: Square | null
+      id: number
+    } | null = null,
+    drag: {
+      actor: Actor
+      from: Square
+      pointer: number
+      target: THREE.Vector3
+      velocity: THREE.Vector3
+      last: THREE.Vector3
+    } | null = null,
+    held: { actor: Actor; from: Square; to: Square } | null = null,
+    hoverEvent: PointerEvent | null = null
   const down = (event: PointerEvent) => {
-    activePointers++
-    downX = event.clientX
-    downY = event.clientY
-    downTime = performance.now()
-    dragged = activePointers > 1
+    // A new primary pointer means every earlier one has gone, whether or not we saw it leave.
+    if (event.isPrimary) pointers = 0
+    pointers++
+    if (pointers > 1) {
+      cancelDrag()
+      press = null
+      return
+    }
+    if (event.button !== 0) return
+    const hit = pick(event),
+      actor = movable(hit.actor) ? hit.actor : null
+    press = {
+      x: event.clientX,
+      y: event.clientY,
+      time: performance.now(),
+      actor,
+      square: hit.square,
+      id: event.pointerId,
+    }
+    // Grabbing your own piece is a drag; anywhere else, the board orbits.
+    if (actor) {
+      controls.enabled = false
+      canvas.setPointerCapture?.(event.pointerId)
+    }
   }
   const move = (event: PointerEvent) => {
-    if (Math.hypot(event.clientX - downX, event.clientY - downY) > 7) dragged = true
-    renderer.domElement.style.cursor = state.enabled && pick(event) ? 'pointer' : 'grab'
+    hoverEvent = event
+    if (press?.actor && !drag && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6)
+      startDrag(event)
+    if (drag) dragTo(event)
   }
   const up = (event: PointerEvent) => {
-    activePointers = Math.max(0, activePointers - 1)
-    if (!state.enabled || dragged || event.button !== 0 || performance.now() - downTime > 800) return
-    const square = pick(event)
-    if (square) onSelect(square)
+    pointers = Math.max(0, pointers - 1)
+    if (drag) endDrag()
+    else if (
+      press &&
+      state.enabled &&
+      Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 7 &&
+      performance.now() - press.time < 800
+    ) {
+      const square = pick(event).square
+      if (square) events.select(square)
+    }
+    press = null
+    controls.enabled = true
   }
   const cancel = () => {
-    activePointers = 0
-    dragged = true
+    pointers = 0
+    cancelDrag()
+    press = null
+    controls.enabled = true
   }
-  renderer.domElement.addEventListener('pointerdown', down)
-  renderer.domElement.addEventListener('pointermove', move)
-  renderer.domElement.addEventListener('pointerup', up)
-  renderer.domElement.addEventListener('pointercancel', cancel)
-  function render(now: number) {
-    if (disposed) return
-    frame = requestAnimationFrame(render)
-    if (cameraMoving) {
-      const speed = reduce() ? 1 : 0.085
-      angle = THREE.MathUtils.lerp(angle, targetAngle, speed)
-      polar = THREE.MathUtils.lerp(polar, targetPolar, speed)
-      camera.zoom = THREE.MathUtils.lerp(camera.zoom, targetZoom, speed)
-      placeCamera()
-      camera.updateProjectionMatrix()
-      if (
-        Math.abs(angle - targetAngle) < 0.0005 &&
-        Math.abs(polar - targetPolar) < 0.0005 &&
-        Math.abs(camera.zoom - targetZoom) < 0.0005
-      )
-        cameraMoving = false
+  const leave = () => {
+    hoverEvent = null
+    setHover(null, null)
+  }
+  function startDrag(event: PointerEvent) {
+    const actor = press!.actor!,
+      from = squareOf(actor)
+    if (!from) return
+    if (state.selected !== from) events.select(from)
+    held = null
+    drag = {
+      actor,
+      from,
+      pointer: event.pointerId,
+      target: actor.pos.clone(),
+      velocity: new THREE.Vector3(),
+      last: actor.pos.clone(),
     }
-    controls.update()
-    for (const [id, a] of actors) {
-      const t = reduce() ? 1 : Math.min((now - a.start) / 520, 1)
-      if (a.removing) {
-        const scale = 1 - Math.max(0, (t - 0.35) / 0.65)
-        a.group.scale.setScalar(Math.max(0.001, scale))
-        a.group.position.y = a.from.y + (1 - scale) * 0.15
-        if (t === 1) {
-          scene.remove(a.group)
-          disposeObject(a.group)
-          actors.delete(id)
+    actor.hover.target = DRAG_LIFT
+    canvas.setPointerCapture?.(event.pointerId)
+    canvas.style.cursor = 'grabbing'
+  }
+  function dragTo(event: PointerEvent) {
+    const at = boardPoint(event, BOARD_Y + DRAG_LIFT)
+    if (!at || !drag) return
+    let x = THREE.MathUtils.clamp(at.x, -4.3, 4.3),
+      z = THREE.MathUtils.clamp(at.z, -4.3, 4.3)
+    // A legal square close by pulls the piece onto its centre.
+    let best: { x: number; z: number; d: number } | null = null
+    for (const move of state.legal) {
+      const c = squareXZ(move.to),
+        d = Math.hypot(c.x - x, c.z - z)
+      if (d < 0.5 && (!best || d < best.d)) best = { ...c, d }
+    }
+    if (best) {
+      const pull = 0.65 * (1 - best.d / 0.5)
+      x = lerp(x, best.x, pull)
+      z = lerp(z, best.z, pull)
+    }
+    drag.target.set(x, BOARD_Y, z)
+    hoveredSquare = squareAt(x, z)
+    paint()
+  }
+  function endDrag() {
+    if (!drag) return
+    const { actor, from, pointer } = drag,
+      to = squareAt(actor.pos.x, actor.pos.z)
+    drag = null
+    if (canvas.hasPointerCapture?.(pointer)) canvas.releasePointerCapture(pointer)
+    actor.tiltX.target = actor.tiltZ.target = 0
+    if (to && to !== from && state.legal.some((m) => m.to === to)) {
+      // Held over its new square until the server plays it (or the promotion is chosen).
+      held = { actor, from, to }
+      glide(actor, home(to), 140)
+      actor.hover.target = 0.3
+      events.select(to)
+      later(400, () => {
+        if (held?.actor === actor && !state.pending) {
+          held = null
+          returnHome(actor, from)
         }
-      } else {
-        const ease = t * t * (3 - 2 * t)
-        a.group.position.lerpVectors(a.from, a.to, ease)
-        if (a.from.distanceTo(a.to) > 0.01)
-          a.group.position.y += Math.sin(t * Math.PI) * (a.knight ? 0.8 : 0.28)
+      })
+    } else returnHome(actor, from)
+    hoveredSquare = null
+    paint()
+  }
+  function cancelDrag() {
+    if (!drag) return
+    const { actor, from } = drag
+    drag = null
+    actor.tiltX.target = actor.tiltZ.target = 0
+    returnHome(actor, from)
+  }
+  function glide(actor: Actor, to: THREE.Vector3, ms: number) {
+    const start = actor.pos.clone()
+    tweens.add({ duration: ms, ease: outCubic, update: (e) => void actor.pos.lerpVectors(start, to, e) })
+  }
+  function returnHome(actor: Actor, square: Square) {
+    actor.hover.target = state.selected === square ? 0.16 : 0
+    if (actor.pos.distanceTo(home(square)) > 0.01)
+      cast.travel(actor, home(square), { quiet: true, height: 0.12, duration: 260 })
+  }
+  function setHover(actor: Actor | null, square: Square | null) {
+    if (actor === hoveredActor && square === hoveredSquare) return
+    hoveredActor = actor
+    hoveredSquare = square
+    lifts()
+    paint()
+  }
+  function hoverStep() {
+    if (!hoverEvent || drag) return
+    const event = hoverEvent
+    hoverEvent = null
+    const hit = pick(event),
+      own = movable(hit.actor) ? hit.actor : null,
+      legal = hit.square && state.legal.some((m) => m.to === hit.square) ? hit.square : null
+    setHover(own, legal)
+    canvas.style.cursor = own || (legal && state.enabled) ? 'pointer' : 'grab'
+  }
+
+  /** Hover, selection and optimistic lifts, all as spring targets. */
+  function lifts() {
+    const selected = actorAt(state.selected),
+      pending = state.pending ? actorAt(state.pending.from) : null,
+      reduced = reducedMotion()
+    for (const actor of cast.actors.values()) {
+      if (drag?.actor === actor) continue
+      let lift = 0
+      if (actor === pending || held?.actor === actor) lift = 0.3
+      else if (actor === selected) lift = reduced ? 0.08 : 0.16
+      else if (actor === hoveredActor && state.enabled) lift = reduced ? 0 : 0.07
+      actor.hover.target = lift
+      actor.bob = actor === selected && !reduced && !pending ? 1 : 0
+    }
+  }
+
+  // ——— the frame ———
+  let showcaseVisible = true,
+    showcaseClock = 0
+  const visibility = options.showcase
+    ? new IntersectionObserver(([entry]) => {
+        showcaseVisible = entry.isIntersecting
+      })
+    : null
+  visibility?.observe(container)
+  const removeFrame = stage.onFrame((dt, now) => {
+    const ms = dt * 1000
+    tweens.speed = queue.speed
+    let moving = queue.step(ms)
+    if (tweens.step(ms)) moving = true
+    presenting()
+    hoverStep()
+    if (drag) {
+      const { actor } = drag
+      drag.last.copy(actor.pos)
+      actor.pos.lerp(drag.target, reducedMotion() ? 1 : dampFactor(28, dt))
+      if (dt > 0) drag.velocity.subVectors(actor.pos, drag.last).divideScalar(dt)
+      if (!reducedMotion()) {
+        // The piece swings from where it is held: its top trails the way it moves.
+        actor.tiltZ.target = THREE.MathUtils.clamp(drag.velocity.x * 0.045, -0.38, 0.38)
+        actor.tiltX.target = THREE.MathUtils.clamp(-drag.velocity.z * 0.045, -0.38, 0.38)
+      }
+      moving = true
+    }
+    if (cast.step(dt, now)) moving = true
+    if (highlights.step(dt)) moving = true
+    if (particles.step(dt)) moving = true
+    if (controls.update()) moving = true
+    if (rig.step(dt)) moving = true
+    if (options.showcase && showcaseVisible && !reducedMotion() && !cameraTween) {
+      // The lobby's board turns slowly while it is on screen, drawn at half rate.
+      offset
+        .subVectors(camera.position, controls.target)
+        .applyAxisAngle(new THREE.Vector3(0, 1, 0), dt * 0.08)
+      camera.position.copy(controls.target).add(offset)
+      camera.lookAt(controls.target)
+      showcaseClock += ms
+      if (showcaseClock >= 33) {
+        showcaseClock = 0
+        moving = true
       }
     }
-    renderer.render(scene, camera)
-  }
-  frame = requestAnimationFrame(render)
+    return moving
+  })
+
+  container.addEventListener('pointerdown', down, { capture: true })
+  canvas.addEventListener('pointermove', move)
+  canvas.addEventListener('pointerup', up)
+  canvas.addEventListener('pointercancel', cancel)
+  canvas.addEventListener('pointerleave', leave)
+  const stopMotion = onMotionChange(() => {
+    if (reducedMotion()) {
+      tweens.finishAll()
+      particles.clear()
+    }
+    lifts()
+    stage.invalidate()
+  })
+
+  build(initial.game)
+  lifts()
+  paint()
+  stage.start()
+
   return {
     update(next) {
-      const priorStatus = state.game.status
+      const previous = state
       state = next
       if (theme !== next.preferences.theme) {
         theme = next.preferences.theme
-        scene.remove(boardData.board)
-        disposeObject(boardData.board)
-        boardData = makeBoard(theme)
-        scene.add(boardData.board)
-        for (const a of actors.values()) {
-          scene.remove(a.group)
-          disposeObject(a.group)
-        }
-        actors.clear()
-        syncActors()
+        scene.remove(board)
+        disposeTree(board)
+        board = makeBoard(theme).board
+        scene.add(board)
+        paintTrays()
+        // Each piece keeps its pose and whatever it was doing; only its turned wood changes.
+        cast.retheme()
       }
-      if (previousFen !== next.game.fen || previousHistory !== next.game.history.length) {
-        syncActors()
-        previousFen = next.game.fen
-        previousHistory = next.game.history.length
+      if (next.game !== previous.game) tell(next.game)
+      if (held && (!next.pending || next.pending.from !== held.from)) {
+        const { actor, from } = held
+        held = null
+        if (next.game === previous.game || next.game.history.length === previous.game.history.length)
+          returnHome(actor, from)
       }
-      paintHighlights()
-      if (next.game.status === 'checkmate' && priorStatus !== 'checkmate')
-        tweenCamera(black ? Math.PI + 0.24 : 0.24, 0.82, 0.94)
+      if (next.selected !== previous.selected || next.enabled !== previous.enabled) {
+        hoveredSquare = null
+        if (!next.enabled) hoveredActor = null
+      }
+      lifts()
+      paint()
     },
     flip(next) {
+      if (next === black) return
       black = next
-      tweenCamera(black ? Math.PI + 0.24 : 0.24, 0.88)
+      orbitTo({
+        azimuth: VIEW.azimuth(black),
+        polar: VIEW.polar,
+        target: TARGET,
+        zoom: cameraTween ? cameraGoal.zoom : camera.zoom,
+        swoop: 0.32,
+        ms: 1150,
+      })
     },
     zoom(amount) {
-      tweenCamera(
-        Math.atan2(camera.position.x, camera.position.z),
-        Math.acos(camera.position.y / camera.position.length()),
-        THREE.MathUtils.clamp(camera.zoom + amount * 0.15, 0.75, 1.65),
-      )
+      orbitTo({ zoom: THREE.MathUtils.clamp(camera.zoom + amount * 0.15, 0.75, 1.65), ms: 320 })
     },
     reset() {
-      tweenCamera(black ? Math.PI + 0.24 : 0.24, 0.88)
+      orbitTo({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 800 })
     },
     top() {
-      tweenCamera(black ? Math.PI : 0, 0.04)
+      orbitTo({ azimuth: black ? Math.PI : 0, polar: 0.04, ms: 800 })
     },
     dispose() {
-      disposed = true
-      cancelAnimationFrame(frame)
-      observer.disconnect()
+      removeFrame()
+      stopMotion()
+      visibility?.disconnect()
+      container.removeEventListener('pointerdown', down, { capture: true })
+      canvas.removeEventListener('pointermove', move)
+      canvas.removeEventListener('pointerup', up)
+      canvas.removeEventListener('pointercancel', cancel)
+      canvas.removeEventListener('pointerleave', leave)
+      stopIdle()
+      queue.clear()
+      tweens.cancelAll()
+      rig.dispose()
       controls.dispose()
-      renderer.domElement.removeEventListener('pointerdown', down)
-      renderer.domElement.removeEventListener('pointermove', move)
-      renderer.domElement.removeEventListener('pointerup', up)
-      renderer.domElement.removeEventListener('pointercancel', cancel)
-      highlights.traverse((o) => {
-        if (o instanceof THREE.Line) {
-          o.geometry.dispose()
-          ;(o.material as THREE.Material).dispose()
-        }
-      })
-      disposeObject(scene)
-      env.dispose()
-      renderer.dispose()
-      renderer.domElement.remove()
+      highlights.dispose()
+      particles.dispose()
+      cast.dispose()
+      stage.dispose()
     },
   }
 }

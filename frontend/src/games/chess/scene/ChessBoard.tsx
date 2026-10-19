@@ -1,25 +1,35 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { Square } from '@games/shared/chess/types'
+import type { Color, Square } from '@games/shared/chess/types'
 import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
 import { createScene } from './createScene'
-import type { SceneApi, SceneState } from './createScene'
+import type { Impact, SceneApi, SceneState } from './createScene'
 
 export type BoardControls = Pick<SceneApi, 'zoom' | 'reset' | 'top'>
-const ChessBoard = forwardRef<
-  BoardControls,
-  { state: SceneState; black: boolean; onSelect: (square: Square) => void }
->(function ChessBoard({ state, black, onSelect }, ref) {
+interface BoardProps {
+  state: SceneState
+  black: boolean
+  onSelect: (square: Square) => void
+  onImpact?: (kind: Impact) => void
+  onPresenting?: (busy: boolean) => void
+  onGraves?: (counts: Record<Color, number> | null) => void
+  /** The lobby's preview: turns slowly while on screen. */
+  showcase?: boolean
+}
+const ChessBoard = forwardRef<BoardControls, BoardProps>(function ChessBoard(
+  { state, black, onSelect, onImpact, onPresenting, onGraves, showcase = false },
+  ref,
+) {
   const container = useRef<HTMLDivElement>(null),
     api = useRef<SceneApi | null>(null),
-    initial = useRef(state),
-    select = useRef(onSelect)
+    initial = useRef({ state, black, showcase }),
+    handlers = useRef({ onSelect, onImpact, onPresenting, onGraves })
   const [failed, setFailed] = useState(false),
     [focused, setFocused] = useState<Square | null>(null),
     [keyboard, setKeyboard] = useState(false)
   useEffect(() => {
-    select.current = onSelect
-  }, [onSelect])
+    handlers.current = { onSelect, onImpact, onPresenting, onGraves }
+  }, [onSelect, onImpact, onPresenting, onGraves])
   useImperativeHandle(
     ref,
     () => ({
@@ -31,11 +41,25 @@ const ChessBoard = forwardRef<
   )
   useEffect(() => {
     if (!container.current) return
+    const start = initial.current
     try {
-      api.current = createScene(container.current, initial.current, (s) => select.current(s))
+      api.current = createScene(
+        container.current,
+        start.state,
+        { black: start.black, showcase: start.showcase },
+        {
+          select: (square) => handlers.current.onSelect(square),
+          impact: (kind) => handlers.current.onImpact?.(kind),
+          presenting: (busy) => handlers.current.onPresenting?.(busy),
+          graves: (counts) => handlers.current.onGraves?.(counts),
+        },
+      )
     } catch (error) {
       console.error('Chess WebGL initialization failed', error)
       setFailed(true)
+      // Without a board to present on, the game shows everything as it stands.
+      handlers.current.onPresenting?.(false)
+      handlers.current.onGraves?.(null)
     }
     return () => {
       api.current?.dispose()
@@ -83,7 +107,9 @@ const ChessBoard = forwardRef<
       aria-label="3D chessboard"
       tabIndex={0}
       onKeyDown={keyDown}
-      onFocus={() => {
+      onFocus={(event) => {
+        // A click focuses the board too; only keyboard focus brings up the cursor and its tip.
+        if (!event.currentTarget.matches(':focus-visible')) return
         setKeyboard(true)
         setFocused((f) => f || 'e2')
       }}

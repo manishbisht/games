@@ -55,7 +55,12 @@
   position: relative;
   min-width: 0;
   border-radius: 50% 50% 14px 14px;
-  background: radial-gradient(ellipse at 50% 62%, light-dark(#e9ebdf, var(--theme-inset)) 0%, light-dark(#f0f0e7, var(--theme-inset)) 46%, transparent 72%);
+  background: radial-gradient(
+    ellipse at 50% 62%,
+    light-dark(#e9ebdf, var(--theme-inset)) 0%,
+    light-dark(#f0f0e7, var(--theme-inset)) 46%,
+    transparent 72%
+  );
 }
 .ch-lobby-board-caption {
   display: flex;
@@ -79,6 +84,7 @@
 .ch-lobby-board {
   position: relative;
   height: 342px;
+  animation: motion-enter 700ms var(--ease-out) 80ms both;
 }
 .ch-lobby-board .ch-board-interaction {
   inset: -8px -15px -8px;
@@ -369,6 +375,11 @@
 .ch-online.ch-online-chess .ch-online-lobby li {
   padding: 10px 0;
   border-top: 1px solid light-dark(#eef0e7, var(--theme-border));
+  animation: motion-enter var(--motion-slow) var(--ease-out) both;
+  transition: translate var(--motion-base) var(--ease-spring);
+}
+.ch-online.ch-online-chess .ch-online-lobby li:hover {
+  translate: 3px 0;
 }
 .ch-online.ch-online-chess .ch-online-lobby li > span {
   min-width: 0;
@@ -504,9 +515,24 @@
   justify-items: center;
   min-width: 0;
 }
+.ch-online-shell .ch-room-seat {
+  transition:
+    translate var(--motion-base) var(--ease-spring),
+    box-shadow var(--motion-base) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
 .ch-online-shell .ch-room-seat:hover:not(:disabled) {
   background: light-dark(#eef3e5, var(--theme-inset));
   border-color: light-dark(#98aa84, var(--theme-border));
+  translate: 0 -3px;
+  box-shadow: 0 12px 26px #3a4a2a17;
+}
+.ch-online-shell .ch-room-seat .ch-room-piece {
+  transition: transform var(--motion-slow) var(--ease-spring);
+}
+.ch-online-shell .ch-room-seat:hover:not(:disabled) .ch-room-piece {
+  transform: translateY(-3px) rotate(-7deg);
 }
 .ch-online-shell .ch-room-seat strong {
   font-size: 13px;

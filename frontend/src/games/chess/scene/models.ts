@@ -326,21 +326,3 @@ export function makeBoard(theme: Preferences['theme']) {
       board.add(mesh(new THREE.SphereGeometry(0.032, 12, 8), material('#c8ad7a', 0.2, 0.7), x, 0.332, z))
   return { board, squares }
 }
-
-export function disposeObject(object: THREE.Object3D) {
-  const geometries = new Set<THREE.BufferGeometry>(),
-    materials = new Set<THREE.Material>(),
-    textures = new Set<THREE.Texture>()
-  object.traverse((o) => {
-    if (o instanceof THREE.Mesh) {
-      geometries.add(o.geometry)
-      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-        materials.add(m)
-        for (const value of Object.values(m)) if (value instanceof THREE.Texture) textures.add(value)
-      }
-    }
-  })
-  geometries.forEach((g) => g.dispose())
-  materials.forEach((m) => m.dispose())
-  textures.forEach((t) => t.dispose())
-}

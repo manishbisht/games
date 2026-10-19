@@ -14,12 +14,7 @@ export default function ChessLobby() {
     legal: [],
     focused: null,
     enabled: false,
-    preferences: {
-      theme: 'walnut',
-      sound: false,
-      highContrast: false,
-      reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    },
+    preferences: { theme: 'walnut', highContrast: false },
   }))
 
   return (
@@ -52,7 +47,7 @@ export default function ChessLobby() {
             aria-label="A walnut and ivory chessboard, ready for two players"
           >
             <div inert aria-hidden="true">
-              <ChessBoard state={preview} black={false} onSelect={() => {}} />
+              <ChessBoard state={preview} black={false} onSelect={() => {}} showcase />
             </div>
           </div>
           <div className="ch-lobby-board-note">
