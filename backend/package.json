@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/backend": "^2.33.6",
+    "@clerk/backend": "^3.25.0",
     "@games/shared": "*"
   },
   "devDependencies": {
