@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { ArrowRight, Globe2, KeyRound, LockKeyhole, Plus, RefreshCw, Users } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import type { GameId, PublicRoomSummary, RoomVisibility } from '@games/shared/protocol'
@@ -20,6 +21,17 @@ export interface OnlinePanelProps {
    * one too many.
    */
   nameAsked?: boolean
+  /**
+   * The game's own table settings, sent with the room as it is made. The
+   * server hands them to the game's adapter (`validateOptions`), which keeps
+   * what it understands — so a game may pass anything its adapter reads.
+   */
+  options?: unknown
+  /**
+   * The game's own picker for those settings, placed inside the create form
+   * so it reads as part of setting the table rather than a separate step.
+   */
+  children?: ReactNode
 }
 
 /**
@@ -39,6 +51,8 @@ export default function OnlinePanel({
   seatChoices,
   appearance,
   nameAsked,
+  options,
+  children,
 }: OnlinePanelProps) {
   const navigate = useNavigate()
   const identity = useIdentity()
@@ -89,6 +103,7 @@ export default function OnlinePanel({
       rememberName()
       const code = await createRoom(game, visibility, playerName, await identity.credentials(), {
         seats,
+        options,
       })
       navigate(`${basePath}/room/${code}`)
     } catch (cause) {
@@ -188,6 +203,7 @@ export default function OnlinePanel({
           </div>
         )}
         {chess && <p>Set the table. Invite someone to play.</p>}
+        {children}
         <div className="ch-online-row">
           <label className="ch-online-visibility">
             <input
