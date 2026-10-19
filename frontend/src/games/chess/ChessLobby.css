@@ -796,3 +796,67 @@
   border-radius: 50%;
   background: #94a67d;
 }
+
+/* The clock a new room is made with: five quiet tiles above the room panel. */
+.ch-clock-choice {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+.ch-clock-choice-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: light-dark(#6d7764, var(--theme-muted));
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.ch-clock-choice > div {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.ch-clock-choice button {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 9px 4px;
+  border-radius: 10px;
+  border: 1px solid light-dark(#e2e5d9, var(--theme-border));
+  background: light-dark(#fffefa, var(--theme-surface));
+  color: light-dark(#4d5a45, var(--theme-text));
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    translate var(--motion-fast) var(--ease-out);
+}
+.ch-clock-choice button strong {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ch-clock-choice button small {
+  font-size: 9px;
+  color: light-dark(#8a917f, var(--theme-muted));
+  white-space: nowrap;
+}
+.ch-clock-choice button:hover {
+  translate: 0 -1px;
+  border-color: light-dark(#c6d0b8, var(--theme-border));
+}
+.ch-clock-choice button.selected {
+  background: light-dark(#eef2e6, var(--theme-inset));
+  border-color: light-dark(#7f935e, var(--theme-accent));
+}
+.ch-clock-choice button:focus-visible {
+  outline: 2px solid light-dark(#647e4f, var(--theme-accent));
+  outline-offset: 2px;
+}
+@media (max-width: 420px) {
+  .ch-clock-choice button small {
+    display: none;
+  }
+}

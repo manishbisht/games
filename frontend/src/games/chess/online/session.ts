@@ -1,7 +1,10 @@
 import type { Color, GameState, PromotionPiece, Square } from '@games/shared/chess/types'
+import type { HeldTiming } from '../components/clock'
 
 export interface OnlineChessSession {
   state: GameState
+  /** When the snapshot's state began and was sent, by the server's clock; what the clocks count from. */
+  timing?: HeldTiming
   myColor: Color | null
   players: Partial<
     Record<

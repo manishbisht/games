@@ -15,6 +15,7 @@ import {
   Flag,
   Handshake,
   Leaf,
+  Timer,
   Maximize,
   Minus,
   RotateCw,
@@ -27,11 +28,15 @@ import {
 import ChessBoard from './scene/ChessBoard'
 import type { BoardControls } from './scene/ChessBoard'
 import type { Impact } from './scene/createScene'
+import ChessClock from './components/ChessClock'
+import { controlName, serverNow } from './components/clock'
+import type { HeldTiming } from './components/clock'
 import Modal from './components/Modal'
 import PromotionGallery from './components/PromotionGallery'
 import { legalMoves, opposite } from '@games/shared/chess'
 import { playChessSound } from './game/audio'
-import { COLOR_NAMES, GLYPHS, PIECE_NAMES } from '@games/shared/chess/types'
+import type { ChessSound, SoundDetail } from './game/audio'
+import { COLOR_NAMES, GLYPHS, PIECE_NAMES, TIME_CONTROLS } from '@games/shared/chess/types'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import type { Color, GameState, Preferences, Square } from '@games/shared/chess/types'
 import { useHeld } from '../../motion/hooks'
@@ -85,6 +90,8 @@ function PlayerCard({
   away,
   you,
   bot,
+  timing,
+  onTick,
 }: {
   color: Color
   game: GameState
@@ -95,6 +102,8 @@ function PlayerCard({
   away?: boolean
   you?: boolean
   bot?: boolean
+  timing?: HeldTiming
+  onTick?: () => void
 }) {
   const captures = game.captured[color],
     shown = captures.slice(0, shownCaptures)
@@ -134,10 +143,7 @@ function PlayerCard({
           ))}
         </div>
       )}
-      <div className="ch-clock" aria-label={`${COLOR_NAMES[color]} clock: no time limit`}>
-        {active && game.status === 'playing' && <i />}
-        <span className="ch-untimed">— : —</span>
-      </div>
+      <ChessClock color={color} game={game} timing={timing} mine={!!you} onTick={onTick} />
     </div>
   )
 }
@@ -270,6 +276,14 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
     [game, selected, destinations, enabled, preferences.theme, preferences.highContrast, pending, seat],
   )
   const isOver = game.status !== 'playing'
+  /** How far into its state the game already was when this board opened; see `SceneOptions.since`. */
+  const [since] = useState(() => {
+    const now = serverNow(online.timing)
+    return now === null || !online.timing ? undefined : now - online.timing.since
+  })
+  const control = TIME_CONTROLS.find(
+    (c) => c.minutes === game.options.clock && c.increment === (game.options.increment ?? 0),
+  )
   // The result waits for the board: the mating move lands, the king falls, and the moment is seen.
   const resultReady = useHeld(isOver && !presenting, game.status === 'checkmate' ? 1200 : 500)
 
@@ -286,14 +300,26 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
     const timer = setTimeout(() => setSent(null), 5000)
     return () => clearTimeout(timer)
   }, [sent])
+  // The flag is heard as it falls — the snapshot that says so is the moment; a game that
+  // opens already flagged stays quiet.
+  const heardStatus = useRef(game.status)
+  useEffect(() => {
+    if (heardStatus.current === game.status) return
+    heardStatus.current = game.status
+    if (game.status === 'timeout' && preferences.sound) playChessSound('flag')
+  }, [game.status, preferences.sound])
   useEffect(() => {
     historyEnd.current?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' })
   }, [game.history.length, reduced])
 
-  /** Sounds come from the board, so they land with the piece rather than with the snapshot. */
-  function onImpact(kind: Impact) {
-    if (preferences.sound) playChessSound(kind)
+  function sound(kind: ChessSound, detail?: SoundDetail) {
+    if (preferences.sound) playChessSound(kind, detail)
   }
+  /** Sounds come from the board, so they land with the piece rather than with the snapshot. */
+  function onImpact(kind: Impact, detail: SoundDetail) {
+    sound(kind, detail)
+  }
+  const onTick = () => sound('tick')
 
   function selectSquare(square: Square) {
     if (!enabled) return
@@ -315,6 +341,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
     }
     const piece = game.pieces.find((p) => p.square === square)
     if (piece?.color === game.turn) {
+      sound('lift')
       setSelected(square)
       setNotice('')
     } else if (selected) setNotice('That square isn’t a legal move. Choose a marked destination.')
@@ -352,6 +379,8 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
     bot: Boolean(online.players[color]?.bot),
     // A capture shows by the captor's name once the piece has reached the tray.
     shownCaptures: Math.min(game.captured[color].length, graves ? graves[opposite(color)] : Infinity),
+    timing: online.timing,
+    onTick,
   })
 
   return (
@@ -419,6 +448,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                 onImpact={onImpact}
                 onPresenting={setPresenting}
                 onGraves={setGraves}
+                since={since}
               />
               <div className="ch-table-controls">
                 <div className="ch-view-controls">
@@ -472,9 +502,16 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
                 {statusDetail}
               </p>
               <div className="ch-session-tags">
-                <span>
-                  <Leaf size={12} /> No time limit
-                </span>
+                {game.options.clock ? (
+                  <span>
+                    <Timer size={12} /> {control?.label ?? 'Timed'} ·{' '}
+                    {controlName(game.options.clock, game.options.increment)}
+                  </span>
+                ) : (
+                  <span>
+                    <Leaf size={12} /> No time limit
+                  </span>
+                )}
                 <span>{botSkill ? `${botSkill} bot` : 'Two players'}</span>
               </div>
               <div className="ch-history-heading">
@@ -751,7 +788,9 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
             ? 'CHECKMATE'
             : game.status === 'resigned'
               ? `${COLOR_NAMES[opposite(game.winner!)]} RESIGNED`
-              : 'THE FINAL POSITION'}
+              : game.status === 'timeout'
+                ? `${COLOR_NAMES[game.turn]} RAN OUT OF TIME`
+                : 'THE FINAL POSITION'}
         </p>
         <h2>{endings[game.status]}</h2>
         <p className="ch-result-winner">

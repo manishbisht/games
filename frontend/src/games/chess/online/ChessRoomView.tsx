@@ -3,6 +3,7 @@ import type { ChessAction, Color, GameState } from '@games/shared/chess/types'
 import type { SeatInfo } from '@games/shared/protocol'
 import type { RoomViewProps } from '../../../online/games'
 import ChessGame from '../ChessGame'
+import { hold } from '../components/clock'
 import type { OnlineChessSession } from './session'
 
 const other = (seat: Color): Color => (seat === 'w' ? 'b' : 'w')
@@ -21,6 +22,7 @@ export default function ChessRoomView({ snapshot, you, api, leave }: RoomViewPro
     const send = (action: ChessAction) => api.action(action)
     return {
       state,
+      timing: hold(snapshot.timing),
       myColor: mySeat,
       players: { w: player(snapshot.seats.w), b: player(snapshot.seats.b) },
       rematch: {

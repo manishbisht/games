@@ -137,3 +137,66 @@ test('public rooms appear in the lobby and can be joined', async ({ browser }) =
   await host.context().close()
   await guest.context().close()
 })
+
+test('a timed room counts both clocks down by the server’s clock, through a reload', async ({
+  browser,
+  request,
+}) => {
+  const errors: string[] = []
+  // The lobby's clock picker reaches the server through the room's create call; this makes that
+  // call directly, as the host, so the clock is checked from the server's side of it.
+  const hostId = crypto.randomUUID()
+  const created = await request.post('http://127.0.0.1:8787/api/rooms', {
+    data: {
+      game: 'chess',
+      visibility: 'private',
+      name: 'Ann',
+      guestId: hostId,
+      options: { timeControl: '3+2' },
+    },
+  })
+  expect(created.status()).toBe(201)
+  const { code } = (await created.json()) as { code: string }
+  const host = await newPlayer(browser, errors)
+  await host.addInitScript((id) => localStorage.setItem('games-guest-id', id), hostId)
+  const guest = await newPlayer(browser, errors)
+  for (const [page, name] of [
+    [host, 'Ann'],
+    [guest, 'Ben'],
+  ] as const) {
+    await page.goto(`/#/chess/room/${code}`)
+    await page.getByLabel('Your name').fill(name)
+    await page.getByRole('button', { name: 'Join room' }).click()
+  }
+  await host.getByRole('button', { name: /Play as White/ }).click()
+  await guest.getByRole('button', { name: /Play as Black/ }).click()
+  await host.getByRole('button', { name: 'Start the game' }).click()
+
+  const clock = (page: Page, color: 'White' | 'Black') => page.getByRole('timer', { name: `${color} clock` })
+  // Nobody's time runs until both sides have made a move.
+  await expect(clock(host, 'White')).toHaveText('3:00')
+  await expect(clock(guest, 'Black')).toHaveText('3:00')
+  await expect(host.locator('.ch-session-tags')).toContainText('Blitz · 3 + 2')
+  const hostMove = keyboardPlayer(host, 'w')
+  const guestMove = keyboardPlayer(guest, 'b')
+  await hostMove('e2', 'e4')
+  await expect(guest.getByLabel('Move history')).toContainText('e4')
+  await guestMove('e7', 'e5')
+  // The increment is banked on each move; then White's clock is the one running.
+  await expect(clock(host, 'Black')).toHaveText('3:02')
+  await expect(clock(host, 'White')).toHaveText('3:01', { timeout: 4000 })
+  await expect(clock(host, 'White')).toHaveClass(/ch-clock-running/)
+  await expect(clock(host, 'Black')).not.toHaveClass(/ch-clock-running/)
+
+  // A reload mid-turn picks the count up where the server has it, not from the top.
+  await guest.reload()
+  await expect(clock(guest, 'White')).toHaveText(/^(2:5\d|3:0[01])$/)
+  const seconds = async (page: Page) => {
+    const [m, s] = ((await clock(page, 'White').textContent()) ?? '').split(':').map(Number)
+    return m * 60 + s
+  }
+  expect(Math.abs((await seconds(host)) - (await seconds(guest)))).toBeLessThanOrEqual(1)
+  expect(errors).toEqual([])
+  await host.context().close()
+  await guest.context().close()
+})

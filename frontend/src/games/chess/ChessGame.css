@@ -259,6 +259,29 @@
   border-color: light-dark(#bcc8ab, var(--theme-border));
   background: light-dark(#e7ecde, var(--theme-inset));
 }
+/* A timed clock reads quiet until it is running, and warm once it runs low. */
+.ch-timed {
+  gap: 8px;
+}
+.ch-timed:not(.ch-clock-running) {
+  color: light-dark(#8d9583, var(--theme-muted));
+}
+.ch-clock-running {
+  color: light-dark(#38452f, var(--theme-text));
+}
+.ch-clock.ch-clock-low {
+  color: light-dark(#9a3f2b, #f0a58e);
+  border-color: light-dark(#e2b9a5, #7a4a3c);
+  background: light-dark(#f7ebe3, color-mix(in srgb, #b74832 14%, var(--theme-inset)));
+}
+.ch-clock.ch-clock-low i {
+  background: #b74832;
+}
+.ch-clock.ch-clock-flag {
+  color: light-dark(#fff8f2, #fff1ea);
+  background: light-dark(#a6482f, #93402b);
+  border-color: light-dark(#a6482f, #93402b);
+}
 .ch-player-active .ch-player-details > span {
   color: light-dark(#657b52, var(--theme-muted));
 }
@@ -1525,6 +1548,39 @@
   animation:
     motion-pop var(--motion-slow) var(--ease-spring) both,
     ch-breathe 1.6s var(--ease-in-out) var(--motion-slow) infinite;
+}
+.ch-clock-low.ch-clock-running {
+  animation: ch-clock-low 1s var(--ease-in-out) infinite;
+}
+.ch-clock-flag {
+  animation: ch-clock-flag 620ms var(--ease-spring) both;
+}
+.ch-clock-flag svg {
+  animation: ch-flag-drop 700ms var(--ease-spring) 120ms both;
+  transform-origin: 20% 90%;
+}
+@keyframes ch-clock-low {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, #b74832 16%, transparent);
+  }
+}
+@keyframes ch-clock-flag {
+  0% {
+    scale: 1;
+  }
+  35% {
+    scale: 1.08;
+  }
+  100% {
+    scale: 1;
+  }
+}
+@keyframes ch-flag-drop {
+  from {
+    opacity: 0;
+    rotate: -50deg;
+    translate: 0 -6px;
+  }
 }
 .ch-captured span {
   display: inline-block;
