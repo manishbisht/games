@@ -1,14 +1,14 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import type { ComponentType, CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
-import type { Replay, ReplayPlayer } from '@games/shared/protocol'
+import type { Replay, ReplayFrame, ReplayPlayer as ReplaySeat } from '@games/shared/protocol'
 import { Check, Clapperboard, Clock, Copy, Pause, Play, StepBack, StepForward } from 'lucide-react'
 import { BoardSkeleton } from '../RouteSkeleton'
 import { useReducedMotion } from '../motion/preference'
 import { fetchReplay, ReplayUnavailable } from './api'
 import { onlineGame, replayUrl } from './games'
-import type { OnlineGame } from './games'
+import type { OnlineGame, ReplayViewProps } from './games'
 import { RoomFrame } from './RoomPage'
 import { expiryLeft, formatClock, REPLAY_SPEEDS, replayHoldMs, turnMarks } from './replayTiming'
 import './replay.css'
@@ -91,7 +91,30 @@ export default function ReplayPage({ game }: { game: string }) {
         </div>
       </RoomFrame>
     )
-  return <ReplayPlayerPage config={config} code={code} replay={load.replay} loadedAt={load.at} />
+  const { replay } = load,
+    left = expiryLeft(replay.expiresAt, load.at)
+  return (
+    <RoomFrame config={config} inRoom={false}>
+      <ReplayPlayer
+        states={replay.states}
+        players={replay.players}
+        forfeited={replay.forfeited}
+        View={config.ReplayView}
+        game={config}
+        eyebrow={`Replay · Room ${code}`}
+        footnote={
+          <>
+            <Clock size={13} aria-hidden="true" />
+            <span>
+              Replays live with their room and are gone 24 hours after its last move
+              {left ? ` — this one has ${left} left.` : '.'}
+              {replay.truncated ? ' This game ran long, so its opening moments were let go.' : ''}
+            </span>
+          </>
+        }
+      />
+    </RoomFrame>
+  )
 }
 
 function Missing({ title, config, children }: { title: string; config?: OnlineGame; children?: ReactNode }) {
@@ -107,29 +130,51 @@ function Missing({ title, config, children }: { title: string; config?: OnlineGa
 }
 
 /** "Ann vs Jules", or a list for a bigger table. */
-const tableName = (players: ReplayPlayer[]) =>
+const tableName = (players: ReplaySeat[]) =>
   players.length === 2
     ? `${players[0].name} vs ${players[1].name}`
     : new Intl.ListFormat('en', { type: 'conjunction' }).format(players.map((player) => player.name))
 
-function ReplayPlayerPage({
-  config,
-  code,
-  replay,
-  loadedAt,
-}: {
-  config: OnlineGame
-  code: string
-  replay: Replay
-  loadedAt: number
-}) {
-  const { states, players } = replay
+export interface ReplayPlayerProps {
+  /** Every state the game passed through, oldest first. */
+  states: ReplayFrame[]
+  players: ReplaySeat[]
+  /** Seats that forfeited, marked in the player list. */
+  forfeited?: readonly string[]
+  /** The game's replay view; without one, a card says it is coming and the timeline still works. */
+  View?: ComponentType<ReplayViewProps>
+  /** The game's name, where its page lives, and how to mark its turns on the scrubber. */
+  game: Pick<OnlineGame, 'name' | 'basePath' | 'replayTurn'>
+  /** Over the title: where this replay comes from ("Replay · Room ABC234"). */
+  eyebrow: string
+  /** The line under the bar — how long the replay lasts, or that it never expires — with its icon. */
+  footnote?: ReactNode
+}
+
+/**
+ * A finished game, played back: the header, the game's view, the player bar
+ * and the keys. It owns the clock — play, pause, step, scrub, speed — and
+ * hands the view the state to show. A room's replay page wraps it in the room
+ * frame; anything else with a game's states (a permanent link, say) can too.
+ *
+ * Playback arrives on the final state still playing, so a view animates the
+ * last move like any other, and stops once that state's hold has run out.
+ */
+export function ReplayPlayer({
+  states,
+  players,
+  forfeited,
+  View,
+  game,
+  eyebrow,
+  footnote,
+}: ReplayPlayerProps) {
   const last = states.length - 1
   const reduced = useReducedMotion()
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState<number>(1)
-  const [ready, setReady] = useState(!config.ReplayView)
+  const [ready, setReady] = useState(!View)
   const [copied, setCopied] = useState(false)
   const started = useRef(false)
 
@@ -149,14 +194,12 @@ function ReplayPlayerPage({
     return () => clearTimeout(timer)
   }, [ready, reduced, last])
 
+  // Each state holds for its time, then the next; the last one holds too,
+  // and only then does playback stop.
   useEffect(() => {
     if (!playing) return
     const timer = setTimeout(
-      () => {
-        const next = Math.min(last, index + 1)
-        setIndex(next)
-        if (next >= last) setPlaying(false)
-      },
+      () => (index >= last ? setPlaying(false) : setIndex(index + 1)),
       replayHoldMs(states, index, speed),
     )
     return () => clearTimeout(timer)
@@ -205,139 +248,128 @@ function ReplayPlayerPage({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const marks = useMemo(() => turnMarks(states, config.replayTurn), [states, config.replayTurn])
+  const marks = useMemo(() => turnMarks(states, game.replayTurn), [states, game.replayTurn])
   const start = states[0]?.at ?? 0
   const elapsed = (states[index]?.at ?? start) - start,
     total = (states[last]?.at ?? start) - start
-  const left = expiryLeft(replay.expiresAt, loadedAt)
-  const View = config.ReplayView
 
   return (
-    <RoomFrame config={config} inRoom={false}>
-      <main className="replay" data-playing={playing || undefined}>
-        <header className="replay-head">
-          <div>
-            <p className="replay-eyebrow">Replay · Room {code}</p>
-            <h1>{tableName(players)}</h1>
-            <ul className="replay-players" aria-label="Players">
-              {players.map((player) => (
-                <li key={player.seat}>
-                  {player.name}
-                  {player.bot && <span> · bot</span>}
-                  {replay.forfeited?.includes(player.seat) && <span> · forfeited</span>}
-                </li>
-              ))}
-            </ul>
+    <main className="replay" data-playing={playing || undefined}>
+      <header className="replay-head">
+        <div>
+          <p className="replay-eyebrow">{eyebrow}</p>
+          <h1>{tableName(players)}</h1>
+          <ul className="replay-players" aria-label="Players">
+            {players.map((player) => (
+              <li key={player.seat}>
+                {player.name}
+                {player.bot && <span> · bot</span>}
+                {forfeited?.includes(player.seat) && <span> · forfeited</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button
+          type="button"
+          className="replay-copy"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(location.href)
+              setCopied(true)
+            } catch {
+              setCopied(false)
+            }
+          }}
+        >
+          {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+          {copied ? 'Copied!' : 'Copy link'}
+        </button>
+      </header>
+
+      <section className="replay-stage" aria-label="Replay">
+        {View ? (
+          <Suspense fallback={<BoardSkeleton label="Setting up the board…" />}>
+            <View
+              states={states}
+              index={index}
+              playing={playing}
+              speed={speed}
+              players={players}
+              onReady={() => setReady(true)}
+            />
+          </Suspense>
+        ) : (
+          <div className="replay-soon">
+            <Clapperboard size={28} aria-hidden="true" />
+            <h2>Replay for {game.name} is coming soon.</h2>
+            <p>
+              The timeline below already works: it steps through all {states.length} moments of this game.
+            </p>
+            <p className="replay-soon-frame" aria-live="polite">
+              Moment {index + 1} of {states.length}
+              {index === last ? ' · the final position' : ''}
+            </p>
           </div>
+        )}
+      </section>
+
+      <div className="replay-bar" role="group" aria-label="Replay controls">
+        <div className="replay-buttons">
+          <button type="button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Step back">
+            <StepBack size={18} aria-hidden="true" />
+          </button>
           <button
             type="button"
-            className="replay-copy"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(location.href)
-                setCopied(true)
-              } catch {
-                setCopied(false)
-              }
-            }}
+            className="replay-play"
+            onClick={toggle}
+            aria-label={playing ? 'Pause' : index >= last && last > 0 ? 'Play again' : 'Play'}
+            disabled={last === 0}
           >
-            {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
-            {copied ? 'Copied!' : 'Copy link'}
+            {playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} aria-hidden="true" />}
           </button>
-        </header>
-
-        <section className="replay-stage" aria-label="Replay">
-          {View ? (
-            <Suspense fallback={<BoardSkeleton label="Setting up the board…" />}>
-              <View
-                states={states}
-                index={index}
-                playing={playing}
-                speed={speed}
-                players={players}
-                onReady={() => setReady(true)}
-              />
-            </Suspense>
-          ) : (
-            <div className="replay-soon">
-              <Clapperboard size={28} aria-hidden="true" />
-              <h2>Replay for {config.name} is coming soon.</h2>
-              <p>
-                The timeline below already works: it steps through all {states.length} moments of this game.
-              </p>
-              <p className="replay-soon-frame" aria-live="polite">
-                Moment {index + 1} of {states.length}
-                {index === last ? ' · the final position' : ''}
-              </p>
-            </div>
-          )}
-        </section>
-
-        <div className="replay-bar" role="group" aria-label="Replay controls">
-          <div className="replay-buttons">
-            <button type="button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Step back">
-              <StepBack size={18} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="replay-play"
-              onClick={toggle}
-              aria-label={playing ? 'Pause' : index >= last && last > 0 ? 'Play again' : 'Play'}
-              disabled={last === 0}
-            >
-              {playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} aria-hidden="true" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => go(index + 1)}
-              disabled={index === last}
-              aria-label="Step forward"
-            >
-              <StepForward size={18} aria-hidden="true" />
-            </button>
-          </div>
-          <Scrubber
-            index={index}
-            last={last}
-            marks={marks}
-            label={`Moment ${index + 1} of ${states.length}, ${formatClock(elapsed)} in`}
-            onScrub={go}
-          />
-          <p className="replay-clock" aria-hidden="true">
-            <span>
-              {index + 1}/{states.length}
-            </span>
-            <span>
-              {formatClock(elapsed)} / {formatClock(total)}
-            </span>
-          </p>
-          <div className="replay-speeds" role="group" aria-label="Playback speed">
-            {REPLAY_SPEEDS.map((rate) => (
-              <button key={rate} type="button" aria-pressed={speed === rate} onClick={() => setSpeed(rate)}>
-                {rate}×
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => go(index + 1)}
+            disabled={index === last}
+            aria-label="Step forward"
+          >
+            <StepForward size={18} aria-hidden="true" />
+          </button>
         </div>
-
-        <p className="replay-expiry">
-          <Clock size={13} aria-hidden="true" />
+        <Scrubber
+          index={index}
+          last={last}
+          marks={marks}
+          label={`Moment ${index + 1} of ${states.length}, ${formatClock(elapsed)} in`}
+          onScrub={go}
+        />
+        <p className="replay-clock" aria-hidden="true">
           <span>
-            Replays live with their room and are gone 24 hours after its last move
-            {left ? ` — this one has ${left} left.` : '.'}
-            {replay.truncated ? ' This game ran long, so its opening moments were let go.' : ''}
+            {index + 1}/{states.length}
+          </span>
+          <span>
+            {formatClock(elapsed)} / {formatClock(total)}
           </span>
         </p>
-        <p className="replay-keys" aria-hidden="true">
-          <kbd>Space</kbd> play/pause · <kbd>←</kbd>
-          <kbd>→</kbd> step · <kbd>Home</kbd>
-          <kbd>End</kbd> jump
-        </p>
-        <Link className="replay-back" to={config.basePath}>
-          Back to {config.name}
-        </Link>
-      </main>
-    </RoomFrame>
+        <div className="replay-speeds" role="group" aria-label="Playback speed">
+          {REPLAY_SPEEDS.map((rate) => (
+            <button key={rate} type="button" aria-pressed={speed === rate} onClick={() => setSpeed(rate)}>
+              {rate}×
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {footnote && <p className="replay-expiry">{footnote}</p>}
+      <p className="replay-keys" aria-hidden="true">
+        <kbd>Space</kbd> play/pause · <kbd>←</kbd>
+        <kbd>→</kbd> step · <kbd>Home</kbd>
+        <kbd>End</kbd> jump
+      </p>
+      <Link className="replay-back" to={game.basePath}>
+        Back to {game.name}
+      </Link>
+    </main>
   )
 }
 

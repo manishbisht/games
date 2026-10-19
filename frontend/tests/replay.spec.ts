@@ -174,6 +174,22 @@ test('under reduced motion nothing plays until asked', async ({ page }) => {
   await expect.poll(() => position(page), { timeout: 10_000 }).toBeGreaterThan(0)
 })
 
+test('playback arrives on the last move still playing, so it animates, then stops', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const code = await finishedGame(page)
+  await page.goto(`/#/chess/replay/${code}`)
+  const slider = page.getByRole('slider', { name: 'Replay position' })
+  const last = await slider.getAttribute('max')
+  // 2×: the final state holds for 1.2 s, ample to see it arrive playing.
+  await page.getByRole('button', { name: '2×' }).click()
+  await expect(slider).toHaveValue(last!, { timeout: 30_000 })
+  // The view is told it is still playing as it lands on the final state…
+  await expect(page.locator('main.replay')).toHaveAttribute('data-playing', 'true')
+  // …and playback ends once that state's hold has run out.
+  await expect(page.getByRole('button', { name: 'Play again' })).toBeVisible()
+  await expect(page.locator('main.replay')).not.toHaveAttribute('data-playing')
+})
+
 test('a replay that is not there says why', async ({ page }) => {
   await page.goto('/#/chess/replay/ZZZZZZ')
   await expect(page.getByRole('heading', { name: 'This replay isn’t here.' })).toBeVisible()
