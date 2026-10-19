@@ -154,6 +154,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     ...roomView(() => import('../games/chess/online/ChessRoomView')),
   },
   estate: {
+    anchorsReactions: true,
     minSeats: 2,
     // Tokens and colours are handed out at the start, once the room knows who
     // turned up, so a seat taken beforehand cannot promise one.
