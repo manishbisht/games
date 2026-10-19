@@ -6,13 +6,13 @@ import type { RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import type { ReactNode } from 'react'
 import { HeaderAuth, useIdentity } from './identity'
 import { useRoom } from './useRoom'
-import { onlineGame } from './games'
+import { onlineGame, replayUrl } from './games'
 import type { BotSkill, OnlineGame } from './games'
 import { presenceEvents } from './roomState'
 import NotifyToggle from './NotifyToggle'
 import ReactionBar from './ReactionBar'
 import ReactionOverlay from './ReactionOverlay'
-import { ArrowLeft, Bot, Check, Copy, Eye, Link2, UserMinus, X } from 'lucide-react'
+import { ArrowLeft, Bot, Check, Copy, Eye, Link2, Play, UserMinus, X } from 'lucide-react'
 import ChessShell from '../games/chess/ChessShell'
 import { chessGame, games } from '../games/catalog'
 import { BoardSkeleton } from '../RouteSkeleton'
@@ -98,7 +98,7 @@ export default function RoomPage({ game }: { game: string }) {
   return <Room code={code} config={config} />
 }
 
-function RoomFrame({
+export function RoomFrame({
   config,
   children,
   inRoom = true,
@@ -225,6 +225,12 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   const toastStack = (
     <div key="toasts" className="ch-room-toasts" role="status">
       {snapshot?.gameState != null && you && <Audience snapshot={snapshot} you={you} floating />}
+      {/* The table has finished: offer the game back, unless its own result screen already does. */}
+      {snapshot?.status === 'finished' && snapshot.gameState != null && !config.linksReplay && (
+        <Link className="room-replay-link" to={replayUrl(snapshot.game, snapshot.code)}>
+          <Play size={14} aria-hidden="true" /> Watch the replay
+        </Link>
+      )}
       {toasts.map((toast) => (
         <div key={toast.id} className={`ch-room-toast${toast.leaving ? ' ch-room-toast-leaving' : ''}`}>
           {toast.text}

@@ -1,0 +1,355 @@
+/*
+ * The replay page: a stage the game draws its replay on, and a player bar
+ * under it. Site tokens only (theme.css), so it reads the same inside every
+ * game's room frame, chess's included.
+ */
+.replay {
+  --replay-ink: var(--theme-text);
+  --replay-muted: var(--theme-muted);
+  --replay-surface: var(--theme-surface);
+  --replay-inset: var(--theme-inset);
+  --replay-border: var(--theme-border);
+  --replay-accent: var(--theme-accent);
+  width: min(1120px, 100%);
+  margin: 24px auto 56px;
+  padding: 0 16px;
+  display: grid;
+  gap: 16px;
+  color: var(--replay-ink);
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+.replay-loading {
+  padding: 48px 16px;
+}
+
+.replay-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.replay-eyebrow {
+  margin: 0 0 6px;
+  color: var(--replay-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.replay h1 {
+  margin: 0;
+  font:
+    400 clamp(24px, 4.4vw, 34px) / 1.15 Georgia,
+    serif;
+  overflow-wrap: anywhere;
+}
+.replay-players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.replay-players li {
+  padding: 3px 10px;
+  border: 1px solid var(--replay-border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.replay-players span {
+  color: var(--replay-muted);
+}
+
+.replay button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--replay-border);
+  border-radius: 10px;
+  background: var(--replay-surface);
+  color: var(--replay-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast, 160ms) ease,
+    border-color var(--motion-fast, 160ms) ease,
+    transform var(--motion-fast, 160ms) ease;
+}
+.replay button:hover:not(:disabled) {
+  border-color: var(--replay-accent);
+}
+.replay button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.replay button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.replay button:focus-visible,
+.replay a:focus-visible,
+.replay input:focus-visible {
+  outline: 2px solid var(--replay-accent);
+  outline-offset: 3px;
+}
+
+/* The stage: whatever the game draws, edge to edge. */
+.replay-stage {
+  position: relative;
+  display: grid;
+  min-height: clamp(300px, 60svh, 680px);
+  border: 1px solid var(--replay-border);
+  border-radius: 20px;
+  background: var(--replay-surface);
+  overflow: hidden;
+}
+.replay-stage > * {
+  min-width: 0;
+}
+.replay-soon {
+  place-self: center;
+  max-width: 30rem;
+  padding: 32px 24px;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.replay-soon svg {
+  color: var(--replay-accent);
+}
+.replay-soon h2 {
+  margin: 0;
+  font:
+    400 clamp(20px, 3vw, 26px) / 1.25 Georgia,
+    serif;
+}
+.replay-soon p {
+  margin: 0;
+  color: var(--replay-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.replay .replay-soon-frame {
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--replay-inset);
+  color: var(--replay-ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The player bar: buttons, scrubber, clock, speed. Sticks to the bottom of a tall page. */
+.replay-bar {
+  position: sticky;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--replay-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--replay-surface) 92%, transparent);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.08);
+  backdrop-filter: blur(8px);
+}
+.replay-buttons {
+  display: flex;
+  gap: 6px;
+}
+.replay .replay-play {
+  min-width: 52px;
+  border-color: transparent;
+  background: var(--replay-accent);
+  color: var(--replay-surface);
+}
+.replay .replay-play:hover:not(:disabled) {
+  border-color: transparent;
+  filter: brightness(1.08);
+}
+.replay-clock {
+  display: grid;
+  justify-items: end;
+  margin: 0;
+  color: var(--replay-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.replay-clock span:first-child {
+  color: var(--replay-ink);
+  font-weight: 600;
+}
+.replay-speeds {
+  display: flex;
+  padding: 3px;
+  border: 1px solid var(--replay-border);
+  border-radius: 12px;
+  background: var(--replay-inset);
+}
+.replay .replay-speeds button {
+  min-width: 44px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--replay-muted);
+  font-variant-numeric: tabular-nums;
+}
+.replay .replay-speeds button[aria-pressed='true'] {
+  background: var(--replay-surface);
+  color: var(--replay-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+
+/* The scrubber: a native range, restyled, over a strip of turn marks. */
+.replay-scrubber {
+  position: relative;
+  display: grid;
+  align-items: center;
+  height: 44px;
+}
+.replay-scrubber svg {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  top: calc(50% + 7px);
+  width: calc(100% - 18px);
+  height: 6px;
+  pointer-events: none;
+}
+.replay-scrubber path {
+  stroke: var(--replay-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.55;
+}
+.replay-scrubber input {
+  --fill: calc(var(--progress) * 100%);
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  border-radius: 8px;
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+.replay-scrubber input::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--replay-accent) var(--fill), var(--replay-inset) var(--fill));
+}
+.replay-scrubber input::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--replay-inset);
+}
+.replay-scrubber input::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--replay-accent);
+}
+.replay-scrubber input::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 2px solid var(--replay-surface);
+  border-radius: 50%;
+  background: var(--replay-accent);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+  appearance: none;
+  transition: scale var(--motion-fast, 160ms) ease;
+}
+.replay-scrubber input::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--replay-surface);
+  border-radius: 50%;
+  background: var(--replay-accent);
+}
+.replay-scrubber input:active::-webkit-slider-thumb {
+  scale: 1.2;
+}
+
+.replay-expiry,
+.replay-keys {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  color: var(--replay-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.replay-expiry {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.replay-expiry svg {
+  flex-shrink: 0;
+  margin-top: 0.3em;
+}
+.replay-keys kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--replay-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--replay-surface);
+  font: inherit;
+  font-size: 11px;
+}
+.replay-back {
+  justify-self: start;
+  color: var(--replay-muted);
+  font-size: 13px;
+}
+.replay-notice p {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .replay {
+    margin-top: 16px;
+  }
+  .replay-bar {
+    grid-template-columns: auto 1fr;
+    padding: 8px 10px;
+    gap: 4px 10px;
+  }
+  .replay-scrubber {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .replay-clock {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .replay-speeds {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+  .replay .replay-speeds button {
+    flex: 1;
+  }
+  .replay-keys {
+    display: none;
+  }
+}
+
+:root[data-motion='reduced'] .replay button,
+:root[data-motion='reduced'] .replay-scrubber input::-webkit-slider-thumb {
+  transition: none;
+  animation: none;
+}

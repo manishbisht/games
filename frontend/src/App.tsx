@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { games } from './games/catalog'
-import { homeScrollPosition, roomPage, screenOf } from './navigation'
+import { homeScrollPosition, replayPage, roomPage, screenOf } from './navigation'
 import { PlayersOnlineProvider } from './online/playersOnline'
 import HomePage from './pages/HomePage'
 import ChunkErrorBoundary from './ChunkErrorBoundary'
@@ -9,6 +9,7 @@ import RouteSkeleton from './RouteSkeleton'
 import { useTheme } from './theme/ThemeProvider'
 
 const RoomPage = roomPage.Component
+const ReplayPage = replayPage.Component
 /** Profiles are a page most visits never open, so they stay out of the entry chunk. */
 const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 const DESCRIPTION = `Play ${new Intl.ListFormat('en', { type: 'conjunction' }).format(
@@ -18,12 +19,12 @@ const DESCRIPTION = `Play ${new Intl.ListFormat('en', { type: 'conjunction' }).f
 export default function App() {
   const { theme } = useTheme()
   const { pathname } = useLocation()
-  const { game, room } = screenOf(pathname)
+  const { game, room, replay } = screenOf(pathname)
   const profile = pathname === '/me' ? 'Your games' : pathname.startsWith('/player/') ? 'Player' : null
 
   useEffect(() => {
     document.title = game
-      ? `${game.name} — Games`
+      ? `${replay ? `${game.name} replay` : game.name} — Games`
       : profile
         ? `${profile} — Games`
         : 'Games — A little play goes a long way.'
@@ -33,7 +34,7 @@ export default function App() {
     document
       .querySelector('link[rel="icon"]')
       ?.setAttribute('href', `${import.meta.env.BASE_URL}${game?.icon ?? 'games.svg'}`)
-  }, [game, profile])
+  }, [game, profile, replay])
 
   // A layout effect, so it lands inside the route transition's commit: the
   // collection comes back where it was left, with the card the game folds
@@ -51,7 +52,7 @@ export default function App() {
   return (
     <PlayersOnlineProvider game={game?.id}>
       <ChunkErrorBoundary resetKey={pathname}>
-        <Suspense fallback={<RouteSkeleton game={game} room={room} />}>
+        <Suspense fallback={<RouteSkeleton game={game} room={room || Boolean(replay)} />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/me" element={<ProfilePage />} />
@@ -68,6 +69,15 @@ export default function App() {
               .filter((entry) => entry.online)
               .map(({ id, path }) => (
                 <Route key={`${path}/room`} path={`${path}/room/:code`} element={<RoomPage game={id} />} />
+              ))}
+            {games
+              .filter((entry) => entry.online)
+              .map(({ id, path }) => (
+                <Route
+                  key={`${path}/replay`}
+                  path={`${path}/replay/:code`}
+                  element={<ReplayPage game={id} />}
+                />
               ))}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

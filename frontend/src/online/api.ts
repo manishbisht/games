@@ -3,6 +3,7 @@ import type {
   MyProfile,
   PublicProfile,
   PublicRoomSummary,
+  Replay,
   RoomVisibility,
 } from '@games/shared/protocol'
 
@@ -64,6 +65,30 @@ export async function fetchLobby(game: GameId): Promise<PublicRoomSummary[]> {
   const res = await fetch(`${API_URL}/api/lobby?game=${game}`)
   if (!res.ok) throw new Error('Could not load open rooms.')
   return ((await res.json()) as { rooms: PublicRoomSummary[] }).rooms
+}
+
+/** Why a replay could not be had: gone (or never finished), asked for too often, or anything else. */
+export class ReplayUnavailable extends Error {
+  readonly reason: 'missing' | 'busy' | 'failed'
+  constructor(reason: ReplayUnavailable['reason']) {
+    super(
+      reason === 'missing'
+        ? 'No replay here.'
+        : reason === 'busy'
+          ? 'That’s a lot of replays at once. Try again in a minute.'
+          : 'Could not load the replay right now.',
+    )
+    this.reason = reason
+  }
+}
+
+/** A room's last finished game, every state as a spectator saw it (see `Replay`). */
+export async function fetchReplay(code: string, signal?: AbortSignal): Promise<Replay> {
+  const res = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(code)}/replay?game=last`, { signal })
+  if (res.status === 404) throw new ReplayUnavailable('missing')
+  if (res.status === 429) throw new ReplayUnavailable('busy')
+  if (!res.ok) throw new ReplayUnavailable('failed')
+  return (await res.json()) as Replay
 }
 
 export function roomSocketUrl(code: string): string {

@@ -7,18 +7,21 @@ import { reducedMotion } from './motion/preference'
 
 /** The shared room page, warmed alongside a game's own chunk on the way to a room. */
 export const roomPage = lazyWithPreload(() => import('./online/RoomPage'))
+/** A room's finished game, played back. */
+export const replayPage = lazyWithPreload(() => import('./online/ReplayPage'))
 
-/** Which screen a path shows: the collection, a game, or one of its rooms. */
-export function screenOf(pathname: string): { game?: GameEntry; room: boolean } {
+/** Which screen a path shows: the collection, a game, one of its rooms, or a room's replay. */
+export function screenOf(pathname: string): { game?: GameEntry; room: boolean; replay?: boolean } {
   for (const game of games) {
     if (matchPath(game.path, pathname)) return { game, room: false }
     if (matchPath(`${game.path}/room/:code`, pathname)) return { game, room: true }
+    if (matchPath(`${game.path}/replay/:code`, pathname)) return { game, room: false, replay: true }
   }
   return { room: false }
 }
 const screenKey = (pathname: string) => {
-  const { game, room } = screenOf(pathname)
-  return game ? `${game.id}${room ? '/room' : ''}` : '/'
+  const { game, room, replay } = screenOf(pathname)
+  return game ? `${game.id}${room ? '/room' : replay ? '/replay' : ''}` : '/'
 }
 
 let homeScroll = 0
@@ -117,14 +120,19 @@ function transition(from: string, to: string, action: string, apply: () => void)
   }
   const target = screenOf(to),
     source = screenOf(from),
-    opening = fromKey === '/' && target.game && !target.room ? visible(cardFor(target.game.id)) : null,
+    opening =
+      fromKey === '/' && target.game && !target.room && !target.replay
+        ? visible(cardFor(target.game.id))
+        : null,
     closing = fromKey !== '/' && toKey === '/'
   let card = opening
   if (card) card.style.viewTransitionName = 'game-stage'
   const vt = viewTransition(opening ? 'open' : closing ? 'close' : 'swap', apply, {
     prepare: async () => {
       if (!target.game) return
-      const loads = [target.game.preload(), ...(target.room ? [roomPage.preload()] : [])]
+      const loads = target.replay
+        ? [replayPage.preload()]
+        : [target.game.preload(), ...(target.room ? [roomPage.preload()] : [])]
       await Promise.race([Promise.all(loads), wait(CHUNK_GRACE_MS)])
     },
     after: () => {
