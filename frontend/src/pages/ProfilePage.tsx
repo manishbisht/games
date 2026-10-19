@@ -17,7 +17,7 @@ import { HeaderAuth, useIdentity } from '../online/identity'
 import NotifyToggle from '../online/NotifyToggle'
 import { useMe } from '../online/useMe'
 import ThemeControl from '../theme/ThemeControl'
-import { ordinal, timeAgo } from './format'
+import { dayAgo, ordinal, timeAgo, toTime } from './format'
 import YourTables from './YourTables'
 import './ProfilePage.css'
 
@@ -110,7 +110,21 @@ function resultLabel(record: PublicGameRecord) {
   return record.result === 'win' ? 'Won' : record.result === 'loss' ? 'Lost' : 'Draw'
 }
 
-function History({ records, now }: { records: PublicGameRecord[]; now: number }) {
+/**
+ * When each game was. A player's own record says it to the minute; a public
+ * profile is only told the day (and may be told it as a date string), so it
+ * says the day — never "14 hr. ago" for a game that was this morning.
+ */
+function When({ at, now, byDay }: { at: number | string; now: number; byDay: boolean }) {
+  const time = toTime(at)
+  if (!Number.isFinite(time)) return null
+  const iso = new Date(time).toISOString()
+  return (
+    <time dateTime={byDay ? iso.slice(0, 10) : iso}>{byDay ? dayAgo(time, now) : timeAgo(time, now)}</time>
+  )
+}
+
+function History({ records, now, byDay }: { records: PublicGameRecord[]; now: number; byDay: boolean }) {
   return (
     <ol className="profile-history">
       {records.map((record, index) => {
@@ -144,7 +158,7 @@ function History({ records, now }: { records: PublicGameRecord[]; now: number })
                   {delta >= 0 ? `+${delta}` : `−${-delta}`}
                 </span>
               )}
-              <time dateTime={new Date(record.at).toISOString()}>{timeAgo(record.at, now)}</time>
+              <When at={record.at} now={now} byDay={byDay} />
             </div>
           </li>
         )
@@ -197,6 +211,7 @@ function Profile({ profile, mine }: { profile: PublicProfile | MyProfile; mine: 
   )
   const active = 'active' in profile ? profile.active : []
   const signedIn = mine ? identity.isSignedIn : !profile.isGuest
+  const since = toTime(profile.since) || 0
   return (
     <>
       <section className="profile-hero">
@@ -214,10 +229,15 @@ function Profile({ profile, mine }: { profile: PublicProfile | MyProfile; mine: 
                 {played} {played === 1 ? 'game' : 'games'} played
               </>
             )}
-            {profile.since > 0 && (
+            {since > 0 && (
               <>
                 {' '}
-                · since {new Date(profile.since).toLocaleDateString('en', { month: 'long', year: 'numeric' })}
+                · since{' '}
+                {new Date(since).toLocaleDateString('en', {
+                  month: 'long',
+                  year: 'numeric',
+                  ...(mine ? {} : { timeZone: 'UTC' }),
+                })}
               </>
             )}
           </p>
@@ -240,7 +260,7 @@ function Profile({ profile, mine }: { profile: PublicProfile | MyProfile; mine: 
           </section>
           <section className="profile-section" aria-labelledby="profile-history-title">
             <h2 id="profile-history-title">Recent games</h2>
-            <History records={profile.recent} now={now} />
+            <History records={profile.recent} now={now} byDay={!mine} />
           </section>
         </>
       ) : (

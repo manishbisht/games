@@ -13,6 +13,32 @@ export function timeAgo(at: number, now: number): string {
   return new Date(at).toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+const DAY_MS = 86_400_000
+
+/**
+ * A server time as milliseconds, whether it came as a number or as a date
+ * string ("2026-10-19"), which is how a coarsened public time may be written.
+ */
+export function toTime(at: number | string): number {
+  return typeof at === 'number' ? at : Date.parse(at)
+}
+
+/**
+ * "today", "yesterday", "3 days ago" — and a date past a month — for a time
+ * known only to the day (a public profile's, the start of a UTC day). Counted
+ * in UTC days, so it never claims an hour it was not told.
+ */
+export function dayAgo(at: number, now: number): string {
+  const days = Math.floor(now / DAY_MS) - Math.floor(at / DAY_MS)
+  if (days < 30) return days <= 0 ? 'today' : relative.format(-days, 'day')
+  return new Date(at).toLocaleDateString('en', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 /** "1st", "2nd", "3rd", "4th". */
 export function ordinal(place: number): string {
   const tens = place % 100
