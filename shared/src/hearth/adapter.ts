@@ -72,14 +72,17 @@ function optionsOf(raw: unknown): HearthOptions {
   return rules ? { mode, rules } : { mode }
 }
 
-const table = (seats: OnlineSeat[], options: unknown) => {
+const table = (seats: OnlineSeat[], options: unknown, ctx: Ctx): GameState => {
   const { mode, rules } = optionsOf(options)
-  return createGame({
-    playerCount: seats.length,
-    names: seats.map((seat) => seat.name),
-    mode,
-    rules,
-  })
+  return {
+    ...createGame({
+      playerCount: seats.length,
+      names: seats.map((seat) => seat.name),
+      mode,
+      rules,
+    }),
+    startedAt: ctx.now,
+  }
 }
 
 export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
@@ -100,7 +103,7 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
     return { kind: 'move', pieceId: action.pieceId }
   },
 
-  create: (seats, options) => table(seats, options),
+  create: (seats, options, ctx) => table(seats, options, ctx),
 
   apply(state, seat, seats, action) {
     if (state.phase === 'won') return { error: 'NOT_PLAYING', message: 'The game is already won.' }
@@ -134,7 +137,10 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
     if (state.phase === 'moving')
       return {
         afterMs: motionDuration(state, false) + MOTION_GRACE_MS,
-        resolve: (current) => gameReducer(current, { type: 'ANIMATION_DONE' }),
+        resolve: (current, ctx) => {
+          const next = gameReducer(current, { type: 'ANIMATION_DONE' })
+          return next.phase === 'won' ? { ...next, endedAt: ctx.now } : next
+        },
       }
     if (state.phase === 'pass')
       return {
@@ -178,5 +184,5 @@ export const hearthAdapter: GameAdapter<GameState, HearthOnlineAction> = {
   },
 
   /** Same table, same colours: a Ludo seat carries no advantage worth rotating. */
-  rematch: (_prev, seats, options) => ({ state: table(seats, options) }),
+  rematch: (_prev, seats, options, ctx) => ({ state: table(seats, options, ctx) }),
 }

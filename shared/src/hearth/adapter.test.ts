@@ -130,6 +130,23 @@ describe('hearth adapter pacing', () => {
     expect(hearthAdapter.waitingOn(landed.state, SEATS)).toEqual(['p0'])
   })
 
+  it('stamps when the table was dealt, and when it was won, on the room clock', () => {
+    expect(start().startedAt).toBe(1_700_000_000_000)
+    const pieces = start().pieces.map((p) =>
+      p.playerId === 'red' ? { ...p, progress: p.id === 'red-0' ? 51 : 57 } : p,
+    )
+    const almost: GameState = {
+      ...start(),
+      pieces,
+      phase: 'choose',
+      dice: 6,
+      legalMoves: [{ pieceId: 'red-0', from: 51, to: 57, captures: [] }],
+    }
+    const won = settle(act(almost, 'p0', { kind: 'move', pieceId: 'red-0' }))
+    expect(won.state.phase).toBe('won')
+    expect(won.state.endedAt).toBe(1_700_000_000_000)
+  })
+
   it('holds a rolled-but-unplayable turn, then passes it on by itself', () => {
     const rolled = settle(act(start(), 'p0', { kind: 'roll' }), 0.1).state
     expect(rolled.phase).toBe('pass')
@@ -205,7 +222,10 @@ describe('bots', () => {
 
   it('rolls for a bot seat whose turn it is to roll', () => {
     const state = hearthAdapter.create(
-      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      [
+        { id: 'p0', name: 'Ann' },
+        { id: 'p1', name: 'Cleo' },
+      ],
       {},
       ctx,
     ) as GameState
@@ -216,7 +236,10 @@ describe('bots', () => {
 
   it('leaves a seat alone when the game is not waiting on it', () => {
     const state = hearthAdapter.create(
-      [{ id: 'p0', name: 'Ann' }, { id: 'p1', name: 'Cleo' }],
+      [
+        { id: 'p0', name: 'Ann' },
+        { id: 'p1', name: 'Cleo' },
+      ],
       {},
       ctx,
     ) as GameState

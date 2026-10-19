@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createGame, gameReducer, getLegalMoves } from './engine'
+import {
+  createGame,
+  gameReducer,
+  getLegalMoves,
+  hopDurations,
+  motionDuration,
+  settleDuration,
+} from './engine'
 import type { GameState } from './types'
 
 function roll(state: GameState, value: number) {
@@ -138,5 +145,41 @@ describe('Hearth & Home rules', () => {
     }
     expect(state.phase).toBe('won')
     expect(state.pieces.filter((p) => p.playerId === state.winner).every((p) => p.progress === 57)).toBe(true)
+  })
+})
+
+describe('Hearth & Home move timing', () => {
+  const moving = (from: number, to: number, captures: string[] = []): GameState => ({
+    ...createGame(),
+    phase: 'moving',
+    motion: {
+      pieceId: 'red-0',
+      from,
+      to,
+      captures,
+      capturedPieces: [],
+      steps: from < 0 ? [0] : Array.from({ length: to - from }, (_, i) => from + i + 1),
+    },
+  })
+
+  it('is exactly the hops the board plays plus what follows the last one', () => {
+    for (const state of [moving(-1, 0), moving(3, 9), moving(20, 24, ['blue-0']), moving(54, 57)]) {
+      const hops = hopDurations(state.motion!).reduce((sum, ms) => sum + ms, 0)
+      expect(motionDuration(state, false)).toBe(hops + settleDuration(state.motion!))
+    }
+  })
+
+  it('gives every step a hop, starting and ending a walk a little slower than it cruises', () => {
+    const hops = hopDurations(moving(3, 9).motion!)
+    expect(hops).toHaveLength(6)
+    expect(hops[0]).toBeGreaterThan(hops[2])
+    expect(hops[5]).toBeGreaterThan(hops[2])
+  })
+
+  it('leaves time for a capture to land and a piece to settle home', () => {
+    expect(settleDuration(moving(20, 24, ['blue-0']).motion!)).toBeGreaterThan(
+      settleDuration(moving(3, 7).motion!),
+    )
+    expect(settleDuration(moving(54, 57).motion!)).toBeGreaterThan(settleDuration(moving(3, 7).motion!))
   })
 })

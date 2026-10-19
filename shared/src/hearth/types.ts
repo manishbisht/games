@@ -54,6 +54,10 @@ export interface GameState {
   winner: PlayerId | null
   events: GameEvent[]
   eventSequence: number
+  /** Server clock (ms) when this table was dealt, for a game clock that survives a reconnect. */
+  startedAt?: number
+  /** Server clock (ms) when the last piece came home. */
+  endedAt?: number
 }
 export interface GameConfig {
   playerCount?: number

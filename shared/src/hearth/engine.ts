@@ -1,5 +1,5 @@
 import { absoluteSpace, HOME, PALETTES, PLAYER_IDS, SAFE_SPACES, TRACK_LENGTH } from './board'
-import type { Action, EventKind, GameConfig, GameState, LegalMove, Piece, PlayerId } from './types'
+import type { Action, EventKind, GameConfig, GameState, LegalMove, Motion, Piece, PlayerId } from './types'
 
 export function createGame(config: GameConfig = {}): GameState {
   const count = Math.max(2, Math.min(4, Math.trunc(config.playerCount || 4)))
@@ -225,17 +225,40 @@ export function progressFor(state: GameState, playerId: PlayerId) {
   }
 }
 
-export function motionDuration(state: GameState, reducedMotion: boolean) {
-  if (reducedMotion) return 180
-  return (
-    (state.motion?.steps.length || 1) * 165 +
-    (state.motion?.captures.length ? 550 : state.motion?.to === HOME ? 650 : 220)
-  )
+/**
+ * How long each hop of a walk takes, in milliseconds. The board and the server
+ * read the same numbers, so a piece always lands before the turn moves on.
+ * The first hop carries the crouch before take-off and the last the reach for
+ * the landing, so a walk starts and finishes a little slower than it cruises;
+ * leaving the nest is one long leap across the court rather than a step.
+ */
+export function hopDurations(motion: Pick<Motion, 'from' | 'steps'>): number[] {
+  if (motion.from < 0) return [480]
+  const last = motion.steps.length - 1
+  return motion.steps.map((_, i) => 150 + (i === 0 ? 55 : 0) + (i === last ? 45 : 0))
 }
 
-/** `[full, reducedMotion]` milliseconds for the beats that resolve on a timer. */
+/**
+ * What follows the last hop: a capture's hit, knock-back and flight home, a
+ * piece settling into the centre, or a plain landing.
+ */
+export function settleDuration(motion: Pick<Motion, 'captures' | 'to'>): number {
+  return motion.captures.length ? 960 : motion.to === HOME ? 720 : 240
+}
+
+export function motionDuration(state: GameState, reducedMotion: boolean) {
+  if (reducedMotion) return 180
+  if (!state.motion) return settleDuration({ captures: [], to: 0 })
+  return hopDurations(state.motion).reduce((sum, ms) => sum + ms, 0) + settleDuration(state.motion)
+}
+
+/**
+ * `[full, reducedMotion]` milliseconds for the beats that resolve on a timer.
+ * `rolling` is only the rattle in the hand: the throw itself plays once the
+ * number is known, inside the beat that follows it.
+ */
 const PAUSES = {
-  rolling: [1100, 220],
+  rolling: [650, 220],
   pass: [1700, 600],
   aiRoll: [750, 300],
   aiChoose: [900, 350],
