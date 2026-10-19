@@ -391,6 +391,8 @@ function Table({
               ref={board}
               state={game}
               timing={online?.timing}
+              receivedAt={online?.receivedAt}
+              recent={online?.recent}
               running={!hidden}
               canRoll={canRoll}
               onRoll={doRoll}

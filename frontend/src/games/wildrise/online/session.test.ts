@@ -104,6 +104,34 @@ describe('wildriseSession', () => {
     expect(wire.action).toHaveBeenCalledTimes(1)
     expect(wire.action).toHaveBeenCalledWith({ kind: 'roll' })
   })
+
+  it('hands the board each recent state with when it arrived, so a burst can be played in order', () => {
+    const playing = table(seated)
+    const snapshot: RoomSnapshot = {
+      protocol: PROTOCOL_VERSION,
+      code: 'ABC234',
+      game: 'wildrise',
+      visibility: 'private',
+      status: 'playing',
+      seatIds: ['p0', 'p1', 'p2'],
+      seats: seated,
+      gameState: playing.state,
+      timing: { now: 2000, since: 1500 },
+    }
+    const lobby = { ...snapshot, status: 'open' as const, gameState: null, timing: undefined }
+    const session = wildriseSession(snapshot, { id: 'ann', seat: 'p0', isHost: true }, api(), () => {}, {
+      receivedAt: 812,
+      recent: [
+        { seq: 4, snapshot: lobby, receivedAt: 400 },
+        { seq: 5, snapshot, receivedAt: 812 },
+      ],
+    })
+    expect(session.receivedAt).toBe(812)
+    expect(session.recent).toEqual([
+      { seq: 4, state: null, timing: undefined, receivedAt: 400 },
+      { seq: 5, state: playing.state, timing: { now: 2000, since: 1500 }, receivedAt: 812 },
+    ])
+  })
 })
 
 describe('claimTarget', () => {

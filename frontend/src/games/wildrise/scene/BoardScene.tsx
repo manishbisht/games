@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import type { BeatTiming } from '@games/shared/protocol'
 import type { GameState } from '@games/shared/wildrise/types'
 import type { Cue } from '../game/audio'
+import type { TableMoment } from '../online/session'
 import { createScene } from './createScene'
 import type { SceneApi } from './createScene'
 import type { Squares } from './story'
@@ -12,6 +13,10 @@ interface Props {
   state: GameState
   /** The room's word on how far into `state` it already is. */
   timing?: BeatTiming
+  /** When `state` arrived (`performance.now()`), which `timing` counts on from. */
+  receivedAt?: number
+  /** The room's recent states in arrival order, newest (`state`) last. */
+  recent?: TableMoment[]
   running: boolean
   canRoll: boolean
   onRoll: () => void
@@ -27,14 +32,16 @@ interface Props {
  * it is played onto the same scene rather than tearing WebGL down and up.
  */
 export default forwardRef<BoardControls, Props>(function BoardScene(
-  { state, timing, running, canRoll, onRoll, onCue, onPositions, onFailure },
+  { state, timing, receivedAt, recent, running, canRoll, onRoll, onCue, onPositions, onFailure },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
-  const initial = useRef({ state, timing }),
+  const initial = useRef({ state, timing, receivedAt }),
     handlers = useRef({ onRoll, onCue, onPositions, onFailure })
   const [failed, setFailed] = useState(false)
+  /** The newest of `recent` the board has played; it opens on the newest there is. */
+  const presented = useRef(recent?.at(-1)?.seq ?? 0)
   useEffect(() => {
     handlers.current = { onRoll, onCue, onPositions, onFailure }
   }, [onRoll, onCue, onPositions, onFailure])
@@ -60,6 +67,7 @@ export default forwardRef<BoardControls, Props>(function BoardScene(
           onPositions: (squares) => handlers.current.onPositions(squares),
         },
         initial.current.timing,
+        initial.current.receivedAt,
       )
     } catch (error) {
       console.error('Wildrise could not initialize the 3D board.', error)
@@ -72,10 +80,20 @@ export default forwardRef<BoardControls, Props>(function BoardScene(
     }
   }, [])
   // A snapshot that changes nothing on the table (someone came or went) is a
-  // no-op for the scene, so following `timing` as well costs nothing.
+  // no-op for the scene, so following `timing` as well costs nothing. Several
+  // snapshots landing in one render are each played, in order — the throw
+  // before the walk it started — unless more arrived than `recent` keeps, when
+  // the newest is caught up to on its own, as on joining.
   useEffect(() => {
-    scene.current?.update(state, timing)
-  }, [state, timing])
+    const board = scene.current
+    if (!board) return
+    if (!recent?.length) return void board.update(state, timing, receivedAt)
+    const seen = presented.current
+    presented.current = recent.at(-1)!.seq
+    const unseen = recent[0].seq <= seen + 1 ? recent.filter((m) => m.seq > seen) : recent.slice(-1)
+    for (const moment of unseen)
+      if (moment.state) board.update(moment.state, moment.timing, moment.receivedAt)
+  }, [state, timing, receivedAt, recent])
   useEffect(() => {
     scene.current?.setRunning(running)
   }, [running])

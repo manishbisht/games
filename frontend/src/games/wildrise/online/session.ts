@@ -2,6 +2,7 @@ import { PLAYER_IDS } from '@games/shared/wildrise/board'
 import type { WildriseOnlineAction } from '@games/shared/wildrise/online'
 import type { GameState, PlayerId } from '@games/shared/wildrise/types'
 import type { BeatTiming, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
+import type { SnapshotEntry } from '../../../online/roomState'
 import type { RoomApi } from '../../../online/useRoom'
 
 export interface WildriseSeatPlayer {
@@ -16,6 +17,18 @@ export interface WildriseSeatPlayer {
 }
 
 /**
+ * One state of the table as it reached this browser: `seq` counts snapshots for
+ * the life of the room page, `receivedAt` is `performance.now()` at the socket.
+ * `state` is null for a snapshot without a game in it.
+ */
+export interface TableMoment {
+  seq: number
+  state: GameState | null
+  timing?: BeatTiming
+  receivedAt: number
+}
+
+/**
  * One online table, in the terms the board already thinks in. The room speaks
  * seats (`p0`…`p3`); the game speaks colours, and after the room compacts its
  * seats at the start the two line up index for index.
@@ -27,6 +40,14 @@ export interface OnlineWildriseSession {
    * clock — what lets a browser that joins mid-walk pick the walk up in step.
    */
   timing?: BeatTiming
+  /** When `state` reached this browser (`performance.now()`): what `timing` is counted on from. */
+  receivedAt: number
+  /**
+   * The last few states in the order they arrived, newest (`state`) last. A
+   * burst of snapshots renders once, so the board reads these to play every
+   * beat of it rather than only the last.
+   */
+  recent: TableMoment[]
   /** The colour this browser plays, or `null` for someone watching. */
   mySeat: PlayerId | null
   players: Partial<Record<PlayerId, WildriseSeatPlayer>>
@@ -60,6 +81,7 @@ export function wildriseSession(
   you: YouInfo,
   api: RoomApi,
   leave: () => void,
+  { receivedAt, recent }: { receivedAt: number; recent: SnapshotEntry[] } = { receivedAt: 0, recent: [] },
 ): OnlineWildriseSession {
   // Safe by construction: this only runs for a wildrise room with a live game.
   const state = snapshot.gameState as GameState
@@ -89,6 +111,13 @@ export function wildriseSession(
   return {
     state,
     timing: snapshot.timing,
+    receivedAt,
+    recent: recent.map((entry) => ({
+      seq: entry.seq,
+      state: entry.snapshot.gameState as GameState | null,
+      timing: entry.snapshot.timing,
+      receivedAt: entry.receivedAt,
+    })),
     mySeat: (you.seat && colourOf(you.seat)) || null,
     players,
     rematch: {

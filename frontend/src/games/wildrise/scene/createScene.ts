@@ -20,7 +20,7 @@ import {
   squash,
   stepSpring,
 } from '../../../motion/ease'
-import { createParticles } from '../../../motion/particles'
+import { createParticles, qualityDensity } from '../../../motion/particles'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
 import { allowPageScroll, createStage, onTap } from '../../../motion/stage'
 import type { QualityTier } from '../../../motion/stage'
@@ -53,8 +53,11 @@ export interface SceneHandlers {
   onPositions: (squares: Squares) => void
 }
 export interface SceneApi {
-  /** `timing` is the room's word on how far into `state` it already is. */
-  update: (state: GameState, timing?: BeatTiming) => void
+  /**
+   * `timing` is the room's word on how far into `state` it already is, as of
+   * `receivedAt` (`performance.now()` when the state reached this browser).
+   */
+  update: (state: GameState, timing?: BeatTiming, receivedAt?: number) => void
   setRunning: (running: boolean) => void
   /** Whether a tap on the die would roll it: it lifts and glows under the pointer. */
   setCanRoll: (can: boolean) => void
@@ -132,8 +135,8 @@ export function createScene(
   initial: GameState,
   handlers: SceneHandlers,
   timing?: BeatTiming,
+  receivedAt?: number,
 ): SceneApi {
-  const born = performance.now()
   const stage = createStage(container, {
     label:
       'Wildrise 3D board with 100 numbered spaces. Drag to rotate, pinch or scroll to zoom. Use Roll dice or press Space to play.',
@@ -314,14 +317,12 @@ export function createScene(
   const particles = createParticles(scene, { max: 520 })
   const DUST = ['#efe4cb', '#dccba6', '#f6efe0']
   const origin = new THREE.Vector3()
-  /** Fewer particles on a device the stage has found slow. */
-  const thin = (count: number) => Math.max(1, Math.round(count * [0.4, 0.65, 1][tier]))
   function puff(x: number, y: number, z: number, count: number, size = 1) {
     if (reduced || silent) return
     particles.burst({
       origin: origin.set(x, y, z),
       kind: 'dust',
-      count: thin(count),
+      count,
       colors: DUST,
       speed: 1.5,
       size: size * 0.85,
@@ -858,7 +859,7 @@ export function createScene(
         origin: origin.set(top.x, top.y + 0.7, top.z),
         kind: 'confetti',
         floor: BOARD_Y + 0.02,
-        count: thin(count),
+        count,
         speed,
         spread: 0.6,
         life: 2.8,
@@ -945,7 +946,15 @@ export function createScene(
   // The camera waits a moment before handing the board back: the next beat of
   // the same turn (a ladder after the walk) usually arrives within it.
   let idleSince = Infinity
+  /**
+   * A beat picked up mid-way keeps time with the room, so it must not lose any
+   * to the board's first frames — slow ones (shaders compiling, textures
+   * uploading) that the stage clamps. Until that beat and what queued behind it
+   * have played, the wall time the stage skipped is played straight through.
+   */
+  let pickedUp = false
   queue.onIdle(() => {
+    pickedUp = false
     boost = 1
     idleSince = stage.now
     container.dataset.beat = 'idle'
@@ -980,7 +989,7 @@ export function createScene(
     silent = false
   }
 
-  function update(next: GameState, timing?: BeatTiming, late = 0) {
+  function update(next: GameState, timing?: BeatTiming, receivedAt?: number) {
     const story_ = plan(previous, story, next, reduced)
     previous = next
     state = next
@@ -1001,8 +1010,10 @@ export function createScene(
       })),
     )
     if (synced && playing) {
-      skip(beatElapsed(timing) + late)
-      catchingUp = { wall: performance.now(), scene: stage.now }
+      // Counted from the socket, not from now: the render, the page crossing
+      // over and the board being built all took some of the room's beat too.
+      pickedUp = true
+      skip(beatElapsed(timing) + (receivedAt === undefined ? 0 : performance.now() - receivedAt))
     }
     if (document.hidden) flush()
     stage.invalidate()
@@ -1040,9 +1051,11 @@ export function createScene(
   })
   const offQuality = stage.onQuality((next) => {
     tier = next
+    particles.density = qualityDensity(tier)
     showAmbient()
     stage.invalidate()
   })
+  particles.density = qualityDensity(tier)
   showAmbient()
   const offChange = () => controls.removeEventListener('change', invalidate)
   const invalidate = () => {
@@ -1201,27 +1214,10 @@ export function createScene(
     if (riding) riding.apply()
   }
 
-  /**
-   * A beat just picked up mid-way must not lose time to the board's first
-   * frames, which are slow (shaders compiling, textures uploading) and which
-   * the stage clamps. For a moment after, any wall time the scene clock didn't
-   * see is played straight through.
-   */
-  let catchingUp: { wall: number; scene: number } | null = null
-  function keepUp(now: number) {
-    if (!catchingUp) return
-    const wall = performance.now() - catchingUp.wall
-    if (wall > 600) return void (catchingUp = null)
-    const owed = wall - (now - catchingUp.scene)
-    if (owed > 20) {
-      skip(owed)
-      catchingUp.scene -= owed
-    }
-  }
-
   stage.onFrame((dt, now) => {
     if (disposed) return false
-    keepUp(now)
+    const drift = stage.takeDrift()
+    if (pickedUp && drift > 0) skip(drift)
     const ms = dt * 1000 * boost
     queue.step(ms)
     tweens.speed = queue.speed
@@ -1257,9 +1253,7 @@ export function createScene(
     return moving
   })
   stage.start()
-  // The table is a few hundred milliseconds old by the time it can play:
-  // that much more of the room's beat has gone by.
-  update(initial, timing, performance.now() - born)
+  update(initial, timing, receivedAt)
 
   return {
     update,

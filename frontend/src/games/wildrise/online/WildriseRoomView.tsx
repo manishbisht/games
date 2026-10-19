@@ -4,11 +4,11 @@ import WildriseGame from '../WildriseGame'
 import { wildriseSession } from './session'
 
 /** Wildrise's half of a room: the room's snapshot becomes the table's session. */
-export default function WildriseRoomView({ snapshot, you, api, leave }: RoomViewProps) {
+export default function WildriseRoomView({ snapshot, receivedAt, recent, you, api, leave }: RoomViewProps) {
   const session = useMemo(
-    () => wildriseSession(snapshot, you, api, leave),
+    () => wildriseSession(snapshot, you, api, leave, { receivedAt, recent }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snapshot, you, api],
+    [snapshot, receivedAt, recent, you, api],
   )
   return <WildriseGame online={session} />
 }
