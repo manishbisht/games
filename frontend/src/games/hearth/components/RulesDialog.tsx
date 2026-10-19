@@ -2,7 +2,16 @@ import { Dices, Footprints, House, Shield, Swords, Trophy } from 'lucide-react'
 import Modal from './Modal'
 import type { Rules } from '@games/shared/hearth/types'
 
-export default function RulesDialog({ onClose, rules }: { onClose: () => void; rules: Rules }) {
+export default function RulesDialog({
+  onClose,
+  rules,
+  onGuide,
+}: {
+  onClose: () => void
+  rules: Rules
+  /** Shows the first-game guide again once this closes; absent where there is nobody to guide. */
+  onGuide?: () => void
+}) {
   const items = [
     {
       Icon: Dices,
@@ -62,6 +71,11 @@ export default function RulesDialog({ onClose, rules }: { onClose: () => void; r
       <button className="hh-primary" data-close>
         Got it. Let’s play.
       </button>
+      {onGuide && (
+        <button className="hh-text-button hh-guide-again" data-close onClick={onGuide}>
+          Show the guide again
+        </button>
+      )}
     </Modal>
   )
 }

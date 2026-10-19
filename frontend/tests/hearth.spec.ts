@@ -11,6 +11,11 @@ import type { Page } from '@playwright/test'
  * Pausing is gone with local play — a room's table is nobody's to stop.
  */
 
+// The first-game guide has its own spec; here it would only stand over the table.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('games-guide-hearth', 'done'))
+})
+
 const rollButton = (page: Page) => page.getByRole('button', { name: 'Roll dice', exact: true })
 
 /** Set a table up and let the server deal it. */
@@ -86,10 +91,13 @@ test('mobile setup, rules and custom settings remain usable', async ({ page }) =
 
 test('sound, settings and camera controls work at a live table', async ({ page }) => {
   await page.goto('/#/hearth-and-home')
+  // Sound turned on at the setup screen is still on at the table, a different page.
+  await page.getByRole('button', { name: 'Turn sound on', exact: true }).click()
   await startBotGame(page)
   await expect(rollButton(page)).toBeEnabled({ timeout: 30000 })
-  await page.getByRole('button', { name: 'Turn sound on', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Mute sound', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Mute sound', exact: true }).click()
+  await page.getByRole('button', { name: 'Turn sound on', exact: true }).click()
   await page.getByRole('button', { name: 'Game settings', exact: true }).click()
   await expect(page.getByLabel('Game sounds')).toBeChecked()
   await page.keyboard.press('Escape')

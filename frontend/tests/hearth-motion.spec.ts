@@ -140,6 +140,7 @@ async function open(page: Page) {
     localStorage.setItem('games-test-clock', 'on')
     localStorage.setItem('games-motion', 'full')
     localStorage.setItem('games-guest-name', 'Robin')
+    localStorage.setItem('games-guide-hearth', 'done')
   })
   const room = await fakeRoom(page)
   await page.goto(`/#/hearth-and-home/room/${CODE}`)

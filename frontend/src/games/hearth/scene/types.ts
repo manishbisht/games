@@ -18,18 +18,6 @@ export type Cue =
   | { kind: 'home'; pan?: number }
   | { kind: 'win' }
 
-/**
- * One state as the room sent it. `seq` counts the snapshots this page has
- * received; `since` is when the state's beat began at the room, on this
- * page's `performance.now()` clock — counted back from when the snapshot
- * arrived, so however late it renders, the beat is `performance.now() - since` in.
- */
-export interface RoomBeat {
-  seq: number
-  state: GameState
-  since: number
-}
-
 export interface SceneHooks {
   select: (pieceId: string) => void
   /** The table as the board is showing it right now — the HUD follows this, not the room. */
@@ -41,13 +29,19 @@ export interface SceneApi {
   /**
    * A state from the room. `seat` is the colour this browser plays; `live` is
    * false for the setup preview. `elapsed` is how far into this state's beat
-   * the room is now (see `RoomBeat`), so a board that joins mid-walk picks the
-   * walk up where the room is.
+   * the room is now (see the online session's `RoomBeat`), so a board that
+   * joins mid-walk picks the walk up where the room is.
    */
   update: (state: GameState, seat: PlayerId | null, live: boolean, elapsed?: number) => void
   /** The player asked to roll: rattle the die now, before the room answers. */
   roll: () => void
   focus: (pieceId: string | null) => void
+  /**
+   * Where a colour's court sits on the canvas, in CSS pixels from its top
+   * left — or the home in the middle, for `null`. Things said at the table
+   * (reactions, the guide) point here.
+   */
+  anchor: (colour: PlayerId | null) => { x: number; y: number }
   reset: () => void
   zoom: (direction: number) => void
   top: () => void

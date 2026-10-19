@@ -1,20 +1,19 @@
 import { PLAYER_IDS } from '@games/shared/hearth/board'
 import type { HearthOnlineAction } from '@games/shared/hearth/online'
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
-import { beatElapsed } from '@games/shared/protocol'
-import type { RoomSnapshot, SeatId } from '@games/shared/protocol'
+import type { ReactionId, SeatId } from '@games/shared/protocol'
 import type { RoomViewProps } from '../../../online/games'
-import type { RoomBeat } from '../scene/types'
+import { claimTarget, rematchState, roomBeats, seatPlayers } from '../../../online/session'
+import type { RoomBeat, SeatPlayer } from '../../../online/session'
 
-export interface HearthSeatPlayer {
+/** A reaction, said by a colour at the table — or `null`, by someone watching. */
+export interface SeatReaction {
+  id: string
+  colour: PlayerId | null
+  reaction: ReactionId
   name: string
-  connected: boolean
-  /** Server timestamp of when they dropped; absent while they are here. */
-  awaySince?: number
-  /** The room is already playing this seat — there is nothing left to claim. */
-  abandoned?: boolean
-  /** Nobody is behind this seat: the room plays it, and the table should say so. */
-  bot?: { skill: string }
+  /** `performance.now()` when it arrived. */
+  receivedAt: number
 }
 
 /**
@@ -30,102 +29,64 @@ export interface OnlineHearthSession {
    * and each knows when its beat began, so a board that arrives mid-walk
    * takes the walk up where the room is.
    */
-  beats: RoomBeat[]
+  beats: RoomBeat<GameState>[]
   /** The colour this browser plays, or `null` for someone watching. */
   mySeat: PlayerId | null
-  players: Partial<Record<PlayerId, HearthSeatPlayer>>
+  players: Partial<Record<PlayerId, SeatPlayer>>
   rematch: { mine: boolean; theirs: boolean }
+  /** The away player the table is stuck on, while there is still a claim to make against them. */
+  claimable: SeatPlayer | null
+  /** Recent reactions, oldest first, each placed at the colour it came from. */
+  reactions: SeatReaction[]
   send: {
     roll: () => void
     move: (pieceId: string) => void
     rematch: () => void
     claim: () => void
+    react?: (reaction: ReactionId) => void
   }
   leave: () => void
 }
-
-/**
- * The player a claim can be made against right now, or `null`. Three things have
- * to hold at once: the table is genuinely stuck on someone who has gone, this
- * browser holds a seat of its own to claim with — a spectator has no standing,
- * and the server would only answer NOT_SEATED — and no claim has been granted
- * yet, because after one the room plays that seat and there is nothing to ask.
- */
-export function claimTarget(session: OnlineHearthSession): HearthSeatPlayer | null {
-  const { state, mySeat, players } = session
-  if (mySeat === null || state.phase === 'won') return null
-  const onTurn = state.players[state.currentPlayer].id
-  if (onTurn === mySeat) return null
-  const blocker = players[onTurn]
-  return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
-}
-
-/**
- * When `snapshot`'s state began at the room, on this page's clock: the server
- * says how far in it was when it sent it, counted back from when it arrived —
- * not from when it rendered. An older server sends no timing, and the beat is
- * taken to start on arrival.
- */
-const beganAt = (snapshot: RoomSnapshot, receivedAt: number) => receivedAt - beatElapsed(snapshot.timing)
 
 export function hearthSession({
   snapshot,
   receivedAt,
   recent,
+  reactions = [],
   you,
   api,
   leave,
 }: RoomViewProps): OnlineHearthSession {
   // Safe by construction: this only runs for a hearth room with a live game.
   const state = snapshot.gameState as GameState
-  // Only the run of game states that ends here: anything before a gap in the game belongs to another table.
-  const run = recent.slice(recent.findLastIndex((entry) => !entry.snapshot.gameState) + 1)
-  const beats: RoomBeat[] = run.map((entry) => ({
-    seq: entry.seq,
-    state: entry.snapshot.gameState as GameState,
-    since: beganAt(entry.snapshot, entry.receivedAt),
-  }))
-  if (beats.at(-1)?.state !== state)
-    beats.push({ seq: (beats.at(-1)?.seq ?? 0) + 1, state, since: beganAt(snapshot, receivedAt) })
-  const colourOf = (seat: SeatId): PlayerId | undefined => PLAYER_IDS[snapshot.seatIds.indexOf(seat)]
-
-  const players: Partial<Record<PlayerId, HearthSeatPlayer>> = {}
-  for (const seat of snapshot.seatIds) {
-    const info = snapshot.seats[seat]
-    const colour = colourOf(seat)
-    if (info && colour)
-      players[colour] = {
-        name: info.player.name,
-        connected: info.connected,
-        awaySince: info.awaySince,
-        abandoned: info.abandoned,
-        bot: info.bot,
-      }
-  }
-
+  const colourOf = (seat: SeatId | null): PlayerId | null =>
+    (seat && PLAYER_IDS[snapshot.seatIds.indexOf(seat)]) || null
+  const players = seatPlayers(snapshot, (_seat, index) => PLAYER_IDS[index]),
+    mySeat = colourOf(you.seat)
   const send = (action: HearthOnlineAction) => api.action(action)
-  // Bots are left out: one never asks for a rematch and the server never waits
-  // for one either, so counting them would leave the table saying "waiting" for
-  // a game that has already restarted.
-  const others = snapshot.seatIds.filter(
-    (seat) => seat !== you.seat && snapshot.seats[seat] && !snapshot.seats[seat]!.bot,
-  )
   return {
     state,
-    beats,
-    mySeat: (you.seat && colourOf(you.seat)) || null,
+    beats: roomBeats<GameState>({ snapshot, receivedAt, recent }),
+    mySeat,
     players,
-    rematch: {
-      mine: you.seat ? (snapshot.seats[you.seat]?.wantsRematch ?? false) : false,
-      // Three or four at the table, so "them" is everyone else — and a rematch
-      // only starts once the whole table has asked for it.
-      theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
-    },
+    rematch: rematchState(snapshot, you),
+    claimable: claimTarget(players, state.players[state.currentPlayer].id, mySeat, state.phase === 'won'),
+    reactions: reactions.map(({ id, seat, reaction, receivedAt }) => {
+      const colour = colourOf(seat)
+      return {
+        id,
+        colour,
+        reaction,
+        receivedAt,
+        name: (colour && players[colour]?.name) || 'Someone watching',
+      }
+    }),
     send: {
       roll: () => send({ kind: 'roll' }),
       move: (pieceId) => send({ kind: 'move', pieceId }),
       rematch: api.rematch,
       claim: api.claim,
+      react: api.react,
     },
     leave,
   }

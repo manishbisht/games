@@ -27,24 +27,30 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router'
 import { estateGame, hearthGame } from '../catalog'
-import { HOME, PALETTES } from '@games/shared/hearth/board'
+import { HOME, PALETTES, PLAYER_IDS } from '@games/shared/hearth/board'
 import { createGame, progressFor } from '@games/shared/hearth'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { feelCue, playCue, soundCheck } from './game/audio'
-import type { GameConfig, GameState, Player } from '@games/shared/hearth/types'
+import type { GameConfig, GameState, Player, PlayerId } from '@games/shared/hearth/types'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
 import type { Cue } from './scene/createScene'
 import { useCountUp, useHeld } from '../../motion/hooks'
 import { useMotionPreference } from '../../motion/preference'
+import { useSound } from '../../motion/sound'
 import type { MotionPreference } from '../../motion/preference'
 import { useBotRoom } from '../../online/useBotRoom'
+import ReactionBar from '../../online/ReactionBar'
+import { sounds } from '../../motion/audio'
 import SetupPanel from './components/SetupPanel'
 import RulesDialog from './components/RulesDialog'
 import Modal from './components/Modal'
 import Die from './components/Die'
-import { claimTarget } from './online/session'
-import type { OnlineHearthSession } from './online/session'
+import Guide from './components/Guide'
+import { useGuide } from './components/useGuide'
+import type { GuideStep } from './components/Guide'
+import SeatReactions from './components/SeatReactions'
+import type { OnlineHearthSession, SeatReaction } from './online/session'
 import './HearthGame.css'
 
 const DEFAULT_CONFIG: GameConfig = {
@@ -257,11 +263,17 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
       ? shown
       : dealt
   const [dialog, setDialog] = useState<'rules' | 'settings' | null>(null)
-  const [muted, setMuted] = useState(true),
-    [winDismissed, setWinDismissed] = useState(false),
+  // Off until asked for, and remembered per game — so muting on the setup screen still holds at the table.
+  const [soundOn, setSoundOn] = useSound('hearth', false),
+    muted = !soundOn
+  const [winDismissed, setWinDismissed] = useState(false),
     [gameMenu, setGameMenu] = useState(false)
   const [motion, setMotion] = useMotionPreference()
-  const board = useRef<BoardControls>(null)
+  const board = useRef<BoardControls>(null),
+    boardSection = useRef<HTMLElement>(null),
+    rollButton = useRef<HTMLButtonElement>(null),
+    choices = useRef<HTMLDivElement>(null),
+    cards = useRef<Partial<Record<PlayerId, HTMLElement | null>>>({})
   const sound = useRef(!muted)
   useEffect(() => {
     sound.current = !muted
@@ -279,19 +291,77 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   // The result waits for the confetti it would otherwise cover.
   const showVictory = useHeld(Boolean(state.winner) && !winDismissed && !dialog, 1500)
   const active = started && !dialog
+  const mySeat = online?.mySeat ?? null
+  /**
+   * The first-game guide, pointing at the real thing for each step. Only for
+   * someone with a seat — a spectator has nothing to roll — and it never
+   * holds the table up: the room plays on while it is open.
+   */
+  const guideSteps: GuideStep[] = [
+    {
+      id: 'roll',
+      text: 'Roll the die from here — or press Space — whenever it’s your turn.',
+      target: () => rollButton.current && { element: rollButton.current },
+      action: 'roll',
+    },
+    {
+      id: 'nest',
+      text: 'Your pieces wait in your nest, and only a 6 lets one out onto the track.',
+      target: () => {
+        const section = boardSection.current,
+          court = board.current?.anchor(mySeat)
+        if (!section) return null
+        if (!court?.inView) return { element: section }
+        const size = Math.min(170, Math.max(96, section.clientWidth * 0.22))
+        return {
+          element: section,
+          spot: { left: court.x - size / 2, top: court.y - size / 2, width: size, height: size },
+        }
+      },
+    },
+    {
+      id: 'pick',
+      text: 'When a roll gives you moves, pick a glowing piece — its path lights up to show where it lands.',
+      target: () => {
+        const element = choices.current ?? boardSection.current
+        return element && { element }
+      },
+      action: 'move',
+    },
+    {
+      id: 'capture',
+      text: state.rules.captures
+        ? `Land on a rival’s piece to send it back to its nest${state.rules.safeSpaces ? ' — though the stars keep everyone safe' : ''}.`
+        : 'Captures are off at this table, so every tile can be shared.',
+      target: () => boardSection.current && { element: boardSection.current },
+    },
+    {
+      id: 'home',
+      text: `Bring all ${state.rules.piecesPerPlayer === 1 ? 'your piece' : `${state.rules.piecesPerPlayer} pieces`} home to the middle and the game is yours.`,
+      target: () => {
+        const card = mySeat && cards.current[mySeat]
+        return card ? { element: card } : null
+      },
+    },
+  ]
+  const guide = useGuide(guideSteps)
+  const guiding =
+    Boolean(online) && mySeat !== null && !guide.done && !dialog && !showVictory && !state.winner
   const roll = useCallback(() => {
     if (active && state.phase === 'roll' && myTurn) {
       // The die starts rattling now; the room's answer decides where it lands.
       board.current?.roll()
       online?.send.roll()
+      guide.did('roll')
     }
-  }, [active, state.phase, myTurn, online])
+  }, [active, state.phase, myTurn, online, guide])
   const select = useCallback(
     (pieceId: string) => {
       if (!active || !myTurn) return
       online?.send.move(pieceId)
+      guide.did('move')
     },
-    [active, myTurn, online],
+    [active, myTurn, online, guide],
   )
   /**
    * Sounds follow the board's own animation, so each plays once, when it
@@ -332,7 +402,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   }
   function toggleSound() {
     if (muted) soundCheck()
-    setMuted(!muted)
+    setSoundOn(muted)
   }
   const status = !started
     ? 'A seat for everyone. A little friendly competition.'
@@ -368,7 +438,27 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                   ? 'Waiting…'
                   : 'Thinking…'
   // The player the table is stuck on, while there is still something to ask for.
-  const awayBlocking = online ? claimTarget(online) : null
+  const awayBlocking = online?.claimable ?? null
+  /**
+   * Where a reaction rises from: the colour's court on the board, or — with
+   * the board scrolled out of sight — that player's card; someone watching
+   * speaks from the home in the middle, or from the top of the player list.
+   */
+  const locate = useCallback((colour: PlayerId | null) => {
+    const court = board.current?.anchor(colour)
+    if (court?.inView) return court
+    const card = colour ? cards.current[colour]?.querySelector('.hh-player-avatar') : null,
+      box = (card ?? cards.current[PLAYER_IDS.find((id) => cards.current[id])!])?.getBoundingClientRect()
+    if (box && box.bottom > 0 && box.top < window.innerHeight)
+      return { x: box.left + box.width / 2, y: box.top }
+    return { x: window.innerWidth / 2, y: window.innerHeight - 96 }
+  }, [])
+  const onReaction = useCallback((entry: SeatReaction, x: number) => {
+    if (!sound.current) return
+    // A little higher for each seat round the table, so two at once read as two people.
+    const seat = entry.colour ? PLAYER_IDS.indexOf(entry.colour) : 4
+    sounds.pop(1 + seat * 0.07, 0.6, ((x / window.innerWidth) * 2 - 1) * 0.5)
+  }, [])
   const EventIcon = {
     start: Flag,
     roll: Dices,
@@ -437,7 +527,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           </div>
         </div>
         <div className="hh-game-layout">
-          <section className="hh-board-section" aria-label="Game table">
+          <section className="hh-board-section" aria-label="Game table" ref={boardSection}>
             <div className="hh-board-top">
               <span className="hh-mode-badge">
                 <span className="hh-tiny-star">✦</span>
@@ -551,6 +641,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                     throws={state.players.reduce((sum, p) => sum + p.stats.rolls, 0)}
                   />
                   <button
+                    ref={rollButton}
                     className={`hh-primary hh-roll-button ${state.phase === 'roll' && myTurn ? 'ready' : ''}`}
                     aria-label={actionLabel}
                     disabled={state.phase !== 'roll' || !myTurn}
@@ -561,7 +652,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                     {state.phase === 'roll' && myTurn && <kbd>SPACE</kbd>}
                   </button>
                   {state.phase === 'choose' ? (
-                    <div className="hh-piece-choices">
+                    <div className="hh-piece-choices" ref={choices}>
                       <p>{myTurn ? 'Pick a piece on the board or below.' : `${player.name} is choosing…`}</p>
                       <div>
                         {state.pieces
@@ -655,6 +746,9 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                       return (
                         <div
                           key={p.id}
+                          ref={(card) => {
+                            cards.current[p.id] = card
+                          }}
                           data-testid={`player-${p.id}`}
                           className={`hh-player-card ${p.id === player.id ? 'current' : ''}`}
                           style={
@@ -703,6 +797,13 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                       )
                     })}
                   </PlayerList>
+                  {online && (
+                    <ReactionBar
+                      className="hh-reaction-bar"
+                      onReact={online.send.react}
+                      watching={online.mySeat === null}
+                    />
+                  )}
                 </section>
                 <section className="hh-events">
                   <div className="hh-section-title">
@@ -777,7 +878,15 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
         </div>
       </footer>
 
-      {dialog === 'rules' && <RulesDialog rules={state.rules} onClose={() => setDialog(null)} />}
+      {dialog === 'rules' && (
+        <RulesDialog
+          rules={state.rules}
+          onClose={() => setDialog(null)}
+          onGuide={online && mySeat !== null ? guide.restart : undefined}
+        />
+      )}
+      {online && <SeatReactions reactions={online.reactions} locate={locate} onArrive={onReaction} />}
+      {guiding && <Guide steps={guideSteps} step={guide.step} onNext={guide.next} onClose={guide.close} />}
       {dialog === 'settings' && (
         <Modal title="Make yourself comfortable" onClose={() => setDialog(null)}>
           <div className="hh-eyebrow">YOUR TABLE</div>

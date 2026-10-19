@@ -3,7 +3,7 @@ import { createGame } from '@games/shared/hearth'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { RoomSnapshot, SeatInfo, YouInfo } from '@games/shared/protocol'
 import type { RoomApi } from '../../../online/useRoom'
-import { claimTarget, hearthSession } from './session'
+import { hearthSession } from './session'
 
 const api = (): RoomApi => ({
   sit: vi.fn(),
@@ -15,6 +15,7 @@ const api = (): RoomApi => ({
   addBot: vi.fn(),
   removeBot: vi.fn(),
   dismissError: vi.fn(),
+  react: vi.fn(),
 })
 
 const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
@@ -168,39 +169,70 @@ describe('hearthSession', () => {
   })
 })
 
-describe('claimTarget', () => {
+describe('claimable', () => {
   /** Red opens the game, so Ben in seat p1 is never the one on turn. */
   const onTurnAway = { ...seated, p0: seat('Ann', { connected: false, awaySince: 1 }) }
 
-  it('names the away player the table is stuck on', () => {
+  it('names the away player the table is stuck on, by the colour on turn', () => {
     // Ben is at the table watching Ann's turn go unplayed.
-    const session = table(onTurnAway, { id: 'ben', seat: 'p1' })
-    expect(claimTarget(session)?.name).toBe('Ann')
-  })
-
-  it('offers nobody to a spectator, who has no seat to claim with', () => {
-    const session = table(onTurnAway, { id: 'eve', seat: null })
-    expect(claimTarget(session)).toBeNull()
-  })
-
-  it('offers nobody once the claim has already been granted', () => {
-    const session = table(
-      { ...seated, p0: seat('Ann', { connected: false, awaySince: 1, abandoned: true }) },
-      { id: 'ben', seat: 'p1' },
-    )
-    // The room is playing Ann's seat now; asking again would settle nothing.
-    expect(claimTarget(session)).toBeNull()
-  })
-
-  it('offers nobody while the player on turn is still here, or when it is your own turn', () => {
-    expect(claimTarget(table(seated, { id: 'ben', seat: 'p1' }))).toBeNull()
+    expect(table(onTurnAway, { id: 'ben', seat: 'p1' }).claimable?.name).toBe('Ann')
     // Ann is away, but it is Ann's own browser asking — she is not blocked on herself.
-    expect(claimTarget(table(onTurnAway))).toBeNull()
+    expect(table(onTurnAway).claimable).toBeNull()
   })
 
   it('offers nobody once the game has been won', () => {
-    const session = table(onTurnAway, { id: 'ben', seat: 'p1' })
-    const won = { ...session, state: { ...session.state, phase: 'won' as const, winner: 'red' as const } }
-    expect(claimTarget(won)).toBeNull()
+    const won = createGame({ playerCount: 3 })
+    const session = hearthSession({
+      snapshot: {
+        protocol: PROTOCOL_VERSION,
+        code: 'ABC234',
+        game: 'hearth',
+        visibility: 'private',
+        status: 'finished',
+        seatIds: ['p0', 'p1', 'p2'],
+        seats: onTurnAway,
+        gameState: { ...won, phase: 'won', winner: 'blue' },
+      },
+      receivedAt: 0,
+      recent: [],
+      you: { id: 'ben', seat: 'p1', isHost: false },
+      api: api(),
+      leave: () => {},
+    })
+    expect(session.claimable).toBeNull()
+  })
+})
+
+describe('reactions', () => {
+  it('places each reaction at the colour its seat was dealt, and a spectator’s at nobody’s', () => {
+    const snapshot: RoomSnapshot = {
+      protocol: PROTOCOL_VERSION,
+      code: 'ABC234',
+      game: 'hearth',
+      visibility: 'private',
+      status: 'playing',
+      seatIds: ['p0', 'p1', 'p2'],
+      seats: seated,
+      gameState: createGame({ playerCount: 3 }),
+    }
+    const wire = api()
+    const session = hearthSession({
+      snapshot,
+      receivedAt: 0,
+      recent: [],
+      reactions: [
+        { id: 'r1', seat: 'p2', reaction: 'wow', at: 1, receivedAt: 10 },
+        { id: 'r2', seat: null, reaction: 'gg', at: 2, receivedAt: 20 },
+      ],
+      you: { id: 'ann', seat: 'p0', isHost: true },
+      api: wire,
+      leave: () => {},
+    })
+    expect(session.reactions).toEqual([
+      { id: 'r1', colour: 'green', reaction: 'wow', name: 'Cai', receivedAt: 10 },
+      { id: 'r2', colour: null, reaction: 'gg', name: 'Someone watching', receivedAt: 20 },
+    ])
+    session.send.react?.('haha')
+    expect(wire.react).toHaveBeenCalledWith('haha')
   })
 })

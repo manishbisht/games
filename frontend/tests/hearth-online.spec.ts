@@ -20,6 +20,8 @@ const settle = (page: Page) => expect(page.getByRole('button', { name: AT_REST }
 
 async function newPlayer(browser: Browser, errors: string[]) {
   const context = await browser.newContext()
+  // The first-game guide has its own spec; here it would only stand over the table.
+  await context.addInitScript(() => localStorage.setItem('games-guide-hearth', 'done'))
   const page = await context.newPage()
   page.on('pageerror', (error) => errors.push(error.message))
   await page.emulateMedia({ reducedMotion: 'reduce' })

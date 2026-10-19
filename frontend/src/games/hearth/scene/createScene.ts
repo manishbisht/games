@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { COURTS } from '@games/shared/hearth/board'
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
 import { onMotionChange, reducedMotion } from '../../../motion/preference'
 import { createStage } from '../../../motion/stage'
@@ -42,7 +43,8 @@ export function createScene(
     environmentIntensity: 0.32,
   })
   const tweens = createTweens(),
-    onScreen = new THREE.Vector2()
+    onScreen = new THREE.Vector2(),
+    spot = new THREE.Vector3()
   const ctx: SceneContext = {
     stage,
     scene: stage.scene,
@@ -121,6 +123,12 @@ export function createScene(
     update: story.update,
     roll: story.roll,
     focus: picking.focus,
+    anchor(colour) {
+      const [x, z] = colour ? COURTS[colour] : [0, 0]
+      // A little above the board, so whatever rises from here starts over the pieces, not under them.
+      const point = stage.toScreen(spot.set(x, 0.6, z), onScreen)
+      return { x: point.x, y: point.y }
+    },
     reset: director.reset,
     zoom: director.zoom,
     top: director.top,

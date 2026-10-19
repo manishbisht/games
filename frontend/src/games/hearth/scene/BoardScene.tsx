@@ -1,10 +1,22 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
+import { usePresentBeats } from '../../../online/session'
+import type { RoomBeat } from '../../../online/session'
 import { createScene } from './createScene'
 import type { Cue, SceneApi } from './createScene'
-import type { RoomBeat } from './types'
 
-export type BoardControls = Pick<SceneApi, 'focus' | 'reset' | 'zoom' | 'top' | 'roll'>
+export interface BoardControls extends Pick<SceneApi, 'focus' | 'reset' | 'zoom' | 'top' | 'roll'> {
+  /**
+   * Where a colour's court (or, for `null`, the home in the middle) is on the
+   * page, in viewport pixels — and whether it is on screen at all, so a caller
+   * can point somewhere else when the board is scrolled away. `null` without a
+   * board to ask.
+   */
+  anchor: (colour: PlayerId | null) => { x: number; y: number; inView: boolean } | null
+}
+
+/** The setup preview has no room, and so no beats. */
+const NO_BEATS: RoomBeat<GameState>[] = []
 
 interface Props {
   state: GameState
@@ -16,7 +28,7 @@ interface Props {
    * The room's recent states, ending with `state`, each stamped with when its
    * beat began. Absent for the setup preview, whose state simply begins now.
    */
-  beats?: RoomBeat[]
+  beats?: RoomBeat<GameState>[]
   onSelect: (id: string) => void
   /** The table as the board is showing it, which trails `state` while a move plays out. */
   onPresent: (state: GameState) => void
@@ -30,9 +42,7 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
   const initial = useRef({ state, seat, live, since: beats?.at(-1)?.since }),
-    hooks = useRef({ onSelect, onPresent, onCue }),
-    /** The newest snapshot the board has been handed; it starts on whatever was newest when it mounted. */
-    seen = useRef(beats?.at(-1)?.seq ?? 0)
+    hooks = useRef({ onSelect, onPresent, onCue })
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     hooks.current = { onSelect, onPresent, onCue }
@@ -45,6 +55,23 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
       zoom: (d) => scene.current?.zoom(d),
       top: () => scene.current?.top(),
       roll: () => scene.current?.roll(),
+      anchor(colour) {
+        const board = scene.current,
+          box = container.current?.getBoundingClientRect()
+        if (!board || !box) return null
+        const { x, y } = board.anchor(colour),
+          point = { x: box.left + x, y: box.top + y }
+        return {
+          ...point,
+          inView:
+            x >= 0 &&
+            x <= box.width &&
+            y >= 0 &&
+            y <= box.height &&
+            point.y >= 0 &&
+            point.y <= window.innerHeight,
+        }
+      },
     }),
     [],
   )
@@ -75,24 +102,21 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
       scene.current = null
     }
   }, [])
-  useEffect(() => {
+  // The room's beats, each once and in order — the board lands the newest when it is joining rather than
+  // following along, its `elapsed` saying how far into that beat the room already is.
+  usePresentBeats(beats ?? NO_BEATS, (beat) => {
     const board = scene.current
-    if (!board) {
-      // Without a board there is nothing to wait for: the HUD takes the room's state as it comes.
-      if (failed) hooks.current.onPresent(state)
-      return
-    }
-    const now = performance.now(),
-      fresh = beats?.filter((beat) => beat.seq > seen.current) ?? []
-    // A burst of snapshots renders once, but each state is still a beat of its own: hand them over in
-    // order. If more arrived than are kept, the gap cannot be told, and the board lands the newest as
-    // a late arrival would.
-    if (fresh.length && fresh[0].seq === seen.current + 1)
-      for (const beat of fresh.slice(0, -1)) board.update(beat.state, seat, live, now - beat.since)
-    seen.current = beats?.at(-1)?.seq ?? seen.current
-    const newest = beats?.at(-1)
-    board.update(state, seat, live, newest ? now - newest.since : 0)
-  }, [state, beats, seat, live, failed])
+    // Without a board there is nothing to wait for: the HUD takes the room's state as it comes.
+    if (!board) hooks.current.onPresent(beat.state)
+    else board.update(beat.state, seat, live, performance.now() - beat.since)
+  })
+  // The setup preview simply shows whatever table the panel describes.
+  useEffect(() => {
+    if (beats) return
+    const board = scene.current
+    if (board) board.update(state, seat, live, 0)
+    else if (failed) hooks.current.onPresent(state)
+  }, [beats, state, seat, live, failed])
   return (
     <div className="hh-canvas" ref={container}>
       {failed && (
