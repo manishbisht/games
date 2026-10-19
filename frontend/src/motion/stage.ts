@@ -120,8 +120,14 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
   function tick(wall: number) {
     if (disposed) return
     frame = requestAnimationFrame(tick)
-    const delta = Math.max(0, wall - last)
+    let delta = Math.max(0, wall - last)
     last = wall
+    if (testClock) {
+      // Under the test clock time only passes when a test steps it.
+      delta = Math.min(testClock.pending, 1000 / 60)
+      testClock.pending -= delta
+      if (testClock.frozen && delta === 0) return
+    }
     if (document.hidden || lost) return
     const dt = running ? Math.min(delta / 1000, 1 / 20) : 0
     if (running) clock += Math.min(delta, 50)
@@ -280,6 +286,48 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
   return stage
 }
 export type Stage = ReturnType<typeof createStage>
+
+/**
+ * A clock browser tests can hold still. Off unless the page was opened with
+ * `localStorage['games-test-clock'] = 'on'`; then `window.__motionClock`
+ * freezes every stage on the page (`freeze()`), advances them by exact
+ * milliseconds in 60 Hz slices (`await step(400)`), and lets them run again
+ * (`release()`) — so a spec can photograph the 40% mark of a capture.
+ * Running free under it, every frame is exactly 1/60 s. Stages on one page
+ * share the stepped time, so step with one board on screen.
+ */
+interface TestClock {
+  frozen: boolean
+  pending: number
+}
+let testClock: TestClock | null = null
+try {
+  if (typeof window !== 'undefined' && localStorage.getItem('games-test-clock') === 'on') {
+    const clock: TestClock = { frozen: false, pending: Infinity }
+    testClock = clock
+    Object.assign(window, {
+      __motionClock: {
+        freeze() {
+          clock.frozen = true
+          clock.pending = 0
+        },
+        release() {
+          clock.frozen = false
+          clock.pending = Infinity
+        },
+        step(ms: number) {
+          clock.pending += ms
+          return new Promise<void>((resolve) => {
+            const check = () => (clock.pending <= 0 ? resolve() : requestAnimationFrame(check))
+            requestAnimationFrame(check)
+          })
+        },
+      },
+    })
+  }
+} catch {
+  // No storage: no test clock.
+}
 
 /** 2 full, 1 lower pixel ratio, 0 lowest ratio and no shadows. */
 export type QualityTier = 0 | 1 | 2
