@@ -6,6 +6,8 @@ import type { HeldTiming } from '../components/clock'
 
 export interface OnlineChessSession {
   state: GameState
+  /** The room's code, for the link to its replay once the game is over. */
+  code?: string
   /** When the snapshot's state began and was sent, by the server's clock; what the clocks count from. */
   timing?: HeldTiming
   /**

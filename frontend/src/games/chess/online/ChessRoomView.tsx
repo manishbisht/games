@@ -22,6 +22,7 @@ export default function ChessRoomView({
     const send = (action: ChessAction) => api.action(action)
     return {
       state: snapshot.gameState as GameState,
+      code: snapshot.code,
       timing: hold(snapshot.timing, receivedAt),
       recent: roomBeats<GameState>({ snapshot, receivedAt, recent }),
       myColor: you.seat as Color | null,

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Globe2, Link2, Timer, Users } from 'lucide-react'
+import { useSearchParams } from 'react-router'
 import { createGame } from '@games/shared/chess'
 import { TIME_CONTROLS } from '@games/shared/chess/types'
 import type { TimeControlId } from '@games/shared/chess/types'
@@ -9,6 +10,11 @@ import ChessShell from './ChessShell'
 import ChessBoard from './scene/ChessBoard'
 import type { SceneState } from './scene/createScene'
 import { controlName } from './components/clock'
+import { PERMALINK_PARAM } from './game/permalink'
+import { BoardSkeleton } from '../../RouteSkeleton'
+
+/** A game's permanent link lands here, as `/chess?moves=…`; see `./game/permalink`. */
+const PermalinkReplay = lazy(() => import('./online/ChessPermalinkReplay'))
 
 /**
  * The clock a new room is made with. Chosen here, before the room exists,
@@ -40,6 +46,25 @@ function ClockChoice({ value, onChange }: { value: TimeControlId; onChange: (id:
 }
 
 export default function ChessLobby() {
+  const [search] = useSearchParams()
+  if (search.has(PERMALINK_PARAM))
+    return (
+      <Suspense
+        fallback={
+          <ChessShell>
+            <div className="replay-loading">
+              <BoardSkeleton label="Setting up the replay…" />
+            </div>
+          </ChessShell>
+        }
+      >
+        <PermalinkReplay search={search} />
+      </Suspense>
+    )
+  return <Lobby />
+}
+
+function Lobby() {
   const [timeControl, setTimeControl] = useState<TimeControlId>('none')
   // Spread, not written as a prop: OnlinePanel does not declare `options` yet. Once it does — and
   // hands them to `createRoom` — the choice reaches the server with no change here.

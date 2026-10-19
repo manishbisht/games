@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import { HeaderAuth } from '../../online/identity'
+import { replayUrl } from '../../online/games'
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -15,6 +16,8 @@ import {
   Flag,
   Handshake,
   Leaf,
+  Link2,
+  Play,
   Timer,
   Maximize,
   Minus,
@@ -38,7 +41,7 @@ import { playChessSound } from './game/audio'
 import type { ChessSound, SoundDetail } from './game/audio'
 import { COLOR_NAMES, GLYPHS, PIECE_NAMES, TIME_CONTROLS } from '@games/shared/chess/types'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
-import type { Color, GameState, Preferences, Square } from '@games/shared/chess/types'
+import type { Color, GameState, Square } from '@games/shared/chess/types'
 import { useHeld } from '../../motion/hooks'
 import { setMotionPreference, useReducedMotion } from '../../motion/preference'
 import { setSoundOn, useSound } from '../../motion/sound'
@@ -46,30 +49,15 @@ import { claimTarget } from '../../online/session'
 import type { ReactionEntry } from '../../online/roomState'
 import type { OnlineChessSession } from './online/session'
 import Guide from './components/Guide'
+import { PREFS, storedPreferences } from './game/preferences'
+import { permalinkUrl } from './game/permalink'
+import './online/ChessReplay.css'
 import { guideSeen, guideSteps, rememberGuide } from './game/guide'
 import { ReactionBubbles, TableReactions } from './components/Reactions'
 import { reactionMeta, useLiveReactions } from './game/reactions'
 import './ChessGame.css'
 
-// Preferences only. The game itself lives in its room, which is what makes a
-// chess table resumable from its link rather than from this browser. Motion is
-// the site's one preference (`motion/preference`), not a chess setting, and
-// sound is remembered per game the way every game remembers it (`motion/sound`).
-const PREFS = 'gambit-preferences-v1'
 type Dialog = 'settings' | 'help' | 'resign' | null
-type TablePreferences = Omit<Preferences, 'sound'>
-function storedPreferences(): TablePreferences {
-  const defaults: TablePreferences = { highContrast: false, theme: 'walnut' }
-  try {
-    const data = JSON.parse(localStorage.getItem(PREFS) || '{}')
-    return {
-      highContrast: data.highContrast === true,
-      theme: data.theme === 'marble' ? 'marble' : 'walnut',
-    }
-  } catch {
-    return defaults
-  }
-}
 // Sound used to live in these preferences: a table muted there stays muted. Once,
 // as the module loads, and only while the per-game setting has never been made.
 try {
@@ -259,6 +247,7 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
   const [presenting, setPresenting] = useState(false),
     [graves, setGraves] = useState<Record<Color, number> | null>(null),
     [resultDismissed, setResultDismissed] = useState(false),
+    [linkCopied, setLinkCopied] = useState(false),
     [notice, setNotice] = useState('')
   const board = useRef<BoardControls>(null),
     historyEnd = useRef<HTMLDivElement>(null)
@@ -908,6 +897,30 @@ export default function ChessGame({ online }: { online: OnlineChessSession }) {
           <span>{game.history.length} moves</span>
           <i />
           <span>{onlineOpponent}</span>
+        </div>
+        <div className="ch-result-replay">
+          {online.code && (
+            <Link to={replayUrl('chess', online.code)}>
+              <Play size={13} aria-hidden="true" /> Watch the replay
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(
+                  permalinkUrl(game, { w: online.players.w?.name, b: online.players.b?.name }),
+                )
+                setLinkCopied(true)
+                setTimeout(() => setLinkCopied(false), 2000)
+              } catch {
+                setLinkCopied(false)
+              }
+            }}
+          >
+            {linkCopied ? <Check size={13} aria-hidden="true" /> : <Link2 size={13} aria-hidden="true" />}
+            {linkCopied ? 'Copied!' : 'Copy permanent link'}
+          </button>
         </div>
         {seat && (
           <button className="ch-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>

@@ -62,6 +62,8 @@ export interface SceneEvents {
   presenting?: (busy: boolean) => void
   /** How many victims of each colour have reached the trays. */
   graves?: (counts: Record<Color, number>) => void
+  /** The board's first frame is on screen. */
+  ready?: () => void
 }
 export interface SceneOptions {
   black: boolean
@@ -81,6 +83,17 @@ export interface SceneApi {
   zoom: (amount: number) => void
   reset: () => void
   top: () => void
+  /**
+   * A replay's jump — a scrub, a step back, a step while paused: the board is
+   * set to `game` at once, with nothing between it and what was shown.
+   */
+  land: (game: GameState) => void
+  /**
+   * A replay playing on into its next state: whatever is still moving lands,
+   * then the story from the board to `game` plays, sped up by `rate` (the
+   * player bar's speed) and further if it would not otherwise fit `withinMs`.
+   */
+  play: (game: GameState, pace: { rate: number; withinMs: number }) => void
   dispose: () => void
 }
 
@@ -381,7 +394,8 @@ export function createScene(
         if (celebrate && !reducedMotion()) confetti(mate ? 1 : 0.6)
       },
     })
-    if (animate && mate && !rig.userControlled)
+    if (animate && mate && !rig.userControlled) {
+      framed = true
       orbit({
         target: new THREE.Vector3(at.x * 0.45, 0.3, at.z * 0.45),
         zoom: 1.22,
@@ -390,6 +404,7 @@ export function createScene(
         ms: 1900,
         delay: 250,
       })
+    }
     return mate ? 700 : 450
   }
 
@@ -510,10 +525,10 @@ export function createScene(
   /** Turns a fresh snapshot into beats. A long backlog (a reconnect) is mostly skipped to its end. */
   function tell(next: GameState) {
     const previous = queued,
-      told = story(previous, next)
+      told = { ...story(previous, next), ms: 0 }
     if (told.kind === 'reset') {
       queued = next
-      queue.push({ label: 'rematch', run: () => rematch(next) })
+      queue.push({ label: 'rematch', run: () => (told.ms += rematch(next)) })
     } else if (told.kind === 'moves') {
       const { records } = told,
         skip = records.length > 4 ? records.length - 2 : 0
@@ -532,7 +547,7 @@ export function createScene(
       records.slice(skip).forEach((record, i, list) =>
         queue.push({
           label: record.san,
-          run: () => playRecord(record, i === list.length - 1 ? next : null),
+          run: () => (told.ms += playRecord(record, i === list.length - 1 ? next : null)),
         }),
       )
     }
@@ -544,10 +559,11 @@ export function createScene(
         run: () => {
           const hold = finale(next, true)
           if (!hold) impact('end')
-          return hold + GAP
+          return (told.ms += hold + GAP)
         },
       })
     presenting()
+    return told
   }
 
   /** The newest of the room's states this board has told; see `unseen`. */
@@ -693,6 +709,8 @@ export function createScene(
   }
 
   // ——— the camera ———
+  /** A mate has swung the camera in on the fallen king; a replay jumping away swings it back. */
+  let framed = false
   function placeCamera(azimuth: number, polar: number) {
     camera.position.set(
       Math.sin(azimuth) * Math.sin(polar) * RADIUS,
@@ -942,6 +960,9 @@ export function createScene(
   }
 
   // ——— the frame ———
+  /** A replay's playback rate; see `play`. Everything the queue and tweens time runs at it. */
+  let pace = 1,
+    shown1 = false
   let showcaseVisible = true,
     showcaseClock = 0
   const visibility = options.showcase
@@ -953,7 +974,12 @@ export function createScene(
   const removeFrame = stage.onFrame((dt, now) => {
     // Opened mid-move, the board keeps time with the room: what the stage's capped frames skipped
     // (shaders compiling as it starts) is made up, so the move lands when it does for everyone else.
-    const ms = dt * 1000 + (syncing ? stage.takeDrift() : 0)
+    const ms = (dt * 1000 + (syncing ? stage.takeDrift() : 0)) * pace
+    if (!shown1) {
+      shown1 = true
+      // Drawn straight after the frame callbacks; the next frame is the first one seen.
+      requestAnimationFrame(() => events.ready?.())
+    }
     tweens.speed = queue.speed
     let moving = queue.step(ms)
     if (tweens.step(ms)) moving = true
@@ -1086,6 +1112,40 @@ export function createScene(
     },
     top() {
       orbit({ azimuth: black ? Math.PI : 0, polar: 0.04, ms: 800 })
+    },
+    land(game) {
+      pace = 1
+      // Queued first, so the queue running dry reconciles against where the board is going.
+      queued = game
+      state = { ...state, game }
+      muted = true
+      queue.clear()
+      tweens.cancelAll()
+      particles.clear()
+      build(game)
+      muted = false
+      if (framed && !rig.userControlled)
+        orbit({ azimuth: VIEW.azimuth(black), polar: VIEW.polar, zoom: 1, target: TARGET, ms: 600 })
+      framed = false
+      lifts()
+      paint()
+    },
+    play(game, { rate, withinMs }) {
+      if (queue.busy) {
+        // A beat still running when the next state comes is cut short, not queued behind.
+        muted = true
+        queue.flush()
+        tweens.finishAll()
+        muted = false
+      }
+      state = { ...state, game }
+      pace = 1
+      const told = tell(game)
+      // The first beat has started (the queue was idle); any after it are guessed at its length.
+      const natural = told.ms * (1 + queue.length)
+      pace = Math.max(rate, natural / Math.max(1, withinMs))
+      lifts()
+      paint()
     },
     dispose() {
       removeFrame()
