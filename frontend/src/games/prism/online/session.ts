@@ -12,6 +12,8 @@ import type { RoomApi } from '../../../online/useRoom'
  * compacts its seats at the start the two line up index for index.
  */
 export interface OnlinePrismSession {
+  /** The room's code: where its finished round plays back (`replayUrl`). */
+  code: string
   /** Already redacted for this browser: every hand in it but one is placeholders. */
   state: GameState
   /** The player index this browser holds, or `null` for someone watching. */
@@ -78,6 +80,7 @@ export function prismSession(
   })
   const mine = you.seat ? snapshot.seatIds.indexOf(you.seat) : -1
   return {
+    code: snapshot.code,
     state,
     viewer: mine >= 0 ? mine : null,
     players,

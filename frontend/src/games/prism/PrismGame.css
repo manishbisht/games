@@ -1512,7 +1512,7 @@
 }
 .pr-text-button {
   background: none;
-  color: light-dark(#7f8874, var(--theme-muted));
+  color: var(--theme-muted);
   font-size: 11px;
   margin: 17px auto 0;
   padding: 8px;
@@ -2567,4 +2567,173 @@
   height: 5px;
   border-radius: 50%;
   background: #80a6be;
+}
+
+/* The round's result offers it back. */
+.pr-result .pr-replay-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin: 19px auto 0;
+  padding: 9px 15px;
+  border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 60%, transparent), #d4ddce33);
+  border-radius: 999px;
+  color: light-dark(var(--theme-text), #e9e2c7);
+  font-size: 12px;
+  text-decoration: none;
+}
+.pr-result .pr-replay-link:hover {
+  border-color: light-dark(var(--theme-accent), #dfc28b);
+}
+.pr-result .pr-replay-link + .pr-text-button {
+  margin-top: 6px;
+}
+
+/*
+ * A replay: the spectator's table inside the replay page's stage. The HUD is
+ * the live table's own, pulled in to fit a box rather than a whole screen.
+ * What sits on the felt keeps the felt's light ink in either appearance —
+ * the felt is green in both.
+ */
+.pr-replay {
+  --pr-felt-ink: #bac7ad;
+  --pr-felt-strong: #e4e8cb;
+  position: relative;
+  min-height: clamp(360px, 62svh, 680px);
+  overflow: hidden;
+  color: light-dark(var(--theme-text), #f0ead8);
+  background: light-dark(var(--theme-page), #142b24);
+  background-image: radial-gradient(
+    ellipse at 50% 45%,
+    light-dark(color-mix(in srgb, var(--theme-page) 25%, transparent), #34533e40),
+    transparent 65%
+  );
+  font-family: 'DM Sans', sans-serif;
+}
+.pr-replay .pr-round {
+  top: 18px;
+  left: 22px;
+}
+.pr-replay .pr-direction {
+  top: 16px;
+  right: 22px;
+}
+/* Every seat is someone else's here, and a side seat sits over the felt's rim: each badge brings its own ground. */
+.pr-replay .pr-opponent {
+  background: light-dark(color-mix(in srgb, var(--theme-surface) 80%, transparent), #152e23b0);
+  border-color: light-dark(color-mix(in srgb, var(--theme-border) 25%, transparent), #c8bd8024);
+}
+.pr-replay .pr-opponent.pr-current {
+  background: light-dark(color-mix(in srgb, var(--theme-surface) 94%, transparent), #152e23ee);
+  border-color: light-dark(color-mix(in srgb, var(--theme-border) 60%, transparent), #c8bd8066);
+}
+.pr-replay .pr-opponent-top {
+  top: 5%;
+}
+.pr-replay .pr-opponent-left {
+  top: 40%;
+  left: 2%;
+}
+.pr-replay .pr-opponent-right {
+  top: 40%;
+  right: 2%;
+}
+.pr-replay .pr-opponent-bottom {
+  bottom: 2.5%;
+}
+.pr-replay .pr-center-info {
+  top: 58%;
+}
+.pr-replay .pr-pile-name,
+.pr-replay .pr-pile-name small,
+.pr-replay .pr-active-color {
+  color: var(--pr-felt-ink);
+}
+.pr-replay .pr-active-color {
+  top: 64%;
+  background: #142b2066;
+  border-color: #b2c39522;
+}
+.pr-replay .pr-active-color strong {
+  color: var(--pr-felt-strong);
+}
+/* What just happened, or how it ended: the corner the table leaves free. */
+.pr-replay-event,
+.pr-replay-result {
+  position: absolute;
+  left: 22px;
+  bottom: 18px;
+  z-index: 3;
+  max-width: calc(50% - 110px);
+  margin: 0;
+}
+.pr-replay-event {
+  color: light-dark(var(--theme-muted), #b4c3aa);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.pr-replay-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 9px 16px;
+  border: 1px solid light-dark(color-mix(in srgb, var(--theme-border) 60%, transparent), #c8bd8059);
+  border-radius: 18px;
+  background: light-dark(var(--theme-surface), #152e23);
+  color: light-dark(var(--theme-accent), #dfc28b);
+  animation: motion-enter var(--motion-base) var(--ease-out) both;
+}
+.pr-replay-result strong {
+  color: light-dark(var(--theme-text), #f0ead8);
+  font:
+    400 19px/1.2 Georgia,
+    serif;
+}
+.pr-replay-result span {
+  color: light-dark(var(--theme-muted), #b4c3aa);
+  font-size: 12px;
+}
+.replay .pr-replay .pr-replay-sound {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 0;
+  border-radius: 50%;
+  border-color: light-dark(color-mix(in srgb, var(--theme-border) 60%, transparent), #d4ddce33);
+  background: transparent;
+  color: light-dark(var(--theme-text), #c7cfbf);
+}
+@media (max-width: 600px) {
+  .pr-replay {
+    min-height: 440px;
+  }
+  .pr-replay .pr-round {
+    top: 12px;
+    left: 14px;
+  }
+  .pr-replay .pr-direction {
+    top: 10px;
+    right: 14px;
+  }
+  .pr-replay .pr-opponent-left {
+    left: 6px;
+  }
+  .pr-replay .pr-opponent-right {
+    right: 6px;
+  }
+  .pr-replay .pr-opponent-bottom {
+    bottom: 64px;
+  }
+  .pr-replay-event,
+  .pr-replay-result {
+    left: 14px;
+    bottom: 12px;
+    max-width: calc(100% - 84px);
+  }
+}
+:root[data-motion='reduced'] .pr-replay-result {
+  animation: none;
 }

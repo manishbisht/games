@@ -29,6 +29,15 @@ export interface TableState {
    * reconnect — is shown part-way through its beat, or already landed.
    */
   since?: number
+  /** Land on `game` at once, telling nothing of how it got there: a replay's scrub, step or jump. */
+  instant?: boolean
+  /**
+   * A replay's clock. The table runs `speed` times as fast, and a story told
+   * into `game` is fitted into `within` ms of the page's time — quickened
+   * further when it would run over, and landed at once if it is still going
+   * when the next one begins.
+   */
+  tempo?: { speed: number; within: number }
 }
 
 /** Where a card of the viewer's DOM hand sits on screen: its centre in client pixels. */
@@ -75,6 +84,8 @@ export interface TableHost {
   /** Where a card of the viewer's hand is — or was, just before it was played. */
   slot(cardId: string): HandSlot | null
   cue(cue: Cue): void
+  /** The table has drawn its first frame. */
+  ready?(): void
 }
 
 /** Something on the felt the page can point at: a seat's fan, the pile, or the middle of the table. */
@@ -129,6 +140,26 @@ function fromGame(game: GameState): TableView {
 /** The table's view of a snapshot it has fully shown. */
 export const tableView = fromGame
 
+/**
+ * About how long the table takes to tell `events` at 1×, from the beats below:
+ * an upper bound, since reduced motion and short throws take less. A replay
+ * reads it to fit a story into the time its state is on screen.
+ */
+function storyMs(events: GameEvent[]) {
+  return events.reduce((ms, event) => {
+    if (event.kind === 'play') return ms + 700
+    if (event.kind === 'draw') return ms + (Math.min(event.count ?? 1, 12) - 1) * 115 + 640
+    if (event.kind === 'shuffle') return ms + 1650
+    if (event.kind === 'effect') return ms + 640
+    if (event.kind === 'call') return ms + 420
+    if (event.kind === 'win') return ms + 1520
+    return ms
+  }, 0)
+}
+/** The same for a whole deal: the sweep, the riffle, every card round the table, the starter. */
+const dealMs = (game: GameState) =>
+  2500 + game.players.reduce((sum, player) => sum + player.hand.length, 0) * 55
+
 /** A round that has only just been dealt: nothing has been played or drawn yet. */
 const freshRound = (game: GameState) =>
   game.status === 'playing' &&
@@ -181,7 +212,12 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     thinkingSince = 0,
     quiet = false,
     tier: QualityTier = stage.quality,
-    penalty: { player: number; count: number; landed: number } | null = null
+    penalty: { player: number; count: number; landed: number } | null = null,
+    /** How fast the table's clock runs against the page's: a replay's speed, and its fit. */
+    pace = 1,
+    /** How much faster than the replay's speed the story being told has to go to fit. */
+    stretch = 1,
+    drawn = false
   const view = fromGame(latest)
   const deck: CardObject[] = [],
     pile: { object: CardObject; card: Card }[] = [],
@@ -1116,7 +1152,11 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     update(next) {
       const before = state,
         previous = latest
-      const game = next.game
+      const game = next.game,
+        tempo = next.tempo
+      state = next
+      // A change of replay speed applies to the story already under way.
+      pace = tempo ? tempo.speed * stretch : 1
       if (
         game === latest &&
         before.viewer === next.viewer &&
@@ -1124,21 +1164,26 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
         before.menu === next.menu
       )
         return
-      state = next
       if (
         next.menu ||
+        next.instant ||
         before.viewer !== next.viewer ||
         before.watching !== next.watching ||
         before.menu !== next.menu
       ) {
         latest = game
+        stretch = 1
+        pace = tempo ? tempo.speed : 1
         snap()
         return
       }
+      // A replay's next story starts from a table that has finished the last one.
+      if (tempo && (queue.busy || tweens.active)) catchUp()
       const age = ageOf(next),
         late = age > LATE_MS
       if (game.round !== previous.round) {
         latest = game
+        if (tempo) fit(tempo, dealMs(game))
         deal(game)
         if (late) skip(age)
         return
@@ -1167,6 +1212,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
         return
       }
       view.arriving.push(...drawn)
+      if (tempo) fit(tempo, storyMs(fresh))
       tell(beatsFor(fresh, [...drawn]), game)
       emit()
       // A backlog this long is a page that fell behind: show where things stand.
@@ -1203,6 +1249,12 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     },
   }
 
+  /** Quickens a replay's story that would run past the time its state is on screen. */
+  function fit(tempo: NonNullable<TableState['tempo']>, ms: number) {
+    stretch = Math.max(1, ms / (tempo.within * tempo.speed * 0.9))
+    pace = tempo.speed * stretch
+  }
+
   /** Every waiting story told at once, silently, landing on the newest. */
   function catchUp() {
     quiet = true
@@ -1219,8 +1271,9 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
 
   let lastBreath = 0
   /** One frame of everything the table animates; also how `skip` plays a beat forward. */
-  function advance(dt: number, now: number) {
+  function advance(frame: number, now: number) {
     clock = now
+    const dt = frame * pace
     // The queue holds its beats at its own catch-up speed; the tweens follow it.
     const ms = dt * 1000
     tweens.speed = queue.speed
@@ -1257,6 +1310,11 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
     return moving || queue.busy
   }
   stage.onFrame((dt, now) => {
+    if (!drawn) {
+      drawn = true
+      // Told once this frame has been rendered, which follows straight on from here.
+      queueMicrotask(() => host.ready?.())
+    }
     // Long frames the stage capped (shaders compiling just after a join, a
     // stalled thread) left a table that keeps time with the room behind it:
     // play that time forward too, so it lands when everyone else's does.
@@ -1271,7 +1329,7 @@ export function createScene(container: HTMLElement, initial: TableState, host: T
   // reloads part-way. A later round is laid out as it stood before the room's
   // last command, which is then told from as far in as the room already is.
   const age = ageOf(initial)
-  if (initial.menu) snap()
+  if (initial.menu || initial.instant) snap()
   else if (freshRound(initial.game)) {
     deal(initial.game)
     if (age > LATE_MS) skip(age)

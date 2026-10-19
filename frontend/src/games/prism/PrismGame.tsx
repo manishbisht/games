@@ -13,6 +13,7 @@ import {
   Check,
   ChevronRight,
   CircleHelp,
+  Clapperboard,
   Flag,
   Hand,
   Layers,
@@ -37,13 +38,14 @@ import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { sound } from './game/audio'
 import TableScene from './scene/TableScene'
 import { tableView } from './scene/createScene'
-import type { Cue, TableApi, TableHost, TableView } from './scene/createScene'
+import type { TableApi, TableHost, TableView } from './scene/createScene'
 import { warmImages } from './scene/artwork'
 import { setMotionPreference, useReducedMotion } from '../../motion/preference'
 import { useHeld } from '../../motion/hooks'
 import { haptic } from '../../motion/audio'
 import { useSound } from '../../motion/sound'
 import { useBotRoom } from '../../online/useBotRoom'
+import { replayUrl } from '../../online/games'
 import { prismGame } from '../catalog'
 import Setup from './components/Setup'
 import type { SetupOptions } from './components/Setup'
@@ -54,14 +56,15 @@ import Rules from './components/Rules'
 import { ReactionControl, SeatReactions } from './components/Reactions'
 import type { ReactionAnchor } from './components/Reactions'
 import Guide from './components/Guide'
+import { cueFor, withCue } from './components/cues'
+import type { Cues } from './components/cues'
+import { seatSide, TOKEN_COLORS, TOKENS } from './game/seats'
 import { guideDone, rememberGuide } from './game/guide'
 import type { GuideStep, GuideTarget } from './components/Guide'
 import type { OnlinePrismSession, TableReaction } from './online/session'
 import './PrismGame.css'
 
 const AI_NAMES = ['You', 'Jules', 'Cleo', 'Milo']
-const TOKENS = ['✦', '◈', '✳', '◉']
-const TOKEN_COLORS = ['#d9bc7c', '#d69583', '#91b3c4', '#b0bb89']
 const DEFAULT_OPTIONS: SetupOptions = {
   mode: 'ai',
   count: 4,
@@ -114,8 +117,6 @@ function AbandonmentNotice({
   )
 }
 
-type CueKind = Exclude<Cue['kind'], 'sound'>
-type Cues = Partial<Record<CueKind, Cue & { key: number }>>
 /**
  * The box round `elements` on screen, for the guide to ring; `null` while none
  * is laid out. A hand wider than the screen scrolls, so only what is in view counts.
@@ -131,12 +132,6 @@ function boxOf(...elements: (Element | null | undefined)[]): GuideTarget | null 
     top = Math.min(...rects.map((r) => r.top)),
     bottom = Math.max(...rects.map((r) => r.bottom))
   return { x: left, y: top, width: right - left, height: bottom - top, element: elements.find(Boolean)! }
-}
-
-/** The newest cue of `kind`, if it is about `player`. */
-function cueFor<K extends CueKind>(cues: Cues, kind: K, player: number) {
-  const cue = cues[kind] as (Extract<Cue, { kind: K }> & { key: number }) | undefined
-  return cue && 'player' in cue && cue.player === player ? cue : null
 }
 
 export default function PrismGame({
@@ -338,16 +333,7 @@ export default function PrismGame({
       // Felt, sparingly: only what lands on this seat.
       const hit = cue.kind === 'skip' || (cue.kind === 'penalty' && cue.landed === 0)
       if (hit && !watching && cue.player === viewer) haptic(16)
-      setCues((current) => {
-        const previous = current[cue.kind]
-        // A penalty counting its cards in is one moment, not one per card.
-        const same =
-          cue.kind === 'penalty' &&
-          previous?.kind === 'penalty' &&
-          previous.player === cue.player &&
-          cue.landed > 0
-        return { ...current, [cue.kind]: { ...cue, key: same ? previous.key : (previous?.key ?? 0) + 1 } }
-      })
+      setCues((current) => withCue(current, cue))
     },
   }
 
@@ -443,7 +429,13 @@ export default function PrismGame({
           <HeaderAuth readOnly={Boolean(online)} />
         </nav>
       </header>
-      <main className="pr-arena" ref={arena} aria-busy={shown.busy || undefined}>
+      {/* `data-sequence`: how far the room has got, which can be ahead of what the table shows. */}
+      <main
+        className="pr-arena"
+        ref={arena}
+        aria-busy={shown.busy || undefined}
+        data-sequence={menu ? undefined : game.sequence}
+      >
         <div className="pr-scene-wrap">
           <TableScene
             ref={table}
@@ -491,15 +483,7 @@ export default function PrismGame({
               // opponent" — the near seat belongs on screen like all the rest.
               .filter((p) => watching || p.id !== viewer)
               .map((p) => {
-                const offset = (p.id - viewer + game.players.length) % game.players.length
-                const position =
-                  offset === 0
-                    ? 'bottom'
-                    : game.players.length === 2 || (game.players.length === 4 && offset === 2)
-                      ? 'top'
-                      : offset === 1
-                        ? 'left'
-                        : 'right'
+                const position = seatSide(p.id, viewer, game.players.length)
                 const count = shown.counts[p.id] ?? p.hand.length,
                   current = active.id === p.id && !shown.dealing,
                   skip = cueFor(cues, 'skip', p.id),
@@ -946,6 +930,9 @@ export default function PrismGame({
                     ? 'Accept another round'
                     : 'Another round'}
               </button>
+              <Link className="pr-text-button pr-replay-link" to={replayUrl('prism', online.code)}>
+                <Clapperboard size={15} /> Watch the replay
+              </Link>
               <button className="pr-text-button" onClick={online.leave}>
                 Leave room
               </button>

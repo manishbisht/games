@@ -29,11 +29,14 @@ export default forwardRef<Pick<TableApi, 'zoom' | 'locate'>, { state: TableState
         view: (view) => latestHost.current.view(view),
         slot: (id) => latestHost.current.slot(id),
         cue: (cue) => latestHost.current.cue(cue),
+        ready: () => latestHost.current.ready?.(),
       }
       try {
         api.current = createScene(element.current!, initial.current, relay)
       } catch {
         setFallback(true)
+        // The flat fallback is as ready as it will ever be.
+        relay.ready!()
       }
       return () => {
         api.current?.dispose()
