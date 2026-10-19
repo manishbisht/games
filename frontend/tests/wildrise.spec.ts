@@ -52,6 +52,8 @@ async function startBotGame(page: Page, players?: number, name = 'Robin') {
 
 test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
+  // The first-game guide has its own spec; here it would only sit over the table.
+  await page.addInitScript(() => localStorage.setItem('games-guide-wildrise', 'done'))
 })
 
 test('play vs bot deals a real table, and the server takes the bots’ turns', async ({ page }) => {

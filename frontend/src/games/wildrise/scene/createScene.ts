@@ -1,7 +1,5 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { beatElapsed } from '@games/shared/protocol'
-import type { BeatTiming } from '@games/shared/protocol'
 import { PALETTES, PLAYER_IDS, spaceCoordinates } from '@games/shared/wildrise/board'
 import type { GameState, PlayerId } from '@games/shared/wildrise/types'
 import { createCameraRig } from '../../../motion/camera'
@@ -54,10 +52,16 @@ export interface SceneHandlers {
 }
 export interface SceneApi {
   /**
-   * `timing` is the room's word on how far into `state` it already is, as of
-   * `receivedAt` (`performance.now()` when the state reached this browser).
+   * `since` is when the room entered `state`, on this page's clock
+   * (`performance.now()`); absent for a table that isn't the room's.
    */
-  update: (state: GameState, timing?: BeatTiming, receivedAt?: number) => void
+  update: (state: GameState, since?: number) => void
+  /**
+   * Where `what` is on screen right now, in CSS pixels from the canvas's corner
+   * — a token (over its head, at camp too) or a square — or `null` when it is
+   * behind the camera or not on the table.
+   */
+  locate: (what: { token: PlayerId } | { square: number }, out: { x: number; y: number }) => boolean
   setRunning: (running: boolean) => void
   /** Whether a tap on the die would roll it: it lifts and glows under the pointer. */
   setCanRoll: (can: boolean) => void
@@ -134,8 +138,7 @@ export function createScene(
   container: HTMLElement,
   initial: GameState,
   handlers: SceneHandlers,
-  timing?: BeatTiming,
-  receivedAt?: number,
+  since?: number,
 ): SceneApi {
   const stage = createStage(container, {
     label:
@@ -989,7 +992,7 @@ export function createScene(
     silent = false
   }
 
-  function update(next: GameState, timing?: BeatTiming, receivedAt?: number) {
+  function update(next: GameState, since?: number) {
     const story_ = plan(previous, story, next, reduced)
     previous = next
     state = next
@@ -1001,7 +1004,7 @@ export function createScene(
     // already is: what came before lands at once, and this beat starts at that
     // point, so the token arrives when it does for everyone else at the table.
     // Without the room's word, a story that didn't follow on plays quickly.
-    const synced = !live && timing !== undefined && !reduced
+    const synced = !live && since !== undefined && !reduced
     if (synced || queue.length > 3) flush()
     queue.push(
       ...story_.beats.map((beat) => ({
@@ -1013,7 +1016,7 @@ export function createScene(
       // Counted from the socket, not from now: the render, the page crossing
       // over and the board being built all took some of the room's beat too.
       pickedUp = true
-      skip(beatElapsed(timing) + (receivedAt === undefined ? 0 : performance.now() - receivedAt))
+      skip(performance.now() - since)
     }
     if (document.hidden) flush()
     stage.invalidate()
@@ -1253,10 +1256,28 @@ export function createScene(
     return moving
   })
   stage.start()
-  update(initial, timing, receivedAt)
+  update(initial, since)
 
+  const located = new THREE.Vector3(),
+    onScreen = new THREE.Vector2()
   return {
     update,
+    locate(what, out) {
+      if ('token' in what) {
+        const token = tokens.get(what.token)
+        if (!token?.group.visible) return false
+        located.copy(token.group.position)
+        located.y += 0.62 * token.group.scale.y
+      } else if (what.square >= 1 && what.square <= 100)
+        located.set(SQUARE_X[what.square], BOARD_Y, SQUARE_Z[what.square])
+      else return false
+      if (!stage.size.width) return false
+      stage.toScreen(located, onScreen)
+      if (located.project(camera).z > 1) return false
+      out.x = onScreen.x
+      out.y = onScreen.y
+      return true
+    },
     setRunning: (running) => stage.setRunning(running),
     setCanRoll(next) {
       canRoll = next

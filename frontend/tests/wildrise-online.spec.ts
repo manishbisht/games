@@ -24,6 +24,7 @@ async function newPlayer(browser: Browser, errors: string[]) {
   const page = await context.newPage()
   page.on('pageerror', (error) => errors.push(error.message))
   await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.addInitScript(() => localStorage.setItem('games-guide-wildrise', 'done'))
   return page
 }
 

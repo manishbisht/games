@@ -1,30 +1,18 @@
 import { PLAYER_IDS } from '@games/shared/wildrise/board'
 import type { WildriseOnlineAction } from '@games/shared/wildrise/online'
 import type { GameState, PlayerId } from '@games/shared/wildrise/types'
-import type { BeatTiming, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
-import type { SnapshotEntry } from '../../../online/roomState'
+import type { ReactionId, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
+import { claimTarget as stuckOn, rematchState, roomBeats, seatPlayers } from '../../../online/session'
+import type { RoomBeat, SeatPlayer } from '../../../online/session'
+import type { ReactionEntry, SnapshotEntry } from '../../../online/roomState'
 import type { RoomApi } from '../../../online/useRoom'
 
-export interface WildriseSeatPlayer {
-  name: string
-  connected: boolean
-  /** Server timestamp of when they dropped; absent while they are here. */
-  awaySince?: number
-  /** The room is already rolling for this seat — there is nothing left to claim. */
-  abandoned?: boolean
-  /** Nobody is behind this seat: the room plays it, and the table should say so. */
-  bot?: { skill: string }
-}
-
-/**
- * One state of the table as it reached this browser: `seq` counts snapshots for
- * the life of the room page, `receivedAt` is `performance.now()` at the socket.
- * `state` is null for a snapshot without a game in it.
- */
-export interface TableMoment {
-  seq: number
-  state: GameState | null
-  timing?: BeatTiming
+/** One reaction, said from a colour at the table — or from someone watching (`null`). */
+export interface TableReaction {
+  id: string
+  reaction: ReactionId
+  from: PlayerId | null
+  /** `performance.now()` when it reached this browser. */
   receivedAt: number
 }
 
@@ -36,44 +24,30 @@ export interface TableMoment {
 export interface OnlineWildriseSession {
   state: GameState
   /**
-   * How far into `state` the room already was when it sent it, by the room's
-   * clock — what lets a browser that joins mid-walk pick the walk up in step.
+   * The room's recent states, oldest first and `state` last, each with when its
+   * beat began on this page's clock: a burst of snapshots renders once, so the
+   * board plays every beat of it, and a browser that joins mid-walk picks the
+   * walk up in step.
    */
-  timing?: BeatTiming
-  /** When `state` reached this browser (`performance.now()`): what `timing` is counted on from. */
-  receivedAt: number
-  /**
-   * The last few states in the order they arrived, newest (`state`) last. A
-   * burst of snapshots renders once, so the board reads these to play every
-   * beat of it rather than only the last.
-   */
-  recent: TableMoment[]
+  beats: RoomBeat<GameState>[]
   /** The colour this browser plays, or `null` for someone watching. */
   mySeat: PlayerId | null
-  players: Partial<Record<PlayerId, WildriseSeatPlayer>>
+  players: Partial<Record<PlayerId, SeatPlayer>>
   rematch: { mine: boolean; theirs: boolean }
+  /** Recent reactions, oldest first. */
+  reactions: TableReaction[]
   send: {
     roll: () => void
     rematch: () => void
     claim: () => void
+    react?: (reaction: ReactionId) => void
   }
   leave: () => void
 }
 
-/**
- * The player a claim can be made against right now, or `null`. Three things have
- * to hold at once: the table is genuinely stuck on someone who has gone, this
- * browser holds a seat of its own to claim with — a spectator has no standing,
- * and the server would only answer NOT_SEATED — and no claim has been granted
- * yet, because after one the room rolls for that seat and there is nothing to ask.
- */
-export function claimTarget(session: OnlineWildriseSession): WildriseSeatPlayer | null {
-  const { state, mySeat, players } = session
-  if (mySeat === null || state.phase === 'won') return null
-  const onTurn = state.players[state.currentPlayer].id
-  if (onTurn === mySeat) return null
-  const blocker = players[onTurn]
-  return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
+/** The player a claim can be made against right now, or `null` (see the room's `claimTarget`). */
+export function claimTarget({ state, players, mySeat }: OnlineWildriseSession): SeatPlayer | null {
+  return stuckOn(players, state.players[state.currentPlayer].id, mySeat, state.phase === 'won')
 }
 
 export function wildriseSession(
@@ -81,55 +55,34 @@ export function wildriseSession(
   you: YouInfo,
   api: RoomApi,
   leave: () => void,
-  { receivedAt, recent }: { receivedAt: number; recent: SnapshotEntry[] } = { receivedAt: 0, recent: [] },
+  {
+    receivedAt = 0,
+    recent = [],
+    reactions = [],
+  }: { receivedAt?: number; recent?: SnapshotEntry[]; reactions?: ReactionEntry[] } = {},
 ): OnlineWildriseSession {
   // Safe by construction: this only runs for a wildrise room with a live game.
   const state = snapshot.gameState as GameState
-  const colourOf = (seat: SeatId): PlayerId | undefined => PLAYER_IDS[snapshot.seatIds.indexOf(seat)]
-
-  const players: Partial<Record<PlayerId, WildriseSeatPlayer>> = {}
-  for (const seat of snapshot.seatIds) {
-    const info = snapshot.seats[seat]
-    const colour = colourOf(seat)
-    if (info && colour)
-      players[colour] = {
-        name: info.player.name,
-        connected: info.connected,
-        awaySince: info.awaySince,
-        abandoned: info.abandoned,
-        bot: info.bot,
-      }
-  }
-
+  const colourOf = (seat: SeatId | null): PlayerId | null =>
+    (seat && PLAYER_IDS[snapshot.seatIds.indexOf(seat)]) || null
   const send = (action: WildriseOnlineAction) => api.action(action)
-  // Bots are left out: one never asks for a rematch and the server never waits
-  // for one either, so counting them would leave the table saying "waiting" for
-  // a game that has already restarted.
-  const others = snapshot.seatIds.filter(
-    (seat) => seat !== you.seat && snapshot.seats[seat] && !snapshot.seats[seat]!.bot,
-  )
   return {
     state,
-    timing: snapshot.timing,
-    receivedAt,
-    recent: recent.map((entry) => ({
-      seq: entry.seq,
-      state: entry.snapshot.gameState as GameState | null,
-      timing: entry.snapshot.timing,
-      receivedAt: entry.receivedAt,
+    beats: roomBeats<GameState>({ snapshot, receivedAt, recent }),
+    mySeat: colourOf(you.seat),
+    players: seatPlayers(snapshot, (_, index) => PLAYER_IDS[index]),
+    rematch: rematchState(snapshot, you),
+    reactions: reactions.map(({ id, reaction, seat, receivedAt }) => ({
+      id,
+      reaction,
+      from: colourOf(seat),
+      receivedAt,
     })),
-    mySeat: (you.seat && colourOf(you.seat)) || null,
-    players,
-    rematch: {
-      mine: you.seat ? (snapshot.seats[you.seat]?.wantsRematch ?? false) : false,
-      // Up to four at the table, so "them" is everyone else — and a rematch only
-      // starts once the whole table has asked for it.
-      theirs: others.length > 0 && others.every((seat) => snapshot.seats[seat]!.wantsRematch),
-    },
     send: {
       roll: () => send({ kind: 'roll' }),
       rematch: api.rematch,
       claim: api.claim,
+      react: api.react,
     },
     leave,
   }

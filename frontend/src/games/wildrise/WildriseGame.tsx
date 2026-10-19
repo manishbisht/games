@@ -32,20 +32,75 @@ import Setup from './components/Setup'
 import type { SetupOptions } from './components/Setup'
 import Dialog from './components/Dialog'
 import TokenPortrait from './components/TokenPortrait'
-import { PALETTES, PLAYER_IDS } from '@games/shared/wildrise/board'
+import { LADDERS, PALETTES, PLAYER_IDS, SNAKES } from '@games/shared/wildrise/board'
 import { createGame } from '@games/shared/wildrise'
 import { companionNames } from '@games/shared/wildrise/online'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { sound } from './game/audio'
 import type { Cue } from './game/audio'
-import type { GameConfig, GameState, Player } from '@games/shared/wildrise/types'
+import type { GameConfig, GameState, Player, PlayerId } from '@games/shared/wildrise/types'
 import { useCountUp, useHeld } from '../../motion/hooks'
+import { sounds } from '../../motion/audio'
+import { useSound } from '../../motion/sound'
+import ReactionBar from '../../online/ReactionBar'
+import Reactions from './components/Reactions'
+import type { Locate } from './components/Reactions'
+import Guide from './components/Guide'
+import { guideSeen } from './game/guide'
+import type { GuideStep, Spot } from './components/Guide'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
 import type { Squares } from './scene/story'
 import { claimTarget } from './online/session'
-import type { OnlineWildriseSession } from './online/session'
+import type { OnlineWildriseSession, TableReaction } from './online/session'
 import './WildriseGame.css'
+
+/** The ladder and the snake the first-game guide points at: the first of each a new player will meet. */
+const SHOWN_LADDER = LADDERS[0],
+  SHOWN_SNAKE = SNAKES[5]
+
+function guideSteps(exactFinish: boolean, animal: string): GuideStep[] {
+  return [
+    {
+      target: 'roll',
+      title: 'Roll the die',
+      text: 'On your turn, press Roll dice — or click the die on the table, or press Space.',
+    },
+    {
+      target: 'token',
+      title: 'Your token hops',
+      text: `Your ${animal.toLowerCase()} leaves camp and hops one square for every pip.`,
+    },
+    {
+      target: 'ladder',
+      title: 'Ladders climb',
+      text: `Stop at the foot of a ladder and climb straight to its top — ${SHOWN_LADDER.from} takes you to ${SHOWN_LADDER.to}.`,
+    },
+    {
+      target: 'snake',
+      title: 'Snakes slide',
+      text: `Land on a snake’s head and slide down to its tail — ${SHOWN_SNAKE.from} drops you to ${SHOWN_SNAKE.to}.`,
+    },
+    {
+      target: 'finish',
+      title: exactFinish ? 'An exact roll to 100' : 'First to 100',
+      text: exactFinish
+        ? 'Square 100 needs the exact number. Roll too many and you wait for your next turn.'
+        : 'Reach or pass square 100 first, and the summit is yours.',
+    },
+  ]
+}
+
+/** Whether a point is inside a box that is itself on screen. */
+const within = (x: number, y: number, box: DOMRect) =>
+  x >= box.left &&
+  x <= box.right &&
+  y >= box.top &&
+  y <= box.bottom &&
+  x >= 0 &&
+  y >= 0 &&
+  x <= innerWidth &&
+  y <= innerHeight
 
 function toConfig(options: SetupOptions): GameConfig {
   return {
@@ -234,8 +289,16 @@ function Table({
   const [dismissedVictory, setDismissedVictory] = useState(false)
   const [hidden, setHidden] = useState(document.hidden)
   const [shown, setShown] = useState<Squares | null>(null)
-  const board = useRef<BoardControls>(null)
+  const board = useRef<BoardControls>(null),
+    stage = useRef<HTMLDivElement>(null)
   const current = game.players[game.currentPlayer]
+  // A first game's guide, for a player with a seat — never for someone watching.
+  const [guide, setGuide] = useState<number | null>(() => (online?.mySeat && !guideSeen() ? 0 : null))
+  const mine = online?.mySeat ? game.players.find((p) => p.id === online.mySeat) : undefined
+  const steps = useMemo(
+    () => guideSteps(game.rules.exactFinish, PALETTES[mine?.id ?? 'red'].animal),
+    [game.rules.exactFinish, mine?.id],
+  )
   /** Whose inputs this browser may make: only ever its own seat. */
   const myTurn = Boolean(online) && online!.mySeat === current.id
   // The room keeps the table moving whatever this browser is doing, so a
@@ -264,6 +327,8 @@ function Table({
     // rattles it in the hand until the number comes back.
     board.current?.rolling()
     online?.send.roll()
+    // The guide's first step is the roll itself: taking it moves the guide on.
+    setGuide((step) => (step === 0 ? 1 : step))
   }, [canRoll, online])
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -290,6 +355,91 @@ function Table({
     [menu, soundOn],
   )
   const onFailure = useCallback(() => setShown(null), [])
+  /**
+   * Where something on the board is in the viewport, while it is in view: a
+   * token's head, or a box round some squares (padded by half a tile).
+   */
+  const onBoard = useCallback((what: { token: PlayerId } | { squares: number[] }): Spot | null => {
+    const canvas = stage.current?.querySelector('.wr-canvas'),
+      scene = board.current
+    if (!canvas || !scene) return null
+    const box = canvas.getBoundingClientRect(),
+      at = { x: 0, y: 0 }
+    if ('token' in what) {
+      if (!scene.locate(what, at)) return null
+      const x = box.left + at.x,
+        y = box.top + at.y
+      return within(x, y, box) ? { left: x - 26, top: y - 6, width: 52, height: 58 } : null
+    }
+    let left = Infinity,
+      top = Infinity,
+      right = -Infinity,
+      bottom = -Infinity
+    for (const square of what.squares) {
+      if (!scene.locate({ square }, at)) return null
+      left = Math.min(left, at.x)
+      right = Math.max(right, at.x)
+      top = Math.min(top, at.y)
+      bottom = Math.max(bottom, at.y)
+    }
+    // Half a tile, measured from the two squares at the start of the board.
+    const one = { x: 0, y: 0 }
+    scene.locate({ square: 1 }, one)
+    scene.locate({ square: 2 }, at)
+    const pad = Math.max(10, Math.hypot(at.x - one.x, at.y - one.y) * 0.55)
+    const spot = {
+      left: box.left + left - pad,
+      top: box.top + top - pad,
+      width: right - left + pad * 2,
+      height: bottom - top + pad * 2,
+    }
+    return within(spot.left + spot.width / 2, spot.top + spot.height / 2, box) ? spot : null
+  }, [])
+  const locateGuide = useCallback(
+    (target: string): Spot | null => {
+      if (target === 'roll') return document.querySelector('.wr-roll')?.getBoundingClientRect() ?? null
+      if (target === 'token') return mine ? onBoard({ token: mine.id }) : null
+      if (target === 'ladder') return onBoard({ squares: [SHOWN_LADDER.from, SHOWN_LADDER.to] })
+      if (target === 'snake') return onBoard({ squares: [SHOWN_SNAKE.from, SHOWN_SNAKE.to] })
+      return onBoard({ squares: [100] })
+    },
+    [mine, onBoard],
+  )
+  /** On a phone the roll bar is pinned to the foot of the screen; the guide keeps above it. */
+  const guideFloor = () => {
+    const bar = document.querySelector('.wr-roll-action')
+    return bar && getComputedStyle(bar).position === 'fixed' ? bar.getBoundingClientRect().top : innerHeight
+  }
+  /**
+   * Where a reaction rises from: the sender's token, else their card, else —
+   * for someone watching, or nothing in view — the top of the board.
+   */
+  const locateReaction = useCallback<Locate>(
+    (from) => {
+      const token = from && onBoard({ token: from })
+      if (token) return { x: token.left + token.width / 2, y: token.top }
+      const card =
+        from && document.querySelector(`[data-testid="wildrise-player-${from}"]`)?.getBoundingClientRect()
+      if (card && within(card.left + card.width / 2, card.top + 10, card))
+        return { x: card.left + card.width / 2, y: card.top + 10 }
+      const box = stage.current?.getBoundingClientRect()
+      return box && box.bottom > 120 && box.top < innerHeight - 120
+        ? { x: box.left + box.width / 2, y: Math.max(box.top, 0) + 120 }
+        : { x: innerWidth / 2, y: innerHeight - 120 }
+    },
+    [onBoard],
+  )
+  const nameOf = (from: PlayerId | null) =>
+    (from && (online?.players[from]?.name ?? game.players.find((p) => p.id === from)?.name)) ||
+    'Someone watching'
+  const onReaction = useCallback(
+    (reaction: TableReaction) => {
+      if (!soundOn) return
+      const { x } = locateReaction(reaction.from)
+      sounds.pop(1.15, 0.8, Math.max(-0.6, Math.min(0.6, (x / innerWidth) * 2 - 1)))
+    },
+    [soundOn, locateReaction],
+  )
   const squareOf = (player: Player) => shown?.[player.id] ?? player.position
   const phaseText =
     game.phase === 'ready'
@@ -386,13 +536,11 @@ function Table({
               {statusText}
             </div>
           </div>
-          <div className="wr-stage">
+          <div className="wr-stage" ref={stage}>
             <BoardScene
               ref={board}
               state={game}
-              timing={online?.timing}
-              receivedAt={online?.receivedAt}
-              recent={online?.recent}
+              beats={online?.beats}
               running={!hidden}
               canRoll={canRoll}
               onRoll={doRoll}
@@ -475,6 +623,13 @@ function Table({
                     />
                   ))}
                 </div>
+                {online && (
+                  <ReactionBar
+                    className="wr-reaction-bar"
+                    onReact={online.send.react}
+                    watching={online.mySeat === null}
+                  />
+                )}
               </section>
               <section className="wr-roll-panel" aria-label="Current turn">
                 <div className="wr-roll-top">
@@ -647,7 +802,36 @@ function Table({
         <button className="wr-primary" onClick={() => setDialog(null)}>
           Got it. Let’s play. <ArrowRight size={17} />
         </button>
+        {mine && (
+          <button
+            className="wr-secondary wr-guide-again"
+            onClick={() => {
+              setDialog(null)
+              setGuide(0)
+            }}
+          >
+            Show the guide again
+          </button>
+        )}
       </Dialog>
+      {online && (
+        <Reactions
+          reactions={online.reactions}
+          nameOf={nameOf}
+          locate={locateReaction}
+          onArrive={onReaction}
+        />
+      )}
+      {guide !== null && mine && !showVictory && (
+        <Guide
+          steps={steps}
+          step={guide}
+          locate={locateGuide}
+          floor={guideFloor}
+          onStep={setGuide}
+          onClose={() => setGuide(null)}
+        />
+      )}
       {winner && (
         <Dialog
           open={showVictory}
@@ -718,7 +902,9 @@ export default function WildriseGame({ online }: { online?: OnlineWildriseSessio
     style: 'casual',
     exact: true,
   })
-  const [soundOn, setSoundOn] = useState(true)
+  // Remembered per game rather than held here: the setup page and the table a
+  // room deals are separate mounts, and a mute should hold across both.
+  const [soundOn, setSoundOn] = useSound('wildrise', true)
   const config = useMemo(() => toConfig(options), [options])
   const room = useBotRoom('wildrise', wildriseGame.path)
   const start = () =>

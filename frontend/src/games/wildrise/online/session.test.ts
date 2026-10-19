@@ -15,6 +15,7 @@ const api = (): RoomApi => ({
   addBot: vi.fn(),
   removeBot: vi.fn(),
   dismissError: vi.fn(),
+  react: vi.fn(),
 })
 
 const seat = (name: string, over: Partial<SeatInfo> = {}): SeatInfo => ({
@@ -105,7 +106,7 @@ describe('wildriseSession', () => {
     expect(wire.action).toHaveBeenCalledWith({ kind: 'roll' })
   })
 
-  it('hands the board each recent state with when it arrived, so a burst can be played in order', () => {
+  it('hands the board each state of the current game, timed from when the room entered it', () => {
     const playing = table(seated)
     const snapshot: RoomSnapshot = {
       protocol: PROTOCOL_VERSION,
@@ -126,10 +127,30 @@ describe('wildriseSession', () => {
         { seq: 5, snapshot, receivedAt: 812 },
       ],
     })
-    expect(session.receivedAt).toBe(812)
-    expect(session.recent).toEqual([
-      { seq: 4, state: null, timing: undefined, receivedAt: 400 },
-      { seq: 5, state: playing.state, timing: { now: 2000, since: 1500 }, receivedAt: 812 },
+    // The lobby before it is another table; the room was 500ms into this beat when it sent it.
+    expect(session.beats).toEqual([{ seq: 5, state: playing.state, since: 312 }])
+  })
+
+  it('says each reaction from the colour of the seat it came from', () => {
+    const snapshot: RoomSnapshot = {
+      protocol: PROTOCOL_VERSION,
+      code: 'ABC234',
+      game: 'wildrise',
+      visibility: 'private',
+      status: 'playing',
+      seatIds: ['p0', 'p1'],
+      seats: { p0: seat('Ann'), p1: seat('Ben') },
+      gameState: createGame({ playerCount: 2 }),
+    }
+    const session = wildriseSession(snapshot, { id: 'ann', seat: 'p0', isHost: true }, api(), () => {}, {
+      reactions: [
+        { id: 'a', seat: 'p1', reaction: 'wow', at: 1, receivedAt: 10 },
+        { id: 'b', seat: null, reaction: 'gg', at: 2, receivedAt: 20 },
+      ],
+    })
+    expect(session.reactions).toEqual([
+      { id: 'a', reaction: 'wow', from: 'blue', receivedAt: 10 },
+      { id: 'b', reaction: 'gg', from: null, receivedAt: 20 },
     ])
   })
 })

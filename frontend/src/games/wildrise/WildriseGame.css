@@ -1522,3 +1522,265 @@
     display: none;
   }
 }
+
+/* Reactions: sent from under the seats, risen from the sender's token. */
+.wr-reaction-bar {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 12px;
+  border-color: var(--wr-line);
+  background: light-dark(#fbfaf4, var(--theme-surface));
+  box-shadow: none;
+}
+.wr-reactions {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  pointer-events: none;
+}
+.wr-reaction {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.wr-reaction-body {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  translate: -50% -100%;
+  animation: wr-reaction-rise 2600ms var(--ease-out) both;
+}
+.wr-reaction-emoji {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 2px solid var(--player-color);
+  border-radius: 50% 50% 50% 8px;
+  background: light-dark(#fffdf6, var(--theme-surface));
+  box-shadow: 0 8px 20px rgb(52 69 54 / 22%);
+  font-size: 25px;
+  line-height: 1;
+  animation: wr-reaction-spring var(--motion-slow) var(--ease-spring) both;
+}
+.wr-reaction-name {
+  max-width: 110px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--player-color);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Pops out of the token, rises with a little sway, holds, then drifts off as it fades. */
+@keyframes wr-reaction-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  10% {
+    opacity: 1;
+  }
+  40% {
+    transform: translate(calc(var(--sway) * 10px), -34px);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--sway) * -8px), -96px);
+  }
+}
+@keyframes wr-reaction-spring {
+  from {
+    scale: 0.2;
+    rotate: calc(var(--sway) * 14deg);
+  }
+}
+:root[data-motion='reduced'] .wr-reaction-body {
+  animation: wr-reaction-fade 2600ms linear both;
+}
+:root[data-motion='reduced'] .wr-reaction-emoji {
+  animation: none;
+}
+@keyframes wr-reaction-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+}
+@media (max-width: 340px) {
+  .wr-reaction-bar button.reaction-bar-button {
+    width: 32px;
+  }
+}
+
+/* The first-game guide: a ring round the real thing, and a card beside it. Never modal. */
+.wr-guide {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+.wr-guide-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 2px solid light-dark(#536a49, var(--theme-accent));
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 4px light-dark(#536a4933, #fff2),
+    0 0 0 100vmax light-dark(#2b382c1c, #0003);
+  transition:
+    translate var(--motion-slow) var(--ease-out),
+    width var(--motion-slow) var(--ease-out),
+    height var(--motion-slow) var(--ease-out);
+  animation: wr-guide-pulse 1.8s var(--ease-in-out) infinite;
+}
+.wr-guide-ring[hidden] {
+  display: none;
+}
+@keyframes wr-guide-pulse {
+  50% {
+    box-shadow:
+      0 0 0 9px light-dark(#536a4914, #fff1),
+      0 0 0 100vmax light-dark(#2b382c1c, #0003);
+  }
+}
+.wr-guide-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: min(320px, calc(100vw - 24px));
+  padding: 18px 18px 14px;
+  border: 1px solid light-dark(#dfe2d0, var(--theme-border));
+  border-radius: 14px;
+  background: light-dark(#fcfbf5, var(--theme-surface));
+  color: var(--wr-ink);
+  box-shadow: 0 18px 44px rgb(43 56 44 / 22%);
+  pointer-events: auto;
+  outline: none;
+  visibility: hidden;
+  animation: wr-guide-in var(--motion-slow) var(--ease-spring) both;
+}
+.wr-guide-card[data-placed] {
+  visibility: visible;
+  transition: translate var(--motion-slow) var(--ease-out);
+}
+.wr-guide-card:focus-visible {
+  outline: 2px solid light-dark(#526b41, var(--theme-accent));
+  outline-offset: 3px;
+}
+@keyframes wr-guide-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+.wr-guide-step {
+  animation: wr-guide-step var(--motion-base) var(--ease-out) both;
+}
+@keyframes wr-guide-step {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+.wr-guide-card h2 {
+  margin: 6px 0 4px;
+  font:
+    400 21px Georgia,
+    serif;
+  letter-spacing: -0.4px;
+}
+.wr-guide-card p:not(.wr-eyebrow) {
+  font-size: 12px;
+  line-height: 1.55;
+  color: light-dark(#5f6858, var(--theme-muted));
+}
+.wr-guide-skip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wr-muted);
+}
+.wr-guide-skip:hover {
+  background: light-dark(#eff0e5, var(--theme-inset));
+}
+.wr-guide-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+.wr-guide-dots {
+  display: flex;
+  gap: 5px;
+  margin-right: auto;
+}
+.wr-guide-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wr-line);
+  transition:
+    background var(--motion-base) var(--ease-out),
+    width var(--motion-base) var(--ease-spring);
+}
+.wr-guide-dots i.on {
+  width: 16px;
+  border-radius: 3px;
+  background: var(--wr-green);
+}
+.wr-guide-later,
+.wr-guide-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.wr-guide-later {
+  background: transparent;
+  color: var(--wr-muted);
+}
+.wr-guide-next {
+  background: var(--wr-green);
+  color: #f7f6ef;
+}
+:root[data-motion='reduced'] .wr-guide-ring,
+:root[data-motion='reduced'] .wr-guide-card[data-placed] {
+  transition: none;
+  animation: none;
+}
+:root[data-motion='reduced'] .wr-guide-card,
+:root[data-motion='reduced'] .wr-guide-step {
+  animation-name: wr-guide-fade;
+}
+@keyframes wr-guide-fade {
+  from {
+    opacity: 0;
+  }
+}
+.wr-guide-again {
+  margin-top: 4px;
+}
