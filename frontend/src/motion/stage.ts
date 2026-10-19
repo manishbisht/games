@@ -122,13 +122,14 @@ export function createStage(container: HTMLElement, options: StageOptions = {}) 
     frame = requestAnimationFrame(tick)
     let delta = Math.max(0, wall - last)
     last = wall
+    // Checked first, so a stepped test clock is only spent on frames that run.
+    if (document.hidden || lost) return
     if (testClock) {
       // Under the test clock time only passes when a test steps it.
       delta = Math.min(testClock.pending, 1000 / 60)
       testClock.pending -= delta
       if (testClock.frozen && delta === 0) return
     }
-    if (document.hidden || lost) return
     const dt = running ? Math.min(delta / 1000, 1 / 20) : 0
     if (running) clock += Math.min(delta, 50)
     let moving = false
