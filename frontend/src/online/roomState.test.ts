@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
-import type { RoomSnapshot } from '@games/shared/protocol'
-import { initialRoomState, isFatal, presenceEvents, RECENT_SNAPSHOTS, roomReducer } from './roomState'
+import type { RoomSnapshot, ServerMessage } from '@games/shared/protocol'
+import {
+  initialRoomState,
+  isFatal,
+  presenceEvents,
+  RECENT_REACTIONS,
+  RECENT_SNAPSHOTS,
+  roomReducer,
+} from './roomState'
 
 const snapshot: RoomSnapshot = {
   protocol: PROTOCOL_VERSION,
@@ -107,5 +114,41 @@ describe('presenceEvents', () => {
       },
     })
     expect(presenceEvents(table(true), table(false))).toEqual([{ seat: 'p2', name: 'Cat', connected: false }])
+  })
+})
+
+describe('reactions', () => {
+  const reaction = (id: string, receivedAt = 5) =>
+    roomReducer(initialRoomState, {
+      type: 'message',
+      message: { type: 'reaction', seat: 'w', reaction: 'wow', id, at: 100 },
+      receivedAt,
+    })
+
+  it('keeps recent reactions, stamped with when they arrived, and never as errors', () => {
+    const state = reaction('a', 42)
+    expect(state.reactions).toEqual([{ id: 'a', seat: 'w', reaction: 'wow', at: 100, receivedAt: 42 }])
+    expect(state.error).toBeNull()
+  })
+
+  it('keeps only the last few, and each one once', () => {
+    let state = initialRoomState
+    for (let i = 0; i < RECENT_REACTIONS + 4; i++)
+      state = roomReducer(state, {
+        type: 'message',
+        message: { type: 'reaction', seat: null, reaction: 'gg', id: String(i), at: i },
+      })
+    const again = roomReducer(state, {
+      type: 'message',
+      message: { type: 'reaction', seat: null, reaction: 'gg', id: String(RECENT_REACTIONS + 3), at: 0 },
+    })
+    expect(state.reactions).toHaveLength(RECENT_REACTIONS)
+    expect(state.reactions[0].id).toBe('4')
+    expect(again).toBe(state)
+  })
+
+  it('ignores a message type this build does not know', () => {
+    const unknown = { type: 'something-new', code: 'BAD_MESSAGE', message: 'x' } as unknown as ServerMessage
+    expect(roomReducer(initialRoomState, { type: 'message', message: unknown })).toBe(initialRoomState)
   })
 })

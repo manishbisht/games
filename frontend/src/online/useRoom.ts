@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
-import type { ClientMessage, SeatId, ServerMessage } from '@games/shared/protocol'
+import type { ClientMessage, ReactionId, SeatId, ServerMessage } from '@games/shared/protocol'
 import { viewTransition } from '../navigation'
 import { roomSocketUrl } from './api'
 import { initialRoomState, isFatal, roomReducer } from './roomState'
@@ -20,6 +20,15 @@ export interface RoomApi {
   addBot: (seat: SeatId, skill?: string) => void
   /** Host only: give a bot's seat back, so a latecomer can have it. */
   removeBot: (seat: SeatId) => void
+  /**
+   * A quick reaction to the table (see `REACTIONS`), for everyone in the room —
+   * spectators included. Only sent while connected: a reaction kept for a
+   * reconnect would land long after the moment it was about.
+   *
+   * Always present on a live room. Optional in the type only so the hand-built
+   * test doubles written before it existed still compile.
+   */
+  react?: (reaction: ReactionId) => void
   dismissError: () => void
 }
 
@@ -143,7 +152,15 @@ export function useRoom(
         // `credentials()` can hit the network (Clerk), and the socket may have
         // closed or been replaced while we waited.
         if (disposed || ws.readyState !== WebSocket.OPEN) return
-        ws.send(JSON.stringify({ type: 'join', protocol: PROTOCOL_VERSION, name: me.name, ...credentials }))
+        ws.send(
+          JSON.stringify({
+            type: 'join',
+            protocol: PROTOCOL_VERSION,
+            name: me.name,
+            ...credentials,
+            features: ['reactions'],
+          } satisfies ClientMessage),
+        )
         // The room reads frames in order, so these follow the join.
         joined.current = true
         flushOutbox(ws)
@@ -216,6 +233,11 @@ export function useRoom(
       // first one its adapter offers rather than being handed `undefined`.
       addBot: (seat, skill) => send({ type: 'addBot', seat, ...(skill ? { skill } : {}) }),
       removeBot: (seat) => send({ type: 'removeBot', seat }),
+      react: (reaction) => {
+        const ws = socket.current
+        if (ws?.readyState === WebSocket.OPEN && joined.current)
+          ws.send(JSON.stringify({ type: 'react', reaction } satisfies ClientMessage))
+      },
       dismissError: () => dispatch({ type: 'dismiss-error' }),
     }),
     [send],

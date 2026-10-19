@@ -1,0 +1,158 @@
+/*
+ * Reactions: the bar a player sends them from, and the room page's default
+ * overlay that floats each one up from the bottom of the screen.
+ */
+.reaction-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--theme-surface) 92%, transparent);
+  box-shadow: 0 6px 18px light-dark(#3040361a, #0005);
+  backdrop-filter: blur(8px);
+  transition: opacity var(--motion-base) var(--ease-out);
+}
+.reaction-bar-resting {
+  opacity: 0.55;
+}
+.reaction-bar button.reaction-bar-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    scale var(--motion-base) var(--ease-spring);
+}
+.reaction-bar-button:hover:not(:disabled) {
+  background: var(--theme-inset);
+  scale: 1.12;
+}
+.reaction-bar-button:active:not(:disabled) {
+  scale: 0.9;
+}
+.reaction-bar-button:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 1px;
+}
+.reaction-bar-button[aria-disabled='true'] {
+  cursor: default;
+}
+.reaction-bar-pop {
+  display: inline-block;
+  animation: reaction-pop var(--motion-slow) var(--ease-spring);
+}
+@keyframes reaction-pop {
+  40% {
+    scale: 1.45;
+    rotate: -10deg;
+  }
+}
+@media (max-width: 420px) {
+  .reaction-bar button.reaction-bar-button {
+    width: 36px;
+    height: 44px;
+    font-size: 19px;
+  }
+}
+
+.reaction-overlay {
+  position: fixed;
+  inset: auto 0 0;
+  height: 0;
+  z-index: 31;
+  pointer-events: none;
+}
+.reaction-float {
+  position: absolute;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  /* Lanes span the middle of the screen, narrower on a phone. */
+  left: calc(50% + var(--lane) * min(30vw, 260px) + var(--jitter) * 36px);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  translate: -50% 0;
+  animation: reaction-float 2600ms var(--ease-out) both;
+}
+.reaction-float-emoji {
+  font-size: 38px;
+  line-height: 1;
+  filter: drop-shadow(0 4px 8px #0003);
+  animation: reaction-spring 700ms var(--ease-spring) both;
+}
+.reaction-float-name {
+  max-width: 120px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  font:
+    550 11px 'DM Sans',
+    sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reaction-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* Rises with a little sway, holds, then fades as it drifts on up. */
+@keyframes reaction-float {
+  0% {
+    opacity: 0;
+    transform: translate(0, 24px);
+  }
+  12% {
+    opacity: 1;
+  }
+  45% {
+    transform: translate(calc(var(--jitter) * 22px), -120px);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--jitter) * -14px), -210px);
+  }
+}
+@keyframes reaction-spring {
+  from {
+    scale: 0.2;
+    rotate: calc(var(--jitter) * 40deg);
+  }
+}
+/* Reduced motion: no rise, just there and gone, softly. */
+:root[data-motion='reduced'] .reaction-float {
+  animation: reaction-fade 2600ms linear both !important;
+}
+:root[data-motion='reduced'] .reaction-float-emoji {
+  animation: none !important;
+}
+@keyframes reaction-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+}

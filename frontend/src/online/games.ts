@@ -3,7 +3,7 @@ import type { GameId, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protoc
 import { games } from '../games/catalog'
 import { lazyWithPreload } from '../lazyPreload'
 import type { RoomApi } from './useRoom'
-import type { SnapshotEntry } from './roomState'
+import type { ReactionEntry, SnapshotEntry } from './roomState'
 
 /**
  * What a game gets once the room is live: the authoritative snapshot, who this
@@ -20,6 +20,14 @@ export interface RoomViewProps {
    * entries whose `seq` it has not seen yet.
    */
   recent: SnapshotEntry[]
+  /**
+   * Recent reactions, oldest first (see `ReactionEntry`). The room page already
+   * floats each one up from the bottom of the screen; a table that would rather
+   * show them beside the seat they came from can, and `<ReactionBar>` is the
+   * control for sending them. Always passed by the room page; optional in the
+   * type only so hand-built test props written before it still compile.
+   */
+  reactions?: ReactionEntry[]
   you: YouInfo
   api: RoomApi
   leave: () => void
