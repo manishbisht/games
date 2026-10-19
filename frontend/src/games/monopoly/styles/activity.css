@@ -103,7 +103,7 @@
 
   .now-label {
     font-size: 8px;
-    color: light-dark(var(--theme-muted), #657285);
+    color: light-dark(var(--theme-muted), #7f8ca0);
     margin-top: 4px;
     margin-left: -2px;
   }
@@ -114,7 +114,7 @@
     gap: 7px;
     border-top: 1px solid light-dark(var(--theme-border), #2b3441);
     font-size: 8px;
-    color: light-dark(var(--theme-muted), #6f7c8e);
+    color: light-dark(var(--theme-muted), #8592a5);
     padding: 12px 0;
     margin-top: 5px;
   }
