@@ -415,6 +415,27 @@ button.ch-room-toast-error > svg {
 .room-audience-floating strong {
   color: #fff;
 }
+/*
+ * On a phone the pill sits over the game itself (at 390px, on chess's footnote
+ * under the board), so a player is told and then it steps aside: shown when
+ * the count changes, gone a few seconds later. Someone watching keeps theirs —
+ * it is what says the table they cannot touch is not a broken one.
+ */
+@media (max-width: 700px) {
+  .room-audience-floating:not(.room-audience-watching) {
+    animation:
+      room-toast-in var(--motion-slow) var(--ease-spring) both,
+      room-audience-away var(--motion-base) var(--ease-in-out) 5s forwards;
+  }
+}
+@keyframes room-audience-away {
+  to {
+    opacity: 0;
+    translate: 0 10px;
+    scale: 0.96;
+    visibility: hidden;
+  }
+}
 
 /* Reactions and the turn-notification switch, between the seats and the start button. */
 .ch-room-extras {

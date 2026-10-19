@@ -224,7 +224,10 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   // on it would hide that it can be pressed — and is spoken through the region.
   const toastStack = (
     <div key="toasts" className="ch-room-toasts" role="status">
-      {snapshot?.gameState != null && you && <Audience snapshot={snapshot} you={you} floating />}
+      {snapshot?.gameState != null && you && (
+        // Keyed by the count, so a change shows it again where it steps aside (online.css).
+        <Audience key={snapshot.spectators ?? 0} snapshot={snapshot} you={you} floating />
+      )}
       {/* The table has finished: offer the game back, unless its own result screen already does. */}
       {snapshot?.status === 'finished' && snapshot.gameState != null && !config.linksReplay && (
         <Link className="room-replay-link" to={replayUrl(snapshot.game, snapshot.code)}>
