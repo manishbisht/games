@@ -30,6 +30,13 @@ const ChessBoard = forwardRef<BoardControls, BoardProps>(function ChessBoard(
   const [failed, setFailed] = useState(false),
     [focused, setFocused] = useState<Square | null>(null),
     [keyboard, setKeyboard] = useState(false)
+  // A fresh game (a rematch) puts the keyboard cursor back where every game starts.
+  const fresh = state.game.history.length === 0,
+    [wasFresh, setWasFresh] = useState(fresh)
+  if (fresh !== wasFresh) {
+    setWasFresh(fresh)
+    if (fresh) setFocused(null)
+  }
   useEffect(() => {
     handlers.current = { onSelect, onImpact, onPresenting, onGraves }
   }, [onSelect, onImpact, onPresenting, onGraves])
