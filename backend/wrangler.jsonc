@@ -30,6 +30,11 @@
     { "name": "PROFILES_LIMITER", "namespace_id": "41004", "simple": { "limit": 60, "period": 60 } },
     // Replays: one per watch, and each can be a few hundred kilobytes of states.
     { "name": "REPLAYS_LIMITER", "namespace_id": "41005", "simple": { "limit": 30, "period": 60 } },
+    // Presence beats: a tab beats twice a minute (and once more each time it is
+    // shown again), so this is a household's worth of tabs behind one address.
+    { "name": "PRESENCE_LIMITER", "namespace_id": "41006", "simple": { "limit": 40, "period": 60 } },
+    // Lobby reads: one per visit to a game's online panel, plus its refresh button.
+    { "name": "LOBBY_LIMITER", "namespace_id": "41007", "simple": { "limit": 60, "period": 60 } },
   ],
   // Anonymous product events (src/analytics.ts lists them, with an example query).
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "games_events" }],

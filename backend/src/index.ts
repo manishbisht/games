@@ -1,15 +1,15 @@
 import { getAdapter, resolveGame } from '@games/shared/online'
 import { generateRoomCode, normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { Env } from './env'
-import { requestCredentials, resolveIdentity, resolvePlayerId } from './auth'
+import { requestCredentials, resolveIdentity, resolvePlayerId, verifyClerkToken } from './auth'
 import { playerHandle, validHandle } from './handles'
 import { validSubscription } from './push'
 import { track } from './analytics'
 import { secureRandom } from './room'
-import { allowedOrigin, corsHeaders } from './cors'
-import { resolvePresenceGame, validPresenceId } from './presence'
-import { overLimit, RETRY_AFTER_S } from './limits'
-import { logReport, MAX_REPORT_BYTES, parseReport } from './clientErrors'
+import { allowedOrigin, corsHeaders, isLocalWorker } from './cors'
+import { presenceKey, resolvePresenceGame, validPresenceId } from './presence'
+import { overLimit, RETRY_AFTER_S, sourceTag } from './limits'
+import { logReport, MAX_REPORT_BYTES, parseReport, readCapped } from './clientErrors'
 
 export { RoomDO } from './room'
 export { LobbyDO } from './lobby'
@@ -56,14 +56,20 @@ function personal(response: Response): Response {
  * missing or do not verify.
  */
 async function requestPlayer(request: Request, env: Env) {
-  const who = await resolvePlayerId(requestCredentials(request), env)
+  const who = await resolvePlayerId(
+    requestCredentials(request),
+    env,
+    verifyClerkToken,
+    isLocalWorker(request.url),
+  )
   return who ? { ...who, handle: await playerHandle(who.id) } : null
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
-    const origin = allowedOrigin(request.headers.get('Origin'))
+    const local = isLocalWorker(url)
+    const origin = allowedOrigin(request.headers.get('Origin'), local)
 
     if (request.method === 'OPTIONS')
       return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} })
@@ -101,8 +107,9 @@ export default {
       const autoStart = body.autoStart === true
       const options = adapter.validateOptions(body.options)
       const visibility = body.visibility === 'public' ? 'public' : 'private'
-      const host = await resolveIdentity(body, env)
+      const host = await resolveIdentity(body, env, verifyClerkToken, local)
       if (!host) return json({ error: 'invalid identity' }, 400, origin)
+      const source = await sourceTag(request)
       for (let attempt = 0; attempt < 5; attempt++) {
         // A private room's code is its invite secret, so it comes from the same
         // CSPRNG the dice do rather than `generateRoomCode`'s Math.random default.
@@ -116,6 +123,7 @@ export default {
           options,
           bots,
           autoStart,
+          source,
         })
         if (created) {
           track(env, 'room_created', { game, detail: visibility, count: seats, value: bots.length })
@@ -132,6 +140,12 @@ export default {
       // Counted before the room is woken: a reconnect loop gone wrong should
       // cost this Worker a header check, not a Durable Object a socket.
       if (await overLimit(env.SOCKETS_LIMITER, request)) return tooMany(origin)
+      // A browser always says which page opened a socket. There are no cookies
+      // to ride along, so this is not about credentials: it stops another site
+      // opening sockets from its visitors' browsers, on their addresses' limits.
+      // Scripts send no Origin, and are held to the limit above instead.
+      const opener = request.headers.get('Origin')
+      if (opener && !origin) return json({ error: 'origin not allowed' }, 403, null)
       return env.ROOM.getByName(code).fetch(request)
     }
 
@@ -155,13 +169,19 @@ export default {
     }
 
     if (url.pathname === '/api/presence' && request.method === 'POST') {
+      if (await overLimit(env.PRESENCE_LIMITER, request)) return tooMany(origin)
       const body = await readObject(request)
       if (!body) return json({ error: 'invalid JSON' }, 400, origin)
       const clientId = validPresenceId(body.clientId)
       const tabId = validPresenceId(body.tabId)
       const game = resolvePresenceGame(body.game)
       if (!clientId || !tabId || game === null) return json({ error: 'invalid presence beat' }, 400, origin)
-      const counts = await env.PRESENCE.getByName('global').beat(clientId, tabId, game)
+      const counts = await env.PRESENCE.getByName('global').beat(
+        await presenceKey(clientId),
+        await presenceKey(tabId),
+        game,
+        await sourceTag(request),
+      )
       return json(counts, 200, origin)
     }
 
@@ -171,7 +191,10 @@ export default {
       if (Number(request.headers.get('content-length') ?? 0) > MAX_REPORT_BYTES)
         return json({ error: 'report too large' }, 413, origin)
       if (await overLimit(env.ERRORS_LIMITER, request)) return tooMany(origin)
-      const report = parseReport(await request.text())
+      // And counted as it arrives, for a body that declared no length at all.
+      const text = await readCapped(request, MAX_REPORT_BYTES)
+      if (text === null) return json({ error: 'report too large' }, 413, origin)
+      const report = parseReport(text)
       if (!report) return json({ error: 'invalid report' }, 400, origin)
       logReport(report, request)
       return new Response(null, { status: 204, headers: origin ? corsHeaders(origin) : {} })
@@ -225,6 +248,7 @@ export default {
     }
 
     if (url.pathname === '/api/lobby' && request.method === 'GET') {
+      if (await overLimit(env.LOBBY_LIMITER, request)) return tooMany(origin)
       const game = resolveGame(url.searchParams.get('game')) ?? undefined
       const rooms = await env.LOBBY.getByName('global').list(game)
       return json({ rooms }, 200, origin)
