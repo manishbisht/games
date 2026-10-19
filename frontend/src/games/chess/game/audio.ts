@@ -1,5 +1,5 @@
 let context: AudioContext | null = null
-export function playChessSound(kind: 'move' | 'capture' | 'check' | 'end') {
+export function playChessSound(kind: 'move' | 'capture' | 'check' | 'end' | 'promote') {
   try {
     context ??= new AudioContext()
     if (context.state === 'suspended') void context.resume()
@@ -7,11 +7,13 @@ export function playChessSound(kind: 'move' | 'capture' | 'check' | 'end') {
     const tones =
       kind === 'end'
         ? [440, 554, 659]
-        : kind === 'check'
-          ? [440, 520]
-          : kind === 'capture'
-            ? [150, 110]
-            : [200]
+        : kind === 'promote'
+          ? [523, 659, 784, 1046]
+          : kind === 'check'
+            ? [440, 520]
+            : kind === 'capture'
+              ? [150, 110]
+              : [200]
     tones.forEach((frequency, i) => {
       const oscillator = context!.createOscillator(),
         gain = context!.createGain(),

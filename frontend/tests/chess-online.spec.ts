@@ -36,7 +36,9 @@ async function newPlayer(browser: Browser, errors: string[]) {
   const page = await context.newPage()
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(() => {
-    localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false, reducedMotion: true }))
+    localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false }))
+    // Motion is the site's one preference now, not a chess setting.
+    localStorage.setItem('games-motion', 'reduced')
   })
   return page
 }

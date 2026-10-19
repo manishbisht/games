@@ -7,7 +7,9 @@ import type { OnlineChessSession } from './session'
 
 const other = (seat: Color): Color => (seat === 'w' ? 'b' : 'w')
 const player = (seat?: SeatInfo) =>
-  seat ? { name: seat.player.name, connected: seat.connected, awaySince: seat.awaySince } : undefined
+  seat
+    ? { name: seat.player.name, connected: seat.connected, awaySince: seat.awaySince, bot: seat.bot?.skill }
+    : undefined
 
 /** Chess's half of a room: the room's snapshot becomes the board's session. */
 export default function ChessRoomView({ snapshot, you, api, leave }: RoomViewProps) {

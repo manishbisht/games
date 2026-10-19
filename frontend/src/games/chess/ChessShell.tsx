@@ -46,27 +46,25 @@ export default function ChessShell({ children, inRoom = false }: { children: Rea
           Two players. Endless possibilities. <span aria-hidden="true">✦</span>
         </span>
       </footer>
-      {help && (
-        <Modal title="How to play" onClose={() => setHelp(false)}>
-          <p className="ch-eyebrow">A GOOD GAME STARTS WITH TWO</p>
-          <h2>Meet at the board.</h2>
-          <p className="ch-dialog-copy">
-            Create a room and share the invite link, or enter a friend’s room code. Choose White or Black,
-            then the host starts the game when both players are seated.
-          </p>
-          <p className="ch-dialog-copy">
-            White moves first. Select a piece, then a highlighted square to move. Win by putting your
-            opponent’s king in check with no legal escape.
-          </p>
-          <p className="ch-dialog-copy">
-            Drag to turn the board, or use the arrow keys and Enter when the board is focused. You can adjust
-            the board, sound, and motion in Settings during your game.
-          </p>
-          <button className="ch-primary" onClick={() => setHelp(false)}>
-            Got it <ArrowRight size={16} />
-          </button>
-        </Modal>
-      )}
+      <Modal title="How to play" open={help} onClose={() => setHelp(false)}>
+        <p className="ch-eyebrow">A GOOD GAME STARTS WITH TWO</p>
+        <h2>Meet at the board.</h2>
+        <p className="ch-dialog-copy">
+          Create a room and share the invite link, or enter a friend’s room code. Choose White or Black, then
+          the host starts the game when both players are seated.
+        </p>
+        <p className="ch-dialog-copy">
+          White moves first. Select a piece, then a highlighted square to move. Win by putting your opponent’s
+          king in check with no legal escape.
+        </p>
+        <p className="ch-dialog-copy">
+          Drag a piece to move it, drag the board to turn it, or use the arrow keys and Enter when the board
+          is focused. You can adjust the board, sound, and motion in Settings during your game.
+        </p>
+        <button className="ch-primary" onClick={() => setHelp(false)}>
+          Got it <ArrowRight size={16} />
+        </button>
+      </Modal>
     </div>
   )
 }

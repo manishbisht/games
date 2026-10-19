@@ -262,10 +262,6 @@
 .ch-player-active .ch-player-details > span {
   color: light-dark(#657b52, var(--theme-muted));
 }
-.ch-clock-low {
-  color: light-dark(#a44534, var(--theme-danger));
-  background: light-dark(#f3e3d9, var(--theme-inset)) !important;
-}
 .ch-captured {
   display: flex;
   flex-wrap: wrap;
@@ -475,34 +471,6 @@
   border-color: light-dark(#e1e5d5, var(--theme-border));
   box-shadow: 0 2px 4px #66704c08;
 }
-.ch-mode-description {
-  display: flex;
-  align-items: flex-start;
-  gap: 11px;
-  color: light-dark(#7e8b6b, var(--theme-muted));
-  margin: 18px 1px 25px;
-}
-.ch-mode-description > svg {
-  margin-top: 3px;
-}
-.ch-mode-description p {
-  font-size: 11px;
-  line-height: 1.85;
-  color: light-dark(#6d795f, var(--theme-muted));
-}
-.ch-mode-description p span {
-  color: light-dark(#969c8c, var(--theme-muted));
-  font-size: 10px;
-}
-.ch-clock-setup {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 19px 0 22px;
-  border-top: 1px solid light-dark(#e9eadf, var(--theme-border));
-  margin-top: 7px;
-  color: light-dark(#82916e, var(--theme-muted));
-}
 .ch-toggle-row {
   background: none;
   display: flex;
@@ -575,16 +543,6 @@
   min-height: 47px;
   justify-content: space-between;
   padding-inline: 18px;
-}
-.ch-setup-note {
-  margin-top: 15px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  font-size: 8px;
-  color: light-dark(#a1a691, var(--theme-muted));
-  line-height: 1.6;
 }
 .ch-side-choice {
   display: flex;
@@ -1194,13 +1152,6 @@
 .ch-contrast .ch-toggle-row small {
   color: light-dark(#535e46, var(--theme-text));
 }
-.ch-reduced *,
-.ch-reduced *::before,
-.ch-reduced *::after {
-  transition: none !important;
-  animation: none !important;
-  scroll-behavior: auto !important;
-}
 
 @media (min-width: 1500px) {
   .ch-main {
@@ -1426,15 +1377,6 @@
   .ch-setup .ch-panel-copy br {
     display: none;
   }
-  .ch-mode-description {
-    margin-block: 15px 20px;
-  }
-  .ch-mode-description p br {
-    display: none;
-  }
-  .ch-mode-description p span {
-    margin-left: 3px;
-  }
   .ch-panel h2 {
     font-size: 31px;
   }
@@ -1469,9 +1411,6 @@
   }
   .ch-switch.on i {
     transform: translateX(14px);
-  }
-  .ch-clock-setup {
-    padding-block: 13px 19px;
   }
   .ch-side-choice button,
   .ch-difficulties button {
@@ -1527,9 +1466,6 @@
     min-height: 43px;
     font-size: 10px;
   }
-  .ch-setup-note {
-    font-size: 9px;
-  }
   .ch-dialog {
     padding: 31px 24px 26px;
   }
@@ -1573,12 +1509,114 @@
     font-size: 11px;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .ch-app *,
-  .ch-dialog * {
-    transition: none !important;
-    animation: none !important;
-    scroll-behavior: auto !important;
+/*
+ * Motion. Reduced motion is the site's `:root[data-motion='reduced']` rule
+ * (motion/motion.css), which lands all of this at once.
+ */
+.ch-player-details > span {
+  animation: ch-fade-in var(--motion-base) var(--ease-out) both;
+}
+.ch-clock {
+  transition:
+    background-color var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out);
+}
+.ch-clock i {
+  animation:
+    motion-pop var(--motion-slow) var(--ease-spring) both,
+    ch-breathe 1.6s var(--ease-in-out) var(--motion-slow) infinite;
+}
+.ch-captured span {
+  display: inline-block;
+  animation: ch-glyph-in 520ms var(--ease-spring) both;
+}
+.ch-history-row {
+  animation: ch-row-in var(--motion-base) var(--ease-out) both;
+  transition: background-color var(--motion-slow) var(--ease-out);
+}
+.ch-san {
+  animation: ch-san-in var(--motion-slow) var(--ease-spring) both;
+}
+.ch-empty-history > span {
+  animation: ch-bob 3.6s var(--ease-in-out) infinite;
+}
+.ch-session h2 {
+  animation: ch-fade-in var(--motion-base) var(--ease-out) both;
+}
+.ch-check-text {
+  animation: ch-nudge 460ms var(--ease-out) both;
+}
+.ch-live-dot:not(.ended) {
+  animation: ch-breathe 2.4s var(--ease-in-out) infinite;
+}
+.ch-result-icon {
+  animation: motion-pop 560ms var(--ease-spring) 120ms both;
+}
+.ch-result-winner {
+  animation: motion-enter var(--motion-slow) var(--ease-out) 200ms both;
+}
+.ch-promotion-buttons button {
+  transition:
+    translate var(--motion-base) var(--ease-spring),
+    background-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out);
+}
+.ch-promotion-buttons button:hover,
+.ch-promotion-buttons button:focus-visible {
+  translate: 0 -3px;
+  box-shadow: 0 8px 18px #3a4a2a1c;
+}
+.ch-view-controls button,
+.ch-sound {
+  transition: scale var(--motion-fast) var(--ease-out);
+}
+.ch-view-controls button:active,
+.ch-sound:active {
+  scale: 0.92;
+}
+@keyframes ch-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ch-breathe {
+  50% {
+    transform: scale(1.65);
+    opacity: 0.45;
+  }
+}
+@keyframes ch-glyph-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.3) rotate(-30deg);
+  }
+}
+@keyframes ch-row-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+@keyframes ch-san-in {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
+}
+@keyframes ch-bob {
+  50% {
+    translate: 0 -4px;
+  }
+}
+@keyframes ch-nudge {
+  20% {
+    translate: -4px 0;
+  }
+  45% {
+    translate: 3px 0;
+  }
+  70% {
+    translate: -1px 0;
   }
 }
 

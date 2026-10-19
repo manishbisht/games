@@ -307,7 +307,8 @@ test('chess: an opening against the easy bot, three moves each', async ({ page }
   test.setTimeout(180000)
   const problems = watch(page)
   await page.addInitScript(() => {
-    localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false, reducedMotion: true }))
+    localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false }))
+    localStorage.setItem('games-motion', 'reduced')
   })
   await page.goto('/#/chess')
   await page.getByLabel('Your name', { exact: true }).fill('Robin')

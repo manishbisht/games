@@ -113,7 +113,9 @@ test('a bot added to a chess room answers your move on the server', async ({ pag
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(() => {
-    localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false, reducedMotion: true }))
+    localStorage.setItem('gambit-preferences-v1', JSON.stringify({ sound: false }))
+    // Motion is the site's one preference now, not a chess setting.
+    localStorage.setItem('games-motion', 'reduced')
   })
   await page.goto('/#/chess')
   await page.getByLabel('Your name', { exact: true }).fill('Robin')

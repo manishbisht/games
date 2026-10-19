@@ -61,7 +61,6 @@ export type ChessAction =
   { kind: 'move'; from: string; to: string; promotion?: PromotionPiece } | { kind: 'resign' }
 export interface Preferences {
   sound: boolean
-  reducedMotion: boolean
   highContrast: boolean
   theme: 'walnut' | 'marble'
 }
