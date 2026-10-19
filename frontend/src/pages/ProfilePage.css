@@ -298,7 +298,8 @@
   font-weight: 600;
   text-align: center;
   background: var(--theme-inset);
-  color: var(--theme-muted);
+  /* A shade under the muted token: on the inset fill that one is 4.4 : 1. */
+  color: light-dark(#5f6c58, var(--theme-muted));
 }
 .profile-result-win {
   background: color-mix(in oklab, light-dark(#6f8f5f, #9fbf88) 20%, transparent);

@@ -203,7 +203,8 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: var(--replay-muted);
+  /* On the inset fill the muted token is 4.4 : 1 in light; a shade under it clears 4.5. */
+  color: light-dark(#5f6c58, var(--replay-muted));
   font-variant-numeric: tabular-nums;
 }
 .replay .replay-speeds button[aria-pressed='true'] {
