@@ -335,8 +335,9 @@ const QUALITY_KEY = 'games-quality'
 /** A device that was slow on one board will be slow on the next; start there. */
 function readQuality(): QualityTier {
   try {
-    const saved = Number(sessionStorage.getItem(QUALITY_KEY))
-    return saved === 0 || saved === 1 ? saved : 2
+    // Read as a string: Number(null) is 0, which would start every visit at the lowest tier.
+    const saved = sessionStorage.getItem(QUALITY_KEY)
+    return saved === '0' ? 0 : saved === '1' ? 1 : 2
   } catch {
     return 2
   }
