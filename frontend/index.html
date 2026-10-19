@@ -17,7 +17,18 @@
       document.documentElement.dataset.theme = theme
       document.documentElement.style.colorScheme = theme
     </script>
-    <meta name="description" content="Free tabletop games for your browser. Meet friends in online rooms or challenge the computer. No downloads or accounts needed." />
+    <meta
+      name="description"
+      content="Play Hearth & Home, Estate, Gambit, Prism, and Wildrise: free tabletop games for your browser. Meet friends in online rooms or challenge the computer. No downloads or accounts needed."
+    />
+    <!-- Fonts as a <link>, not a CSS @import: the browser finds it while parsing
+         this file instead of after downloading and parsing the stylesheet. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap"
+    />
     <title>Games — A little play goes a long way.</title>
   </head>
   <body>

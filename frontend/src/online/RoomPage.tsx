@@ -1,5 +1,5 @@
 import ThemeControl from '../theme/ThemeControl'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
 import type { RoomSnapshot, SeatId } from '@games/shared/protocol'
@@ -9,12 +9,16 @@ import { useRoom } from './useRoom'
 import { onlineGame } from './games'
 import type { BotSkill, OnlineGame } from './games'
 import { presenceEvents } from './roomState'
-import { ArrowLeft, Bot, Check, Copy, Link2, UserMinus } from 'lucide-react'
+import { ArrowLeft, Bot, Check, Copy, Link2, UserMinus, X } from 'lucide-react'
 import ChessShell from '../games/chess/ChessShell'
 import { chessGame, games } from '../games/catalog'
+import { BoardSkeleton } from '../RouteSkeleton'
 import './online.css'
 
-const TOAST_MS = 4000
+const TOAST_MS = 4000,
+  /** How long a toast takes to leave; it is marked a little before it goes. */
+  TOAST_EXIT_MS = 260,
+  COPIED_MS = 2000
 
 /** A skill's label, or the raw id if the server offers one we have no word for. */
 const skillLabel = (skills: BotSkill[], id: string) => skills.find((skill) => skill.id === id)?.label ?? id
@@ -31,6 +35,11 @@ export default function RoomPage({ game }: { game: string }) {
   const identity = useIdentity()
   const config = onlineGame(game)
   const code = normalizeRoomCode(raw ?? '')
+  // The table's code is needed the moment the game starts, which is a socket
+  // message rather than a click — so fetch it while the room is still filling.
+  useEffect(() => {
+    void config?.preloadRoomView()
+  }, [config])
   if (!config)
     return (
       <Notice title="That link looks wrong.">
@@ -135,7 +144,7 @@ function NamePrompt({ config }: { config: OnlineGame }) {
 
 function Room({ code, config }: { code: string; config: OnlineGame }) {
   const navigate = useNavigate()
-  const { room, api } = useRoom(code)
+  const { room, api } = useRoom(code, config.preloadRoomView)
   const { snapshot, you } = room
   const leave = () => navigate(config.basePath)
   const isChess = config.basePath === chessGame.path
@@ -146,7 +155,7 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   const [chosen, setChosen] = useState<Partial<Record<SeatId, string>>>({})
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
-  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([])
+  const [toasts, setToasts] = useState<{ id: number; text: string; leaving?: boolean }[]>([])
   const toastId = useRef(0)
   const prevSnapshot = useRef<RoomSnapshot | null>(null)
   const mySeat = you?.seat ?? null
@@ -158,27 +167,38 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
       const id = ++toastId.current
       const text = `${event.name} ${event.connected ? 'reconnected' : 'disconnected'}`
       setToasts((current) => [...current, { id, text }])
+      setTimeout(
+        () => setToasts((current) => current.map((t) => (t.id === id ? { ...t, leaving: true } : t))),
+        TOAST_MS - TOAST_EXIT_MS,
+      )
       setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), TOAST_MS)
     }
   }, [snapshot, mySeat])
 
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), COPIED_MS)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  // One live region that stays mounted from the lobby into the game, so a
+  // toast is announced as the text it adds rather than as a region appearing
+  // (which screen readers tend to skip). The error is a real button — a role
+  // on it would hide that it can be pressed — and is spoken through the region.
   const toastStack = (
-    <div className="ch-room-toasts">
+    <div key="toasts" className="ch-room-toasts" role="status">
       {toasts.map((toast) => (
-        <div key={toast.id} className="ch-room-toast" role="status">
+        <div key={toast.id} className={`ch-room-toast${toast.leaving ? ' ch-room-toast-leaving' : ''}`}>
           {toast.text}
         </div>
       ))}
       {room.error && (
-        <button className="ch-room-toast" role="status" onClick={api.dismissError}>
+        <button className="ch-room-toast ch-room-toast-error" onClick={api.dismissError}>
           {room.error.message}
+          <X size={14} aria-label="Dismiss" />
         </button>
       )}
-      {room.phase === 'reconnecting' && (
-        <div className="ch-room-toast" role="status">
-          Reconnecting…
-        </div>
-      )}
+      {room.phase === 'reconnecting' && <div className="ch-room-toast">Reconnecting…</div>}
     </div>
   )
 
@@ -188,19 +208,32 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   if (room.phase === 'full') return <Fatal config={config} title="This room is full." />
   if (!snapshot)
     return (
-      <RoomFrame config={config}>
-        <p className="ch-room-loading" role="status">
-          Joining room {code}…
-        </p>
-      </RoomFrame>
+      <>
+        <RoomFrame config={config}>
+          <p className="ch-room-loading" role="status">
+            Joining room {code}…
+          </p>
+        </RoomFrame>
+        {toastStack}
+      </>
     )
 
-  // The game is on: hand the table over to the game itself.
+  // The game is on: hand the table over to the game itself. Its own boundary,
+  // so a table whose code is still arriving shows a board on its way inside
+  // the room's frame, and the toasts stay put.
   const RoomView = config.RoomView
   if (snapshot.gameState !== null && you)
     return (
       <>
-        <RoomView snapshot={snapshot} you={you} api={api} leave={leave} />
+        <Suspense
+          fallback={
+            <RoomFrame config={config}>
+              <BoardSkeleton label="Dealing you in…" />
+            </RoomFrame>
+          }
+        >
+          <RoomView snapshot={snapshot} you={you} api={api} leave={leave} />
+        </Suspense>
         {toastStack}
       </>
     )
@@ -218,7 +251,7 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
     return (
       <div key={seat} className="ch-room-seat-slot">
         <button
-          className={`ch-room-seat ${mine ? 'ch-room-seat-mine' : ''}`}
+          className={`ch-room-seat${mine ? ' ch-room-seat-mine' : ''}${occupant ? ' ch-room-seat-taken' : ''}`}
           disabled={Boolean(occupant) && !mine}
           onClick={() => (mine ? api.leaveSeat() : api.sit(seat))}
         >
@@ -228,7 +261,11 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
             </span>
           )}
           <strong>{mine ? 'Leave seat' : label}</strong>
-          <span>
+          {/* Keyed by who sits there, so a seat filling (or emptying) plays its entrance. */}
+          <span
+            key={occupant ? `${occupant.player.name}:${bot ? 'bot' : 'person'}` : 'open'}
+            className="ch-room-seat-who"
+          >
             {occupant
               ? `${occupant.player.name}${bot ? ` · ${skillLabel(skills, bot.skill)}` : occupant.connected ? '' : ' (away)'}`
               : 'Open seat'}
@@ -277,58 +314,60 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   const people = taken - bots
   const ready = taken >= config.minSeats
   return (
-    <RoomFrame config={config}>
-      <main className="ch-room">
-        <p className="ch-eyebrow">A GOOD GAME IS ONE INVITE AWAY</p>
-        <h1>Room {snapshot.code}</h1>
-        <p className="ch-room-intro">
-          {isChess
-            ? 'Share a link. Choose a side. Meet at the board.'
-            : 'Invite friends, choose a seat, or add bots to get started.'}
-        </p>
-        <div className="ch-room-invite">
-          <label htmlFor="room-invite">
-            <Link2 size={15} /> Invite a friend
-          </label>
-          <div>
-            <input
-              id="room-invite"
-              readOnly
-              value={window.location.href}
-              onFocus={(event) => event.target.select()}
-            />
-            <button
-              className="ch-room-copy"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(window.location.href)
-                  setCopied(true)
-                  setCopyError(false)
-                } catch {
-                  setCopyError(true)
-                }
-              }}
-            >
-              {copied ? <Check size={15} /> : <Copy size={15} />}
-              {copied ? 'Copied!' : 'Copy link'}
-            </button>
+    <>
+      <RoomFrame config={config}>
+        <main className="ch-room">
+          <p className="ch-eyebrow">A GOOD GAME IS ONE INVITE AWAY</p>
+          <h1>Room {snapshot.code}</h1>
+          <p className="ch-room-intro">
+            {isChess
+              ? 'Share a link. Choose a side. Meet at the board.'
+              : 'Invite friends, choose a seat, or add bots to get started.'}
+          </p>
+          <div className="ch-room-invite">
+            <label htmlFor="room-invite">
+              <Link2 size={15} /> Invite a friend
+            </label>
+            <div>
+              <input
+                id="room-invite"
+                readOnly
+                value={window.location.href}
+                onFocus={(event) => event.target.select()}
+              />
+              <button
+                className="ch-room-copy"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(window.location.href)
+                    setCopied(true)
+                    setCopyError(false)
+                  } catch {
+                    setCopyError(true)
+                  }
+                }}
+              >
+                {copied ? <Check size={15} /> : <Copy size={15} />}
+                {copied ? 'Copied!' : 'Copy link'}
+              </button>
+            </div>
+            {copyError && <p role="status">Select and copy the invite link above to share it.</p>}
           </div>
-          {copyError && <p role="status">Select and copy the invite link above to share it.</p>}
-        </div>
-        {isChess && <p className="ch-room-seat-label">CHOOSE YOUR SIDE</p>}
-        <div className="ch-room-seats">{snapshot.seatIds.map(seatSlot)}</div>
-        {isHost ? (
-          <button className="ch-room-start" disabled={!ready} onClick={api.start}>
-            {!ready ? 'Waiting for players…' : startLabel(people, bots, taken === snapshot.seatIds.length)}
-          </button>
-        ) : (
-          <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
-        )}
-        <Link className="ch-room-leave" to={config.basePath}>
-          Leave room
-        </Link>
-        {toastStack}
-      </main>
-    </RoomFrame>
+          {isChess && <p className="ch-room-seat-label">CHOOSE YOUR SIDE</p>}
+          <div className="ch-room-seats">{snapshot.seatIds.map(seatSlot)}</div>
+          {isHost ? (
+            <button className="ch-room-start" disabled={!ready} onClick={api.start}>
+              {!ready ? 'Waiting for players…' : startLabel(people, bots, taken === snapshot.seatIds.length)}
+            </button>
+          ) : (
+            <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
+          )}
+          <Link className="ch-room-leave" to={config.basePath}>
+            Leave room
+          </Link>
+        </main>
+      </RoomFrame>
+      {toastStack}
+    </>
   )
 }

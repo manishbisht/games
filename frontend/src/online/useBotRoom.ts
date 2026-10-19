@@ -1,8 +1,10 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
 import type { GameId } from '@games/shared/protocol'
+import { roomPage } from '../navigation'
 import { createRoom } from './api'
 import type { RoomSetup } from './api'
+import { onlineGame } from './games'
 import { useIdentity } from './identity'
 
 /**
@@ -27,6 +29,10 @@ export function useBotRoom(game: GameId, basePath: string) {
       if (busy || !identity.isReady) return
       setBusy(true)
       setError('')
+      // Fetch the room and its table while the server deals, so the player
+      // lands on a board rather than on a loading screen.
+      void roomPage.preload()
+      void onlineGame(game)?.preloadRoomView()
       try {
         const name = identity.name.trim() || 'You'
         if (!identity.isSignedIn) identity.setName(name)

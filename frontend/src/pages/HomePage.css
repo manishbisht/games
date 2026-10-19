@@ -164,10 +164,15 @@
   gap: 26px;
 }
 .collection-card {
+  position: relative;
   overflow: hidden;
   border: 1px solid light-dark(#e2e4d9, var(--theme-border));
   border-radius: 16px;
   background: light-dark(#fffefa, var(--theme-surface));
+  transition:
+    translate var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out);
 }
 .collection-preview {
   color: #303c35;
@@ -427,6 +432,16 @@
 .collection-play:hover {
   background: #344b33;
 }
+/* The play button's hit area is the whole card. */
+.collection-play::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+}
+.collection-play svg {
+  transition: translate var(--motion-base) var(--ease-spring);
+}
 .collection-card-estate .collection-play {
   background: #263140;
 }
@@ -436,6 +451,258 @@
 .collection-page a:focus-visible {
   outline: 2px solid light-dark(#607552, var(--theme-accent));
   outline-offset: 4px;
+}
+/* Focus lands on the button, but the card is what it opens. */
+.collection-card:has(.collection-play:focus-visible) {
+  outline: 2px solid light-dark(#607552, var(--theme-accent));
+  outline-offset: 4px;
+}
+
+/*
+ * Motion. The page arrives as a short cascade (first visit only, see
+ * HomePage.tsx), and each card comes alive when pointed at or focused: it
+ * lifts, its board leans in, and the preview plays a beat of its game — a
+ * piece hops home, the dice tumble, a knight jumps, the hand fans, a token
+ * climbs the ladder. Reduced motion lands all of it at once (motion.css).
+ */
+.collection-page[data-intro]
+  :is(
+    .collection-eyebrow,
+    .collection-intro h1,
+    .collection-intro-copy,
+    .collection-benefits,
+    .collection-section-heading
+  ) {
+  animation: collection-rise 640ms var(--ease-out) backwards;
+}
+.collection-page[data-intro] .collection-intro h1 {
+  animation-delay: 70ms;
+}
+.collection-page[data-intro] .collection-intro-copy {
+  animation-delay: 140ms;
+}
+.collection-page[data-intro] .collection-benefits {
+  animation-delay: 210ms;
+}
+.collection-page[data-intro] .collection-section-heading {
+  animation-delay: 260ms;
+}
+.collection-page[data-intro] .collection-card {
+  animation: collection-card-in 720ms var(--ease-out) calc(300ms + var(--i) * 90ms) backwards;
+}
+.collection-page[data-intro] .collection-card .collection-board {
+  animation: collection-board-in 900ms var(--ease-spring) calc(380ms + var(--i) * 90ms) backwards;
+}
+@keyframes collection-rise {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+  }
+}
+@keyframes collection-card-in {
+  from {
+    opacity: 0;
+    translate: 0 28px;
+    scale: 0.98;
+  }
+}
+@keyframes collection-board-in {
+  from {
+    opacity: 0;
+    translate: 0 -18px;
+    scale: 0.92;
+  }
+}
+
+.collection-board,
+.collection-preview-dice {
+  transition:
+    translate var(--motion-slow) var(--ease-spring),
+    scale var(--motion-slow) var(--ease-spring),
+    rotate var(--motion-slow) var(--ease-spring);
+}
+@media (hover: hover) {
+  .collection-card:hover {
+    translate: 0 -6px;
+    border-color: light-dark(#d3d8c6, color-mix(in oklab, var(--theme-border), var(--theme-text) 18%));
+    box-shadow:
+      0 2px 4px light-dark(#3040360d, #0003),
+      0 22px 44px -12px light-dark(#30403633, #0009);
+  }
+  .collection-card:hover .collection-play svg {
+    translate: 4px 0;
+  }
+}
+.collection-card:is(:hover, :focus-within) .collection-board {
+  translate: 0 -6px;
+  scale: 1.05;
+}
+.collection-card:is(:hover, :focus-within) .collection-preview-dice {
+  translate: -6px -4px;
+}
+
+/* Hearth & Home: one piece from each nest hops toward home, in turn. */
+.collection-card-hearth:is(:hover, :focus-within) .collection-court i:first-child {
+  animation: collection-hop 620ms var(--ease-out) both;
+}
+.collection-card-hearth:is(:hover, :focus-within) .collection-court-gold i:first-child {
+  animation-delay: 110ms;
+}
+.collection-card-hearth:is(:hover, :focus-within) .collection-court-blue i:first-child {
+  animation-delay: 220ms;
+}
+.collection-card-hearth:is(:hover, :focus-within) .collection-court-green i:first-child {
+  animation-delay: 330ms;
+}
+@keyframes collection-hop {
+  0% {
+    translate: 0 0;
+    scale: 1 1;
+  }
+  15% {
+    translate: 0 1px;
+    scale: 1.2 0.8;
+  }
+  45% {
+    translate: 0 -12px;
+    scale: 0.9 1.12;
+  }
+  75% {
+    translate: 0 0;
+    scale: 1.15 0.85;
+  }
+  100% {
+    translate: 0 0;
+    scale: 1 1;
+  }
+}
+
+/* Estate and Hearth: the dice leave the table and tumble back down. */
+.collection-card:is(:hover, :focus-within) .collection-preview-dice svg {
+  animation: collection-tumble 760ms var(--ease-out) both;
+}
+@keyframes collection-tumble {
+  0% {
+    translate: 0 0;
+    rotate: 0deg;
+  }
+  40% {
+    translate: 6px -26px;
+    rotate: 200deg;
+  }
+  70% {
+    translate: 10px 0;
+    rotate: 330deg;
+  }
+  85% {
+    translate: 11px -5px;
+    rotate: 350deg;
+  }
+  100% {
+    translate: 12px 0;
+    rotate: 360deg;
+  }
+}
+
+/* Gambit: the knight takes its L — up, over, and down with a little give. */
+.collection-card-chess:is(:hover, :focus-within) .collection-chess-knight {
+  display: inline-block;
+  animation: collection-knight 700ms var(--ease-out) both;
+}
+@keyframes collection-knight {
+  0% {
+    translate: 0 0;
+    rotate: 0deg;
+  }
+  20% {
+    translate: 0 3px;
+    rotate: -6deg;
+  }
+  55% {
+    translate: 10px -30px;
+    rotate: 12deg;
+  }
+  85% {
+    translate: 20px 0;
+    rotate: -3deg;
+  }
+  100% {
+    translate: 20px 0;
+    rotate: 0deg;
+  }
+}
+
+/* Prism: the hand fans open. Individual transforms, so they add to the cards' own tilt. */
+.collection-prism-card {
+  transition:
+    translate var(--motion-slow) var(--ease-spring),
+    rotate var(--motion-slow) var(--ease-spring);
+}
+.collection-card-prism:is(:hover, :focus-within) .collection-prism-card-0 {
+  translate: -14px 4px;
+  rotate: -8deg;
+}
+.collection-card-prism:is(:hover, :focus-within) .collection-prism-card-1 {
+  translate: -5px -6px;
+  rotate: -3deg;
+  transition-delay: 30ms;
+}
+.collection-card-prism:is(:hover, :focus-within) .collection-prism-card-2 {
+  translate: 5px -8px;
+  rotate: 3deg;
+  transition-delay: 60ms;
+}
+.collection-card-prism:is(:hover, :focus-within) .collection-prism-card-3 {
+  translate: 14px 2px;
+  rotate: 8deg;
+  transition-delay: 90ms;
+}
+
+/* Wildrise: a token climbs the ladder, rung by rung. */
+.collection-wildrise-token {
+  position: absolute;
+  left: 15%;
+  top: 79%;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  background: #c7643f;
+  box-shadow:
+    -1px 2px 0 #7e3a22,
+    inset 1px 2px 2px #fff6;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+.collection-card-wildrise:is(:hover, :focus-within) .collection-wildrise-token {
+  opacity: 1;
+  animation: collection-climb 1100ms var(--ease-in-out) 80ms both;
+}
+@keyframes collection-climb {
+  0% {
+    translate: 0 0;
+  }
+  20% {
+    translate: 15px -24px;
+  }
+  25% {
+    translate: 15px -21px;
+  }
+  45% {
+    translate: 30px -47px;
+  }
+  50% {
+    translate: 30px -44px;
+  }
+  70% {
+    translate: 52px -82px;
+  }
+  75% {
+    translate: 52px -79px;
+  }
+  100% {
+    translate: 74px -118px;
+  }
 }
 .collection-note {
   display: flex;

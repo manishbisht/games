@@ -37,6 +37,15 @@ describe('bot skills the room will actually accept', () => {
     })
   }
 
+  it('promises the seat counts the server will actually book', () => {
+    // The collection's "2–4 players" is read from the catalog; the room only
+    // ever opens with what the adapter allows.
+    for (const game of online) {
+      const adapter = getAdapter(game.id as GameId)!
+      expect(game.players).toEqual({ min: adapter.minSeats, max: adapter.maxSeats })
+    }
+  })
+
   it('leads with the skill the server would have picked by itself', () => {
     // `addBot` without a skill takes `skills[0]`, so the first one listed here
     // is what an unchanged picker sends — they have to be the same one.

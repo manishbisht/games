@@ -1,5 +1,5 @@
-import { lazy } from 'react'
 import type { ComponentType, LazyExoticComponent } from 'react'
+import { lazyWithPreload } from '../lazyPreload'
 
 export interface GameEntry {
   id: string
@@ -11,9 +11,13 @@ export interface GameEntry {
   tags: string[]
   icon: string
   themeColor: { light: string; dark: string }
+  /** Seats at one table. Mirrors the adapter's min/maxSeats; games.test.ts holds them together. */
+  players: { min: number; max: number }
   /** Has an online mode, so `${path}/room/:code` routes to the shared room page. */
   online?: boolean
   Component: LazyExoticComponent<ComponentType>
+  /** Fetch the game's chunk ahead of the click (hover, focus, a route transition). */
+  preload: () => Promise<boolean>
 }
 
 export const hearthGame: GameEntry = {
@@ -28,7 +32,8 @@ export const hearthGame: GameEntry = {
   icon: 'hearth.svg',
   themeColor: { light: '#faf9f5', dark: '#18211c' },
   online: true,
-  Component: lazy(() => import('./hearth/HearthGame')),
+  players: { min: 2, max: 4 },
+  ...lazyWithPreload(() => import('./hearth/HearthGame')),
 }
 
 export const estateGame: GameEntry = {
@@ -43,7 +48,8 @@ export const estateGame: GameEntry = {
   icon: 'estate.svg',
   themeColor: { light: '#faf9f5', dark: '#111722' },
   online: true,
-  Component: lazy(() => import('./monopoly/MonopolyGame')),
+  players: { min: 2, max: 4 },
+  ...lazyWithPreload(() => import('./monopoly/MonopolyGame')),
 }
 
 export const chessGame: GameEntry = {
@@ -58,7 +64,8 @@ export const chessGame: GameEntry = {
   icon: 'chess.svg',
   themeColor: { light: '#f8f7f2', dark: '#18211c' },
   online: true,
-  Component: lazy(() => import('./chess/ChessLobby')),
+  players: { min: 2, max: 2 },
+  ...lazyWithPreload(() => import('./chess/ChessLobby')),
 }
 
 export const prismGame: GameEntry = {
@@ -73,7 +80,8 @@ export const prismGame: GameEntry = {
   icon: 'prism.svg',
   themeColor: { light: '#faf9f5', dark: '#142b24' },
   online: true,
-  Component: lazy(() => import('./prism/PrismGame')),
+  players: { min: 2, max: 4 },
+  ...lazyWithPreload(() => import('./prism/PrismGame')),
 }
 
 export const wildriseGame: GameEntry = {
@@ -88,7 +96,8 @@ export const wildriseGame: GameEntry = {
   icon: 'wildrise.svg',
   themeColor: { light: '#f7f6ef', dark: '#18211c' },
   online: true,
-  Component: lazy(() => import('./wildrise/WildriseGame')),
+  players: { min: 2, max: 4 },
+  ...lazyWithPreload(() => import('./wildrise/WildriseGame')),
 }
 
 export const games: GameEntry[] = [hearthGame, estateGame, chessGame, prismGame, wildriseGame]

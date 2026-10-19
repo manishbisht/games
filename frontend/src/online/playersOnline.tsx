@@ -2,6 +2,7 @@
    its hook, and the badge belong to one tiny feature; splitting them into
    separate files would obscure more than fast refresh gains. */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { useCountUp } from '../motion/hooks'
 import { presenceBeat, type PresenceCounts } from './api'
 import { guestId } from './guest'
 
@@ -60,10 +61,12 @@ export function usePlayersOnline(): PresenceCounts | null {
 export function PlayersOnlineBadge({ game, className }: { game?: string; className: string }) {
   const counts = usePlayersOnline()
   const count = counts === null ? 0 : game ? (counts.byGame[game] ?? 0) : counts.total
+  // Counts to each new number; the label always says the real one.
+  const shown = useCountUp(count)
   if (!count) return null
   return (
     <span className={className} aria-label={`${count} ${count === 1 ? 'player' : 'players'} online`}>
-      <i aria-hidden="true" /> {count} online
+      <i aria-hidden="true" /> {shown} online
     </span>
   )
 }

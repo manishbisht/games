@@ -1,7 +1,7 @@
-import { lazy } from 'react'
 import type { ComponentType, LazyExoticComponent } from 'react'
 import type { GameId, RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import { games } from '../games/catalog'
+import { lazyWithPreload } from '../lazyPreload'
 import type { RoomApi } from './useRoom'
 
 /**
@@ -44,14 +44,24 @@ interface OnlineGameConfig {
    * no bots yet.
    */
   botSkills?: BotSkill[]
-  /** Lazy so a room page never drags a game's 3D scene in before it is needed. */
+  /**
+   * Lazy so a room page never drags a game's 3D scene in before it is needed —
+   * but the room warms it with `preloadRoomView` as soon as it opens, because
+   * the moment it is needed is a socket message, not a click.
+   */
   RoomView: LazyExoticComponent<ComponentType<RoomViewProps>>
+  preloadRoomView: () => Promise<boolean>
 }
 
 export interface OnlineGame extends OnlineGameConfig {
   /** Where the game lives, e.g. `/chess`. Rooms are `${basePath}/room/:code`. */
   basePath: string
   name: string
+}
+
+function roomView(load: () => Promise<{ default: ComponentType<RoomViewProps> }>) {
+  const { Component, preload } = lazyWithPreload(load)
+  return { RoomView: Component, preloadRoomView: preload }
 }
 
 const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
@@ -64,7 +74,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'easy', label: 'Easy' },
       { id: 'medium', label: 'Medium' },
     ],
-    RoomView: lazy(() => import('../games/chess/online/ChessRoomView')),
+    ...roomView(() => import('../games/chess/online/ChessRoomView')),
   },
   estate: {
     minSeats: 2,
@@ -74,7 +84,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     // One strength: Estate's bot has no difficulty to pick, so the picker is
     // left out entirely rather than offering a choice of one.
     botSkills: [{ id: 'standard', label: 'Bot' }],
-    RoomView: lazy(() => import('../games/monopoly/online/EstateRoomView')),
+    ...roomView(() => import('../games/monopoly/online/EstateRoomView')),
   },
   hearth: {
     minSeats: 2,
@@ -86,7 +96,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'medium', label: 'Medium' },
       { id: 'hard', label: 'Hard' },
     ],
-    RoomView: lazy(() => import('../games/hearth/online/HearthRoomView')),
+    ...roomView(() => import('../games/hearth/online/HearthRoomView')),
   },
   prism: {
     minSeats: 2,
@@ -98,7 +108,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'medium', label: 'Medium' },
       { id: 'hard', label: 'Hard' },
     ],
-    RoomView: lazy(() => import('../games/prism/online/PrismRoomView')),
+    ...roomView(() => import('../games/prism/online/PrismRoomView')),
   },
   wildrise: {
     minSeats: 2,
@@ -111,7 +121,7 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'fast', label: 'Fast · keep it moving' },
       { id: 'fun', label: 'Fun · a little expressive' },
     ],
-    RoomView: lazy(() => import('../games/wildrise/online/WildriseRoomView')),
+    ...roomView(() => import('../games/wildrise/online/WildriseRoomView')),
   },
 }
 

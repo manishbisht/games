@@ -1,7 +1,10 @@
 import ThemeControl from '../theme/ThemeControl'
+import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { ArrowRight, Bot, Dices, Globe2, Heart, House, Monitor, Users } from 'lucide-react'
 import { Link } from 'react-router'
 import { games } from '../games/catalog'
+import type { GameEntry } from '../games/catalog'
 import { HeaderAuth } from '../online/identity'
 import { PlayersOnlineBadge } from '../online/playersOnline'
 import './HomePage.css'
@@ -31,6 +34,7 @@ function BoardPreview({ game }: { game: string }) {
               <circle cx="21" cy="18" r="3.4" fill="#668e78" />
               <circle cx="81" cy="10" r="3.4" fill="#a182ad" />
             </svg>
+            <span className="collection-wildrise-token" />
           </div>
         ) : game === 'prism' ? (
           <div className="collection-prism-hand">
@@ -92,9 +96,22 @@ function BoardPreview({ game }: { game: string }) {
   )
 }
 
+const players = ({ min, max }: GameEntry['players']) => `${min === max ? min : `${min}–${max}`} players`
+
+/**
+ * The collection plays its entrance once a visit. Coming back from a game,
+ * the page is already folding out of that game's card (navigation.ts), and a
+ * second cascade on top of it would only be noise.
+ */
+let introPlayed = false
+
 export default function HomePage() {
+  const [intro] = useState(() => !introPlayed)
+  useEffect(() => {
+    introPlayed = true
+  }, [])
   return (
-    <div className="collection-page">
+    <div className="collection-page" data-intro={intro || undefined}>
       <header className="collection-header">
         <Link to="/" className="collection-brand" aria-label="Games home">
           <span className="collection-brand-icon">
@@ -146,8 +163,18 @@ export default function HomePage() {
             <span>{games.length} games · endless good times</span>
           </div>
           <div className="collection-grid">
-            {games.map((game) => (
-              <article className={`collection-card collection-card-${game.id}`} key={game.id}>
+            {games.map((game, index) => (
+              <article
+                className={`collection-card collection-card-${game.id}`}
+                key={game.id}
+                style={{ '--i': index } as CSSProperties}
+                // The whole card is the link; fetching the game the moment it
+                // is pointed at (or focused, or touched) means the click
+                // usually finds it already here.
+                onPointerEnter={() => void game.preload()}
+                onFocus={() => void game.preload()}
+                onTouchStart={() => void game.preload()}
+              >
                 <BoardPreview game={game.id} />
                 <div className="collection-card-content">
                   <p className="collection-card-eyebrow">{game.category}</p>
@@ -165,14 +192,8 @@ export default function HomePage() {
                     <div className="collection-player-info">
                       <Users size={17} />
                       <span>
-                        {game.id === 'chess' ? '2 players' : '2–4 players'}
-                        <small>
-                          {game.id === 'chess'
-                            ? 'Online with friends'
-                            : game.online
-                              ? 'Bots or online friends'
-                              : 'Play against bots'}
-                        </small>
+                        {players(game.players)}
+                        <small>{game.online ? 'Bots or online friends' : 'Play against bots'}</small>
                       </span>
                       <PlayersOnlineBadge game={game.id} className="collection-card-online" />
                     </div>

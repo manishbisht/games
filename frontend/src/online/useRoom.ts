@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { PROTOCOL_VERSION } from '@games/shared/protocol'
 import type { ClientMessage, SeatId, ServerMessage } from '@games/shared/protocol'
+import { viewTransition } from '../navigation'
 import { roomSocketUrl } from './api'
 import { initialRoomState, isFatal, roomReducer } from './roomState'
 import type { RoomClientState } from './roomState'
@@ -24,8 +25,26 @@ export interface RoomApi {
 
 /** The server's edge answers these without waking the room (setWebSocketAutoResponse). */
 const HEARTBEAT_MS = 20000
+/**
+ * What a reconnect may carry over: a click made while the socket was down is
+ * sent once it is back, unless the moment has plainly passed — a minute-old
+ * move would only earn an error about a turn that has moved on.
+ */
+const OUTBOX_LIMIT = 16
+const OUTBOX_MAX_AGE_MS = 15000
 
-export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
+/** 1s, 2s, 4s… up to 10s, each ±25% so a room's players don't all knock at once after a blip. */
+const backoff = (attempt: number) => Math.min(10000, 1000 * 2 ** attempt) * (0.75 + Math.random() * 0.5)
+
+/**
+ * `warm` fetches whatever the table needs before it can be drawn (the game's
+ * RoomView chunk); the start of a game waits briefly on it, so the lobby can
+ * cross into a board rather than into a loading screen.
+ */
+export function useRoom(
+  code: string,
+  warm?: () => Promise<unknown>,
+): { room: RoomClientState; api: RoomApi } {
   const identity = useIdentity()
   const identityRef = useRef(identity)
   useEffect(() => {
@@ -34,6 +53,13 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
   const [room, dispatch] = useReducer(roomReducer, initialRoomState)
   const socket = useRef<WebSocket | null>(null)
   const attempts = useRef(0)
+  const outbox = useRef<{ at: number; frame: string }[]>([])
+  const joined = useRef(false)
+  const playing = useRef(false)
+  const warmRef = useRef(warm)
+  useEffect(() => {
+    warmRef.current = warm
+  })
   const fatal = isFatal(room.phase)
 
   useEffect(() => {
@@ -42,7 +68,40 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
     let timer: ReturnType<typeof setTimeout> | undefined
     let heartbeat: ReturnType<typeof setInterval> | undefined
     let missedPongs = 0
+    /**
+     * Server messages, in order — except that the one which starts (or ends)
+     * the game is committed as a view transition, whose update runs a frame
+     * or more later. Whatever arrives meanwhile is held and committed with it,
+     * so a later snapshot can never land before the one it follows.
+     */
+    let held: ServerMessage[] | null = null
+    const deliver = (message: ServerMessage) => {
+      if (held) return void held.push(message)
+      const nowPlaying = message.type === 'room' ? message.snapshot.gameState !== null : playing.current
+      if (nowPlaying === playing.current) return dispatch({ type: 'message', message })
+      playing.current = nowPlaying
+      held = []
+      viewTransition(
+        'swap',
+        () => {
+          dispatch({ type: 'message', message })
+          for (const next of held ?? []) dispatch({ type: 'message', message: next })
+          held = null
+        },
+        {
+          prepare: () =>
+            Promise.race([warmRef.current?.(), new Promise((resolve) => setTimeout(resolve, 400))]),
+        },
+      )
+    }
+    const flushOutbox = (ws: WebSocket) => {
+      const fresh = outbox.current.filter((entry) => Date.now() - entry.at < OUTBOX_MAX_AGE_MS)
+      outbox.current = []
+      for (const entry of fresh) ws.send(entry.frame)
+    }
     const open = () => {
+      timer = undefined
+      joined.current = false
       const ws = new WebSocket(roomSocketUrl(code))
       socket.current = ws
       ws.onopen = async () => {
@@ -85,6 +144,9 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
         // closed or been replaced while we waited.
         if (disposed || ws.readyState !== WebSocket.OPEN) return
         ws.send(JSON.stringify({ type: 'join', protocol: PROTOCOL_VERSION, name: me.name, ...credentials }))
+        // The room reads frames in order, so these follow the join.
+        joined.current = true
+        flushOutbox(ws)
       }
       ws.onmessage = (event) => {
         if (event.data === 'pong') {
@@ -97,27 +159,44 @@ export function useRoom(code: string): { room: RoomClientState; api: RoomApi } {
         } catch {
           return // Not our protocol; nothing sensible to do with an unparseable frame.
         }
-        dispatch({ type: 'message', message })
+        deliver(message)
       }
       ws.onclose = (event) => {
         clearInterval(heartbeat)
+        joined.current = false
         if (disposed) return
         dispatch({ type: 'close', code: event.code })
-        timer = setTimeout(open, Math.min(10000, 1000 * 2 ** attempts.current++))
+        timer = setTimeout(open, backoff(attempts.current++))
       }
     }
+    // Waiting out a backoff is pointless once the network is back or the
+    // player has returned to the tab (a phone wakes with a dead socket).
+    const retryNow = () => {
+      if (timer === undefined || document.visibilityState !== 'visible') return
+      clearTimeout(timer)
+      open()
+    }
     open()
+    window.addEventListener('online', retryNow)
+    document.addEventListener('visibilitychange', retryNow)
     return () => {
       disposed = true
       clearTimeout(timer)
       clearInterval(heartbeat)
+      window.removeEventListener('online', retryNow)
+      document.removeEventListener('visibilitychange', retryNow)
       socket.current?.close()
       socket.current = null
     }
   }, [code, fatal])
 
+  // Sent now if the room is listening; otherwise kept (briefly) for the
+  // reconnect, rather than a click vanishing without a word.
   const send = useCallback((message: ClientMessage) => {
-    if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message))
+    const frame = JSON.stringify(message),
+      ws = socket.current
+    if (ws?.readyState === WebSocket.OPEN && joined.current) return ws.send(frame)
+    outbox.current = [...outbox.current, { at: Date.now(), frame }].slice(-OUTBOX_LIMIT)
   }, [])
 
   const api = useMemo<RoomApi>(

@@ -10,6 +10,13 @@
   --theme-danger: light-dark(#a44534, #e9a591);
 }
 
+/* Appearance and Motion travel together into every header. */
+.display-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
 .theme-control {
   display: inline-flex;
   align-items: center;
@@ -38,6 +45,139 @@
 .theme-control select.theme-select:focus-visible {
   outline: 2px solid var(--theme-accent);
   outline-offset: 3px;
+}
+
+/* Motion: an icon button beside Appearance, opening a small popover. */
+button.motion-control {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: var(--theme-surface);
+  color: var(--theme-muted);
+}
+button.motion-control:hover,
+button.motion-control:has(+ .motion-popover:popover-open) {
+  color: var(--theme-text);
+  border-color: color-mix(in oklab, var(--theme-border), var(--theme-text) 25%);
+}
+button.motion-control:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 3px;
+}
+.motion-control-icon {
+  animation: motion-control-swap var(--motion-slow) var(--ease-spring) both;
+}
+@keyframes motion-control-swap {
+  from {
+    opacity: 0;
+    scale: 0.4;
+    rotate: -40deg;
+  }
+}
+.motion-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--theme-border);
+  border-radius: 12px;
+  background: var(--theme-surface);
+  color: var(--theme-text);
+  font:
+    400 12px 'DM Sans',
+    sans-serif;
+  box-shadow:
+    0 1px 2px light-dark(#30403614, #0006),
+    0 12px 32px light-dark(#30403624, #0008);
+  transform-origin: top right;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    scale var(--motion-base) var(--ease-spring),
+    translate var(--motion-base) var(--ease-spring),
+    display var(--motion-base) allow-discrete,
+    overlay var(--motion-base) allow-discrete;
+  opacity: 0;
+  scale: 0.96;
+  translate: 0 -4px;
+}
+.motion-popover:popover-open {
+  opacity: 1;
+  scale: 1;
+  translate: 0 0;
+}
+@starting-style {
+  .motion-popover:popover-open {
+    opacity: 0;
+    scale: 0.96;
+    translate: 0 -4px;
+  }
+}
+.motion-popover fieldset {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.motion-popover legend {
+  padding: 8px 10px 6px;
+  color: var(--theme-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.motion-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.motion-option:hover,
+.motion-option:has(input:focus-visible) {
+  background: var(--theme-inset);
+}
+.motion-option:has(input:focus-visible) {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: -2px;
+}
+.motion-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.motion-option span {
+  display: grid;
+  gap: 2px;
+}
+.motion-option strong {
+  font-weight: 600;
+}
+.motion-option small {
+  color: var(--theme-muted);
+  font-size: 11px;
+}
+.motion-option > svg {
+  color: var(--theme-accent);
+  opacity: 0;
+  scale: 0.5;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    scale var(--motion-base) var(--ease-spring);
+}
+.motion-option:has(input:checked) > svg {
+  opacity: 1;
+  scale: 1;
 }
 
 @media (max-width: 1200px) {
@@ -83,7 +223,7 @@
   .collection-header {
     column-gap: 12px;
   }
-  .collection-header .theme-control {
+  .collection-header .display-controls {
     margin-left: auto;
   }
 }
