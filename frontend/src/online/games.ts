@@ -61,6 +61,11 @@ export interface ReplayViewProps<S = unknown> {
   states: ReplayFrame<S>[]
   /** The state to show. */
   index: number
+  /**
+   * Playback is running. Still true as it arrives on the final state, so the
+   * last move animates like any other; it turns false once that state's hold
+   * has run out (or the moment the player pauses, steps or scrubs).
+   */
   playing: boolean
   /** Playback rate, one of `REPLAY_SPEEDS`; scale the view's own animations by it. */
   speed: number
@@ -153,6 +158,10 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'medium', label: 'Medium' },
     ],
     ...roomView(() => import('../games/chess/online/ChessRoomView')),
+    ...replayView(() => import('../games/chess/online/ChessReplayView')),
+    replayTurn: (state) => (state as { turn: string }).turn,
+    // The result dialog offers the replay, and a permanent link to the moves.
+    linksReplay: true,
   },
   estate: {
     anchorsReactions: true,
@@ -164,6 +173,10 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
     // left out entirely rather than offering a choice of one.
     botSkills: [{ id: 'standard', label: 'Bot' }],
     ...roomView(() => import('../games/monopoly/online/EstateRoomView')),
+    ...replayView(() => import('../games/monopoly/online/EstateReplayView')),
+    // A mark wherever the dice pass to someone else.
+    replayTurn: (state) => (state as { current: number }).current,
+    linksReplay: true,
   },
   hearth: {
     anchorsReactions: true,
@@ -177,6 +190,10 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'hard', label: 'Hard' },
     ],
     ...roomView(() => import('../games/hearth/online/HearthRoomView')),
+    ...replayView(() => import('../games/hearth/online/HearthReplayView')),
+    // A six's extra roll is the same player's turn going on, so it is not a new mark.
+    replayTurn: (state) => (state as { currentPlayer?: number } | null)?.currentPlayer,
+    linksReplay: true,
   },
   prism: {
     anchorsReactions: true,
@@ -190,6 +207,11 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'hard', label: 'Hard' },
     ],
     ...roomView(() => import('../games/prism/online/PrismRoomView')),
+    ...replayView(() => import('../games/prism/online/PrismReplayView')),
+    // A mark each time play passes to another seat; a skip or a reverse between two marks nothing.
+    replayTurn: (state) => (state as { currentPlayer?: number } | null)?.currentPlayer,
+    // The round's result offers the replay.
+    linksReplay: true,
   },
   wildrise: {
     anchorsReactions: true,
@@ -204,6 +226,11 @@ const CONFIGS: Partial<Record<GameId, OnlineGameConfig>> = {
       { id: 'fun', label: 'Fun · a little expressive' },
     ],
     ...roomView(() => import('../games/wildrise/online/WildriseRoomView')),
+    ...replayView(() => import('../games/wildrise/online/WildriseReplayView')),
+    // A mark each time the die passes on.
+    replayTurn: (state) => (state as { currentPlayer?: number } | null)?.currentPlayer,
+    // The win dialog offers the replay.
+    linksReplay: true,
   },
 }
 
