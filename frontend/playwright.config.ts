@@ -13,6 +13,12 @@ export default defineConfig({
    * hang quickly.
    */
   expect: { timeout: 15000 },
+  /**
+   * Pixel baselines (tests/visual.spec.ts) live beside the specs, one folder per
+   * spec file. No platform suffix: they are only ever made and compared in the
+   * Playwright Linux image (scripts/visual-baselines.sh, and CI's e2e job).
+   */
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFileName}/{arg}{ext}',
   fullyParallel: false,
   workers: 1,
   // One retry on CI, where a shared runner can starve a WebGL frame; a test

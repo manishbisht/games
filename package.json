@@ -10,7 +10,10 @@
     "dev": "npm run dev -w frontend",
     "build": "npm run build -w frontend",
     "lint": "npm run lint -w frontend",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "test:visual:update": "scripts/visual-baselines.sh",
+    "test:visual:check": "scripts/visual-baselines.sh --check",
+    "test:device": "DEVICE_PERF=1 npm exec -w frontend -- playwright test tests/device-perf.spec.ts"
   },
   "allowScripts": {
     "@clerk/shared@3.47.8": true,

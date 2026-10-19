@@ -49,9 +49,17 @@ jobs:
   # the real Worker under `wrangler dev` and the built site under `vite preview`,
   # both started by playwright.config.ts's webServer. No secrets, like `check`:
   # without a Clerk key the site plays as guests, which is what these specs do.
+  #
+  # It runs inside the official Playwright image, browsers and system fonts
+  # included, because tests/visual.spec.ts compares screenshots against
+  # baselines made in that same image (scripts/visual-baselines.sh). The tag
+  # must match @playwright/test in package-lock.json; a step below checks.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001 --ipc=host
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -67,10 +75,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        # The bundled Chromium, not Chrome: the config picks it when CI is set.
+      - name: Check the image matches Playwright
+        # The image carries the browsers; a version bump without a new image
+        # (and new baselines) would fail every test, so say so up front.
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: |
+          installed="$(node -p "require('@playwright/test/package.json').version")"
+          if [ "$installed" != "1.63.0" ]; then
+            echo "::error::@playwright/test is $installed but the e2e image is v1.63.0: update the image tag in deploy.yml and scripts/visual-baselines.sh regenerates the baselines."
+            exit 1
+          fi
 
       - name: Run end-to-end tests
         working-directory: frontend
