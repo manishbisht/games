@@ -6,7 +6,8 @@ Scope: the Worker (`backend/src`: `index.ts`, `auth.ts`, `room.ts`, `limits.ts`,
 `shared/src/online/registry.ts`), and the browser's handling of identity (`frontend/src/online/identity.tsx`,
 `clerkAuth.tsx`, `guest.ts`, `api.ts`, `useRoom.ts`, `playersOnline.tsx`, `frontend/src/errorReports.ts`).
 Reviewed at `cdb207b` plus the working tree of 2026-10-19 (line numbers re-checked against `52b9c80`; every finding
-also names the function, in case they drift). Report only: no code was changed.
+also names the function, in case they drift). Report only: no code was changed. **Update 2026-10-20:** the server-side
+findings (1–10, 13, 16–20) are fixed in the working tree, each with tests; every section below opens with its status.
 
 **Summary.** No critical or high-severity issue, including in the profiles, reactions and push work added
 during the review (findings 15–20). The identity model is sound (the verified Clerk `sub` or a
@@ -43,6 +44,8 @@ work, and the two global Durable Objects every visitor shares.
 
 ## 1. Medium — forged Clerk tokens force a JWKS fetch each time
 
+**Status (2026-10-20).** Fixed (server, commit-ready). Tokens verify against Clerk's key set fetched once per isolate and cached for an hour (`ClerkKeys` in `auth.ts`); a token naming a key the set lacks may refresh it at most once per 5 minutes, and concurrent misses share one fetch. With the new optional `CLERK_JWT_KEY` secret (PEM) verification never touches the network. A socket gets one successful join and at most three attempts, then is closed (1008). Tests: `auth.test.ts` (forged-kid storm → one fetch), `room-hardening.test.ts`. **Deploy:** `wrangler secret put CLERK_JWT_KEY` is recommended.
+
 **Where.** `backend/src/auth.ts:33-41` (`resolvePlayerId`) calls `verifyToken(token, { secretKey })`. In `@clerk/backend` 2.33.6
 (`node_modules/@clerk/backend/dist/index.js:1399-1419`, `loadClerkJWKFromRemote`), a token whose header `kid`
 is not in the in-memory cache triggers a fresh fetch of the instance's JWKS from Clerk's Backend API — with
@@ -64,6 +67,8 @@ after a few failures).
 
 ## 2. Medium — no per-socket message rate limit in a room
 
+**Status (2026-10-20).** Fixed (server, commit-ready). Token bucket per socket (`MESSAGE_LIMITS`: burst 30, refill 10/s); the first frame over is answered `RATE_LIMITED` (new additive `ErrorCode`), and a socket that sends another full burst into the empty bucket is closed with 1008. Frames over 8 KB are refused before `JSON.parse`. Lobby updates are throttled to one per 250 ms per room. Test: `room-hardening.test.ts`.
+
 **Where.** `room.ts:723-768` (`webSocketMessage`). Every message is parsed and dispatched; every mutating
 handler ends in `save()` (`room.ts:232-238`: a full `storage.put` of the record, `setAlarm`, a possible
 PresenceDO RPC) and `broadcast()` (`room.ts:700-721`: a snapshot built per distinct seat and sent to up to 24
@@ -81,6 +86,8 @@ is one upsert.
 
 ## 3. Medium — sockets that never join are unlimited and never time out
 
+**Status (2026-10-20).** Fixed (server, commit-ready). Each socket's attachment records when it was accepted; sockets that have not joined within 15 s are closed (1013) by a per-room sweep timer (and on the next upgrade), and at most 32 unjoined sockets are held — the oldest is let go for the newest, so a whole room reconnecting at once still fits. Test: `room-hardening.test.ts`.
+
 **Where.** `room.ts:618-628` accepts every upgrade; `MAX_ROOM_SOCKETS` (`room.ts:50`) is only checked inside
 `handleJoin` (`room.ts:783`) and `joinedSockets` (`room.ts:645-649`) counts only sockets with an attachment.
 The edge answers `ping` without waking the object (`room.ts:169`), so an idle unjoined socket lives forever.
@@ -97,6 +104,8 @@ attachment (`{ acceptedAt }`) and close sockets with no `player` older than ~10 
 
 ## 4. Medium — rate limits key on the full IPv6 address
 
+**Status (2026-10-20).** Fixed (server, commit-ready). `clientKey` keys IPv6 on its /64 (IPv4-mapped addresses on their IPv4 form, IPv4 unchanged), for every limiter. Test: `limits.test.ts` (rotation within a /64 is one key).
+
 **Where.** `limits.ts:31-35` uses `CF-Connecting-IP` verbatim as the key for `ROOMS_LIMITER`,
 `SOCKETS_LIMITER`, `ERRORS_LIMITER` and `PROFILES_LIMITER` (`backend/wrangler.jsonc` `ratelimits`).
 
@@ -110,6 +119,8 @@ live rooms, but no longer bounded by the limiter.
 Consider a coarser second limiter (per /48) for room creation.
 
 ## 5. Medium — presence and lobby are unthrottled and global
+
+**Status (2026-10-20).** Fixed (server, commit-ready). New `PRESENCE_LIMITER` (40/min) and `LOBBY_LIMITER` (60/min). `PresenceDO` now does a point lookup and an upsert per beat: counts are reused for 2 s unless the beat changed who is here, pruning runs at most every 15 s on new indexes (`presence(last_seen)`, `room_bots(updated_at)`), and one address (`sourceTag`, a hash — never the address) can add at most 20 browsers to the count. Tests: `limits.test.ts`, `presence-counts.test.ts`.
 
 **Where.** `index.ts:138-147` (`POST /api/presence`) and `index.ts:208-212` (`GET /api/lobby`) have no
 `overLimit` check. Both route to a single object named `'global'` (`PresenceDO`, `LobbyDO`). `PresenceDO.beat`
@@ -126,6 +137,8 @@ serve `/api/lobby` through the Cache API for a few seconds so bursts collapse to
 
 ## 6. Low–Medium — ghost public rooms and lobby flooding
 
+**Status (2026-10-20).** Fixed (server, commit-ready). A public room is listed only while it is open and its host, or a seated person, is connected; it is no longer listed at creation and is removed when the last such person leaves. The lobby lists at most 3 rooms per address tag (`MAX_LISTED_PER_SOURCE`); extra rooms still work by code. Test: `lobby.test.ts`.
+
 **Where.** `room.ts:613-614` calls `pushLobby` at creation, before the host has connected or sat; `lobby.ts:87-101`
 lists anything updated in the last 6 hours (`STALE_MS`) with a free seat. Host names are free text (`auth.ts:17-21`).
 
@@ -138,6 +151,8 @@ instead of `create`), drop it from the lobby when the last person leaves (`handl
 `STALE_MS` for rooms with no connected sockets. Cap public rooms per address/identity.
 
 ## 7. Low — the guest id is also the presence `clientId`
+
+**Status (2026-10-20).** Fixed. Server: whatever id a browser sends is hashed (`presenceKey`) before it reaches `PresenceDO`, so no guest id is stored, from old clients or new. Client (shell agent, `01b10bf`): `playersOnline.tsx` sends its own random `games-presence-id`. Test: `presence-counts.test.ts`.
 
 **Where.** `frontend/src/online/playersOnline.tsx:29` sends `guestId()` as `clientId`; `presence.ts:107-117`
 stores it as `client_id` in the global PresenceDO's SQLite table (aged out after 90 s, `presence.ts:5`).
@@ -154,6 +169,8 @@ The count only needs a stable, distinct per-browser value.
 
 ## 8. Low — names accept bidi overrides, zero-width and control characters
 
+**Status (2026-10-20).** Fixed (server, commit-ready). `cleanName` normalises to NFC, collapses whitespace, strips `Cc`, `Cf` and other default-ignorable characters (keeping ZWJ/ZWNJ between characters and emoji variation selectors), the braille blank, stacks of more than three combining marks, and caps at 24 code points without splitting a grapheme; a name with nothing printable left is refused. Every name enters through it (join, room creation), and profiles and push payloads clean again on the way out. Test: `auth.test.ts`. Client mirror in `saveGuestName` remains a frontend follow-up.
+
 **Where.** `auth.ts:17-21` (`cleanName`) collapses whitespace and truncates to 24 UTF-16 units.
 
 **Exploit.** No XSS: names are rendered as React text and canvas `fillText`, and the frontend has no
@@ -165,6 +182,8 @@ invisible. Truncation at 24 units can also split a surrogate pair.
 by code points (`[...name].slice(0, 24).join('')`). Mirror it in `saveGuestName` (`guest.ts:17-19`).
 
 ## 9. Low — Clerk tokens accepted without `authorizedParties`
+
+**Status (2026-10-20).** Fixed (server, commit-ready). After verification, an `azp` claim must be the site origin — or a localhost origin when the Worker itself is a local dev server. Test: `auth.test.ts`.
 
 **Where.** `auth.ts:36`. `verifyToken` checks signature, `exp`/`nbf` (5 s skew) and the issuer's keys, but
 without `authorizedParties` it does not check the `azp` claim, and no `audience` is set.
@@ -179,6 +198,8 @@ origins in development).
 
 ## 10. Low — `/api/errors` reads an unbounded body without `Content-Length`
 
+**Status (2026-10-20).** Fixed (server, commit-ready). The body is read through a byte counter (`readCapped`) and cut off with 413 past 8 KB, whatever `Content-Length` says. Test: `limits.test.ts` (chunked body).
+
 **Where.** `index.ts:152-155`: the size check uses the declared `content-length`; a chunked request has none,
 so `request.text()` buffers whatever arrives before `parseReport` checks `text.length` (`clientErrors.ts:30`,
 which also counts UTF-16 units rather than bytes).
@@ -187,6 +208,8 @@ which also counts UTF-16 units rather than bytes).
 with no `Content-Length` (`sendBeacon` and `fetch` with a string body always send one).
 
 ## 11. Low — a signed-in player's name is not scrubbed from error reports
+
+**Status (2026-10-20).** Open — frontend (`errorReports.ts`), outside the server work.
 
 **Where.** `frontend/src/errorReports.ts:80-89` takes the name to scrub from `localStorage['games-guest-name']`
 only. A signed-in player's Clerk display name (`clerkAuth.tsx:24-25`) — often a full real name — is not
@@ -198,6 +221,8 @@ queries and the room code are scrubbed (`errorReports.ts:68-78`).
 snapshot.
 
 ## 12. Low — no Content-Security-Policy
+
+**Status (2026-10-20).** Open — frontend (`index.html`).
 
 **Where.** `frontend/index.html`. GitHub Pages cannot set response headers, and there is no `<meta
 http-equiv="Content-Security-Policy">`. There is currently no XSS sink, so this is defence in depth: today an
@@ -212,6 +237,8 @@ suite with it.
 
 ## 13. Info — no `Origin` check on the WebSocket upgrade; CORS admits any localhost port
 
+**Status (2026-10-20).** Fixed (server, commit-ready). A WebSocket upgrade with an `Origin` that is not allowed is refused (403); scripts that send none are held to the socket limit. Localhost origins (CORS and upgrades) are only admitted when the Worker is itself served from loopback (`isLocalWorker`) — `wrangler dev`, tests and CI keep working with no configuration. Tests: `worker.test.ts`, `room-hardening.test.ts`.
+
 **Where.** `index.ts:128-136` forwards the upgrade regardless of `Origin`; `cors.ts:8` allows any
 `http(s)://localhost:*` or `127.0.0.1:*` origin.
 
@@ -224,6 +251,8 @@ per-address limits. CORS here only governs reading responses, none of which are 
 origins to `import.meta.env`-style dev builds of the Worker (e.g. an `ALLOW_LOCAL_ORIGINS` var off in production).
 
 ## 14. Info — dependency advisories are dev-only
+
+**Status (2026-10-20).** Open — dependency updates.
 
 `npm audit` (2026-10-19): 7 high-severity advisories, all in development tooling — `undici` 7.29 (via
 `miniflare`/`wrangler` and `@cloudflare/vitest-pool-workers`), `sharp` (via `miniflare`), `source-map-js` (via
@@ -261,6 +290,8 @@ foundations are sound:
 
 ## 15. Low — the guest id as an `X-Guest-Id` header
 
+**Status (2026-10-20).** Open — check Workers Logs for recorded headers (an operational check).
+
 **Where.** `auth.ts:74-79`; `frontend/src/online/api.ts:94-95`.
 
 **Risk.** The Worker never logs it, but Cloudflare's own request logging (Workers Logs invocation records,
@@ -273,6 +304,8 @@ guest id once for a short-lived signed token, so the long-lived secret is sent o
 
 ## 16. Low — push delivery follows redirects and allows any port
 
+**Status (2026-10-20).** Fixed (server, commit-ready). Push `fetch` uses `redirect: 'manual'` (a 3xx is a failure), endpoints must be https on the default port with no credentials, and the check (`deliverable`) runs again as each push leaves, for rows stored under the old rule. Test: `push.test.ts`.
+
 **Where.** `push.ts:204` (host and scheme checked, port not); `push.ts:238` (`fetch` with the default
 `redirect: 'follow'`).
 
@@ -283,6 +316,8 @@ vendor host on an unusual port) would carry the Worker's POST somewhere the allo
 
 ## 17. Low — reaction allowance is per socket
 
+**Status (2026-10-20).** Fixed (server, commit-ready). The reaction bucket is keyed by player id (a second tab or a reconnect shares it), cleared when the room empties. Test: `room-hardening.test.ts`.
+
 **Where.** `room.ts` `reactionBuckets` (a `WeakMap<WebSocket, …>`) and `handleReact`.
 
 **Exploit.** One person opens several sockets to the room (spectators up to `MAX_ROOM_SOCKETS`), or
@@ -292,6 +327,8 @@ frame to every socket. Bounded by the socket limits, so a nuisance rather than a
 **Fix.** Key the bucket by `player.id` (a `Map` cleared when the room empties) instead of by socket.
 
 ## 18. Low — public profiles publish opponents' handles and exact times
+
+**Status (2026-10-20).** Fixed (server, commit-ready). Public profiles round `at` and `since` to the UTC day and drop every opponent's handle; names are kept. The owner's own `/api/me` keeps exact times and opponent links (only to people they actually played; this keeps the profile e2e's click-through working). There is still no opt-out toggle — a product decision. Test: `profiles.test.ts`.
 
 **Where.** `room.ts` `recordFinish` (stores each opponent's `handle`), `player.ts` `profile` (public `recent`
 keeps `opponents[].handle` and `at`).
@@ -304,6 +341,8 @@ public views, and omit opponents' handles unless that opponent's profile is publ
 
 ## 19. Low — chess ratings can be farmed
 
+**Status (2026-10-20).** Fixed (server, commit-ready). A side's rating only moves against an opponent who is signed in or a guest with ≥ 5 finished games — unless that side is still provisional, so two newcomers' first games still count — and at most 3 rated games a day against the same opponent; the rest are recorded unrated. Test: `ratings.test.ts`.
+
 **Where.** `room.ts` `recordFinish`: a game is rated when two people played and the history has ≥ 2 plies.
 
 **Exploit.** Open a second tab in a private window (a fresh guest id), play two plies, resign — repeat. The
@@ -313,6 +352,8 @@ throwaway identity costs nothing, so a rating can be pushed up at will.
 opponents with few rated games.
 
 ## 20. Low — a joiner's name on the host's lock screen
+
+**Status (2026-10-20).** Fixed (server, commit-ready). Names are cleaned at entry (#8) and again in `joinedMessage`; a name with nothing printable left reads "Someone joined your table". Test: `auth.test.ts`.
 
 **Where.** `ledger.ts:67` (`joinedMessage`: `${name} joined your table`).
 

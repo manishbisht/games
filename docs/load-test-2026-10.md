@@ -9,6 +9,8 @@ What happens to the room server when hundreds of bot tables run at once, each wi
 - The room never answers a client's close frame, so a client-side close takes about 10 s to settle.
 - Joins and departures each broadcast the full snapshot to every socket, so a room's reconnect storm costs O(sockets²) messages.
 
+**Update 2026-10-20:** both bugs and the chess replay are fixed; see [After the fixes](#after-the-fixes-2026-10-20) at the end.
+
 ## How to run it
 
 ```sh
@@ -196,3 +198,53 @@ Line numbers below are as of `9e73634`. `room.ts` is under heavy edit, so search
    - Run this test on frozen code with its own `--persist-to` and port.
    - Production-like numbers need a staging deploy and a way past the per-IP limits (`limits.ts`). Do not aim this script at production.
    - The useful numbers from a local run are the per-room ones: CPU per event, bytes per snapshot and messages per storm.
+
+## After the fixes (2026-10-20)
+
+What changed, from the list above:
+
+- **Closes are answered.** `RoomDO.webSocketClose` replies with the client's code (1000 for the reserved ones), in a `try`.
+- **No more k² fan-out.** A join sends the full snapshot to the socket that joined at once; everyone else hears about arrivals and departures in one coalesced broadcast 40 ms later (`PRESENCE_COALESCE_MS`), sent only to sockets that have not had a snapshot since. Any real broadcast in between carries the news and cancels it. No protocol change.
+- **Serialised once per view** (recommendation 3): `broadcast` stringifies each viewpoint's snapshot once and splices in `you`, and computes `connectedIds()` once.
+- **Chess no longer replays the whole game** (recommendation 1, the replay half). The adapter hands the engine a line that starts at the position after the last capture or one-step pawn move, so a move costs the same at ply 200 as at ply 20. Every state, bot choice and draw is identical to the whole-line replay (`backend/test/chess-line.test.ts` plays games both ways). The bot search itself is unchanged.
+- **Presence scans** (recommendation 6): pruning runs at most every 15 s on new indexes, and counts are reused for 2 s unless a beat changed who is here.
+
+### Results
+
+Same harness and machine, the two builds side by side as frozen copies (`git archive HEAD` for before, the working tree for after), each on its own port, `--persist-to` and worker name.
+
+**The machine was shared.** Other agents were running Playwright and Chrome at the same time. The load average moved between 4 and 22, and for part of the session the disk was full. At 300 rooms that noise outweighs the difference between the builds. Whenever the load average was above about 10, **both** builds lost the storm: the unchanged build brought back 741, then 0, then 0 of 1,200 sockets, and logged up to 1,072 "dropped connection to the UserWorker" warnings; the new build did the same. So the 300-room rows below are from the quiet windows only (load average 5–7, disk not full). The per-room counts (messages per storm, closes answered, CPU per chess event) don't depend on the noise. Rerun the 300-room pair on an idle machine before quoting them.
+
+|                                                                          | Before                    | After                |
+| ------------------------------------------------------------------------ | ------------------------- | -------------------- |
+| **100 rooms × 4:** host action RTT, steady, p50 / p95 ms                 | 3.3 / 31                  | 3.3 / 35             |
+| 100 rooms: workerd CPU %, steady, p50 / p95                              | 48 / 65                   | 48 / 67              |
+| 100 rooms: messages during the storm                                     | 1,042                     | 675                  |
+| 100 rooms: storm, wall time until everyone was back                      | 0.81 s                    | 0.64 s               |
+| 100 rooms: closes the server answered (p50)                              | 0 / 400                   | 400 / 400 (194 ms)   |
+| **300 rooms × 4** (quiet windows): host action RTT, steady, p50 / p95 ms | 518 / 805 and 789 / 1,105 | 462 / 883            |
+| 300 rooms: storm, wall time until everyone was back                      | 2.5 s and 3.1 s           | 2.2 s                |
+| 300 rooms: closes the server answered                                    | 72 / 1,200 and 0 / 1,200  | 1,200 / 1,200        |
+| **Wide rooms, 20 × 24:** messages while connecting                       | 5,937                     | 972                  |
+| Wide rooms: messages during the storm (per room)                         | 5,958 (~298)              | 1,099 (~55)          |
+| Wide rooms: closes answered (p50)                                        | 0 / 480                   | 480 / 480 (187 ms)   |
+| **Chess, 20 × 2, instant host, 25 s:** events handled at ~100% of a core | 2,319 (≈10.8 ms each)     | 2,740 (≈9.1 ms each) |
+| Chess: host action RTT p50 / p95 ms                                      | 226 / 345                 | 190 / 312            |
+
+A human chess move through the adapter, measured in Node 22 on positions reached by random play:
+
+| Plies played | Whole-line replay (before) | Shortened line (after) |
+| ------------ | -------------------------- | ---------------------- |
+| 20           | 1.41 ms                    | 0.35 ms                |
+| 100          | 6.15 ms                    | 1.60 ms                |
+| 200          | 11.46 ms                   | 0.32 ms                |
+
+How to read these:
+
+- **The 300-room knee is still a one-thread knee.** It hasn't moved much, because the cost there is the bot searches and alarms of 300 tables on one core.
+- **The per-room costs are what carry to production,** and those dropped:
+  - A 24-socket room's storm costs about 55 messages instead of about 300.
+  - Closes now settle in milliseconds, so a browser reconnects at once instead of after about 10 s. At 300 rooms the answers take about a second, because the process is saturated.
+  - A long chess game no longer gets dearer per move.
+- **The chess-only gain is modest (~18%).** Games against an instant host are short, and the `easy` search (200 nodes of move generation) dominates each event. The replay saving grows with game length, as the second table shows.
+- **Still open:** a time bound on the bot search (recommendation 2) and writing less per beat (recommendation 7).
