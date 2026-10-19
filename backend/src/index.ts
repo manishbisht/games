@@ -135,6 +135,25 @@ export default {
       return env.ROOM.getByName(code).fetch(request)
     }
 
+    const replayMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9]+)\/replay$/)
+    if (replayMatch && request.method === 'GET') {
+      const code = normalizeRoomCode(replayMatch[1])
+      if (!code) return json({ error: 'not found' }, 404, origin)
+      // `last` is the only game a room offers today; anything else is a link
+      // from a future this server does not know about.
+      const which = url.searchParams.get('game') ?? 'last'
+      if (which !== 'last') return json({ error: 'unknown game selector' }, 400, origin)
+      if (await overLimit(env.REPLAYS_LIMITER, request)) return tooMany(origin)
+      const replay = await env.ROOM.getByName(code).replayJson()
+      if (replay === null) return personal(json({ error: 'not found' }, 404, origin))
+      const headers = new Headers({ 'content-type': 'application/json' })
+      if (origin) for (const [k, v] of Object.entries(corsHeaders(origin))) headers.set(k, v as string)
+      // A rematch that finishes replaces what `last` means, so nothing in
+      // between may hold on to the old one.
+      headers.set('Cache-Control', 'no-store')
+      return new Response(replay, { status: 200, headers })
+    }
+
     if (url.pathname === '/api/presence' && request.method === 'POST') {
       const body = await readObject(request)
       if (!body) return json({ error: 'invalid JSON' }, 400, origin)

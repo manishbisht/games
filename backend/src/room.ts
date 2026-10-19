@@ -30,6 +30,7 @@ import type { Ledger } from './ledger'
 import { outcomeOf } from './outcome'
 import type { NotifyKind, PlayerSelf } from './player'
 import type { PushMessage } from './push'
+import { ReplayLog } from './replay'
 
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000
 /** Safety valve so one alarm cannot spin forever on an adapter that never settles. */
@@ -203,6 +204,8 @@ export class RoomDO extends DurableObject<Env> {
    */
   private reactionBuckets = new WeakMap<WebSocket, { tokens: number; at: number }>()
   private reactionSeq = 0
+  /** Every state each game passes through, as a spectator saw it (see replay.ts). */
+  private replay = new ReplayLog(this.ctx.storage.sql)
 
   /** The sockets still in the room: everything workerd lists, less the ones leaving it. */
   private sockets(): WebSocket[] {
@@ -221,6 +224,7 @@ export class RoomDO extends DurableObject<Env> {
       if (stored && !Array.isArray(stored.seatIds)) {
         await this.ctx.storage.deleteAll()
         await this.ctx.storage.deleteAlarm()
+        this.replay.forget()
         this.cached = null
       } else {
         this.cached = stored
@@ -537,11 +541,39 @@ export class RoomDO extends DurableObject<Env> {
     record.gameState = state
     record.stateAt = Date.now()
     if (this.adapter(record).isFinished(state)) record.status = 'finished'
+    // Logged as the view nobody is sitting behind, so a replay can never show
+    // what the table could not see.
+    this.replay.record(this.adapter(record).view(state, null), record.stateAt)
+    if (record.status === 'finished') this.replay.finish(record.forfeited)
     const pending = this.pendingPhase(record)
     record.autoAt = pending ? Date.now() + pending.afterMs : undefined
     // A game that has come to rest on an abandoned seat — or a bot's turn — still
     // has to move on.
     if (!pending) this.stampAuto(record)
+  }
+
+  /** A new game is about to be dealt at this table: start its replay, seated as it is now. */
+  private beginReplay(record: RoomRecord): void {
+    this.replay.begin(
+      record.game,
+      record.seatIds.flatMap((seat) => {
+        const stored = record.seats[seat]
+        return stored
+          ? [{ seat, name: stored.player.name, ...(stored.bot ? { bot: { skill: stored.bot.skill } } : {}) }]
+          : []
+      }),
+    )
+  }
+
+  /**
+   * The room's latest finished game, serialised (see `Replay`), or null when
+   * there is no room or it has not finished a game yet. A game in progress is
+   * never offered: a replay is something to watch afterwards, not a second
+   * way to watch live.
+   */
+  async replayJson(): Promise<string | null> {
+    const record = await this.load()
+    return record ? this.replay.read(record.expiresAt) : null
   }
 
   /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
@@ -988,6 +1020,7 @@ export class RoomDO extends DurableObject<Env> {
     record.seats = seats
     record.seatIds = played
     record.status = 'playing'
+    this.beginReplay(record)
     this.setGameState(
       record,
       adapter.create(
@@ -1053,6 +1086,7 @@ export class RoomDO extends DurableObject<Env> {
       }
       for (const s of record.seatIds) if (record.seats[s]) record.seats[s]!.wantsRematch = false
       record.status = 'playing'
+      this.beginReplay(record)
       this.setGameState(record, state)
     }
     await this.save(record)
@@ -1242,5 +1276,6 @@ export class RoomDO extends DurableObject<Env> {
     this.cached = null
     await this.ctx.storage.deleteAll()
     await this.ctx.storage.deleteAlarm()
+    this.replay.forget()
   }
 }

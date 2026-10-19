@@ -2,6 +2,7 @@ import type { ReactionId } from './reactions'
 
 export * from './reactions'
 export * from './profiles'
+export * from './replay'
 
 export const PROTOCOL_VERSION = 3
 

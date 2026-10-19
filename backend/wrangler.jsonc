@@ -28,6 +28,8 @@
     { "name": "ERRORS_LIMITER", "namespace_id": "41003", "simple": { "limit": 30, "period": 60 } },
     // Profile reads and push opt-ins: a page load makes one or two.
     { "name": "PROFILES_LIMITER", "namespace_id": "41004", "simple": { "limit": 60, "period": 60 } },
+    // Replays: one per watch, and each can be a few hundred kilobytes of states.
+    { "name": "REPLAYS_LIMITER", "namespace_id": "41005", "simple": { "limit": 30, "period": 60 } },
   ],
   // Anonymous product events (src/analytics.ts lists them, with an example query).
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "games_events" }],

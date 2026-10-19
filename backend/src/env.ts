@@ -19,6 +19,7 @@ export interface Env {
   SOCKETS_LIMITER?: RateLimit
   ERRORS_LIMITER?: RateLimit
   PROFILES_LIMITER?: RateLimit
+  REPLAYS_LIMITER?: RateLimit
   /** Anonymous product events (see analytics.ts). Optional: tests and bare configs run without it. */
   ANALYTICS?: AnalyticsEngineDataset
   /**
