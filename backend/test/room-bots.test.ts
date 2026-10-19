@@ -489,9 +489,9 @@ describe('adding and removing bots', () => {
     expect((after!.gameState as { phase: string }).phase).not.toBe('ready')
   })
 
-  it('turns a latecomer away once bots have filled the table, until one is removed', async () => {
-    // The intended behaviour: a bot occupies a seat for every purpose,
-    // fullness included, and `removeBot` is the way back.
+  it('keeps a latecomer watching once bots have filled the table, until one is removed', async () => {
+    // A bot occupies a seat for every purpose, fullness included, and
+    // `removeBot` is the way back to one.
     const { code, host } = await openRoom()
     for (const seat of ['p1', 'p2', 'p3']) {
       host.send({ type: 'addBot', seat })
@@ -499,7 +499,9 @@ describe('adding and removing bots', () => {
     }
     const late = await connect(code)
     late.join('Cara')
-    await late.expectError('ROOM_FULL')
+    await late.waitRoom((m) => m.you.seat === null)
+    late.send({ type: 'sit', seat: 'p3' })
+    await late.expectError('SEAT_TAKEN')
 
     host.send({ type: 'removeBot', seat: 'p3' })
     await host.waitRoom((m) => !m.snapshot.seats.p3)

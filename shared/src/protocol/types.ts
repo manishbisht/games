@@ -59,6 +59,12 @@ export interface RoomSnapshot<S = unknown> {
   /** Ordered; fixed at creation, compacted onto the played seat count at start. */
   seatIds: SeatId[]
   seats: Partial<Record<SeatId, SeatInfo>>
+  /**
+   * How many people are in the room without a seat, watching. A spectator's
+   * own snapshot counts them too; `you.seat === null` is how they know it is
+   * them. Optional only so a snapshot from an older server still parses.
+   */
+  spectators?: number
   /** Redacted for the socket it is addressed to — one viewer's view of the game. */
   gameState: S | null
   /**

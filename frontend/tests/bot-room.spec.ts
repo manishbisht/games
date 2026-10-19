@@ -108,3 +108,33 @@ test('a chess room offers the two strengths its search can afford', async ({ pag
   await page.getByRole('button', { name: 'Add bot', exact: true }).click()
   await expect(page.getByRole('button', { name: /^Remove / })).toBeVisible()
 })
+
+test('a full table under way lets a latecomer watch, and tells the table', async ({ page, browser }) => {
+  await openRoom(page, 2)
+  await page.getByRole('button', { name: /Take seat 1/ }).click()
+  await expect(page.getByRole('button', { name: /Leave seat/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Add bot', exact: true }).click()
+  await page.getByRole('button', { name: /^Start/ }).click()
+  await expect(page.getByRole('heading', { name: /^Room / })).toHaveCount(0)
+
+  // Every seat is taken and the game is on: once, that was "This room is full."
+  const watcherContext = await browser.newContext()
+  const watcher = await watcherContext.newPage()
+  await watcher.goto(page.url())
+  await watcher.getByLabel('Your name', { exact: true }).fill('Sam')
+  await watcher.getByRole('button', { name: 'Join room', exact: true }).click()
+  await expect(watcher.getByRole('status', { name: 'You are watching' })).toBeVisible()
+  await expect(watcher.getByText('This room is full.')).toHaveCount(0)
+  await expect(watcher.locator('canvas').first()).toBeVisible()
+  // The swap into the table is a view transition; photograph the table, not its way in.
+  await expect(watcher.locator('html')).not.toHaveAttribute('data-vt', /.+/)
+  await watcher.waitForTimeout(600)
+  await watcher.screenshot({ path: 'test-results/spectator-watching.png' })
+
+  // The player is told someone is watching, and when they go, that they went.
+  await expect(page.getByRole('status', { name: '1 watching' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/spectator-player-count.png' })
+  await watcher.getByRole('link', { name: 'All games', exact: true }).click()
+  await expect(page.getByRole('status', { name: '1 watching' })).toHaveCount(0)
+  await watcherContext.close()
+})

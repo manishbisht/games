@@ -227,7 +227,7 @@ describe('joining and seats', () => {
     await vi.waitFor(() => expect(alreadyStartedCount()).toBe(2))
   })
 
-  it('turns away a third player and reclaims seats on reconnect', async () => {
+  it('seats a third player as a spectator and reclaims seats on reconnect', async () => {
     const { code, guestId } = await createRoom()
     const host = await connect(code)
     host.join('Ann', guestId)
@@ -237,10 +237,13 @@ describe('joining and seats', () => {
     guest.send({ type: 'sit', seat: 'b' })
     await host.waitRoom((m) => Boolean(m.snapshot.seats.b))
 
+    // Both seats are taken, so Eve watches rather than being turned away.
     const third = await connect(code)
     third.join('Eve')
-    await third.expectError('ROOM_FULL')
-    await vi.waitFor(() => expect(third.closes[0]?.code).toBe(4403))
+    const watching = await third.waitRoom((m) => m.you.seat === null)
+    expect(watching.snapshot.spectators).toBe(1)
+    third.send({ type: 'sit', seat: 'b' })
+    await third.expectError('SEAT_TAKEN')
 
     guest.ws.close()
     await host.waitRoom((m) => m.snapshot.seats.b?.connected === false)

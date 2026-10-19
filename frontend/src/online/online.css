@@ -383,3 +383,35 @@ button.ch-room-toast-error > svg {
     font-size: 16px;
   }
 }
+
+/* Spectators: who is watching, and — for a watcher — that they are one. */
+.room-audience {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem auto 0;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--theme-border);
+  color: var(--theme-muted);
+  font-size: 0.85rem;
+  width: max-content;
+  max-width: 100%;
+}
+.room-audience strong {
+  color: var(--theme-text);
+  font-weight: 600;
+}
+.room-audience-floating {
+  /* Sits at the head of the toast stack, in the overlay lane every game leaves free. */
+  margin: 0;
+  border: 0;
+  background: rgba(20, 20, 20, 0.78);
+  color: #fffc;
+  box-shadow: 0 8px 24px #0003;
+  backdrop-filter: blur(6px);
+  animation: room-toast-in var(--motion-slow) var(--ease-spring) both;
+}
+.room-audience-floating strong {
+  color: #fff;
+}

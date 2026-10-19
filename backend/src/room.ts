@@ -27,6 +27,13 @@ const MAX_AUTO_ADVANCES = 20
 const STAND_IN_DELAY_MS = 1200
 /** How long the room pauses before a bot's decision lands, when its game has no opinion. */
 const BOT_THINK_MS = 900
+/**
+ * How many sockets one room serves, seat-holders and spectators together. A
+ * seat-holder is always let back in; past this, someone who could only watch is
+ * told the room is full. Every snapshot is built and sent once per socket, so
+ * this is what bounds a single move's cost.
+ */
+export const MAX_ROOM_SOCKETS = 24
 
 /**
  * How often a room that is still playing the same bots repeats itself to the
@@ -139,6 +146,20 @@ export class RoomDO extends DurableObject<Env> {
    * hint: losing it to eviction costs one redundant push, never correctness.
    */
   private lastBotPush = { at: 0, bots: -1 }
+  /**
+   * Sockets whose close (or error) the room is handling. workerd still lists a
+   * socket in `getWebSockets()` while its own `webSocketClose` runs, so without
+   * this a player who left was counted as present by the very handler meant to
+   * notice they had gone — their seat never went "away", a spectator was never
+   * uncounted — until some later socket's departure happened to look again.
+   * Weak, so a socket that is gone for good costs nothing to remember.
+   */
+  private departed = new WeakSet<WebSocket>()
+
+  /** The sockets still in the room: everything workerd lists, less the ones leaving it. */
+  private sockets(): WebSocket[] {
+    return this.ctx.getWebSockets().filter((ws) => !this.departed.has(ws))
+  }
 
   private async load(): Promise<RoomRecord | null> {
     if (this.cached === undefined) {
@@ -383,11 +404,18 @@ export class RoomDO extends DurableObject<Env> {
 
   private connectedIds(): Set<string> {
     const ids = new Set<string>()
-    for (const ws of this.ctx.getWebSockets()) {
+    for (const ws of this.sockets()) {
       const attachment = ws.deserializeAttachment() as Attachment | null
       if (attachment) ids.add(attachment.player.id)
     }
     return ids
+  }
+
+  /** Sockets that have joined, other than `except` — the one asking to. */
+  private joinedSockets(except: WebSocket): number {
+    let count = 0
+    for (const ws of this.sockets()) if (ws !== except && ws.deserializeAttachment()) count++
+    return count
   }
 
   private seatOf(record: RoomRecord, playerId: string): SeatId | null {
@@ -398,6 +426,10 @@ export class RoomDO extends DurableObject<Env> {
   /** Seat players are stripped down to public fields; only `gameState` is per-viewer. */
   private snapshot(record: RoomRecord, viewerSeat: SeatId | null): RoomSnapshot {
     const connected = this.connectedIds()
+    // Everyone here who holds no seat: people, not tabs, so one watcher with two
+    // windows open is one.
+    const seated = new Set(record.seatIds.map((seat) => record.seats[seat]?.player.id))
+    const spectators = [...connected].filter((id) => !seated.has(id)).length
     const seats: Partial<Record<SeatId, SeatInfo>> = {}
     for (const seat of record.seatIds) {
       const stored = record.seats[seat]
@@ -421,6 +453,7 @@ export class RoomDO extends DurableObject<Env> {
       status: record.status,
       seatIds: record.seatIds,
       seats,
+      spectators,
       gameState: record.gameState === null ? null : this.adapter(record).view(record.gameState, viewerSeat),
       ...(record.gameState === null || record.stateAt === undefined
         ? {}
@@ -438,7 +471,7 @@ export class RoomDO extends DurableObject<Env> {
     // One snapshot per distinct viewpoint: redaction is pure, so every seat
     // needs it built once and all the spectators share a single `null` view.
     const views = new Map<SeatId | null, RoomSnapshot>()
-    for (const ws of this.ctx.getWebSockets()) {
+    for (const ws of this.sockets()) {
       const attachment = ws.deserializeAttachment() as Attachment | null
       if (!attachment) continue
       const seat = this.seatOf(record, attachment.player.id)
@@ -512,8 +545,10 @@ export class RoomDO extends DurableObject<Env> {
     const player = await resolveIdentity(message, this.env)
     if (!player) return this.fail(ws, 'BAD_TOKEN', 'Could not verify your identity.')
     const seat = this.seatOf(record, player.id)
-    const taken = record.seatIds.filter((s) => record.seats[s]).length
-    if (!seat && taken >= record.seatIds.length) {
+    // Somebody without a seat watches — at a full table, a game under way, a
+    // finished one — and is sent the view nobody is sitting behind. Only a room
+    // with no space left even to watch from turns them away.
+    if (!seat && this.joinedSockets(ws) >= MAX_ROOM_SOCKETS) {
       this.fail(ws, 'ROOM_FULL', 'This room is full.')
       ws.close(CLOSE_CODES.full, 'ROOM_FULL')
       return
@@ -822,11 +857,13 @@ export class RoomDO extends DurableObject<Env> {
     this.broadcast(record)
   }
 
-  async webSocketClose(): Promise<void> {
+  async webSocketClose(ws: WebSocket): Promise<void> {
+    this.departed.add(ws)
     await this.handleDeparture()
   }
 
-  async webSocketError(): Promise<void> {
+  async webSocketError(ws: WebSocket): Promise<void> {
+    this.departed.add(ws)
     await this.handleDeparture()
   }
 

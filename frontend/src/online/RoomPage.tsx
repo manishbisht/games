@@ -2,14 +2,14 @@ import ThemeControl from '../theme/ThemeControl'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { normalizeRoomCode } from '@games/shared/protocol/codes'
-import type { RoomSnapshot, SeatId } from '@games/shared/protocol'
+import type { RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
 import type { ReactNode } from 'react'
 import { HeaderAuth, useIdentity } from './identity'
 import { useRoom } from './useRoom'
 import { onlineGame } from './games'
 import type { BotSkill, OnlineGame } from './games'
 import { presenceEvents } from './roomState'
-import { ArrowLeft, Bot, Check, Copy, Link2, UserMinus, X } from 'lucide-react'
+import { ArrowLeft, Bot, Check, Copy, Eye, Link2, UserMinus, X } from 'lucide-react'
 import ChessShell from '../games/chess/ChessShell'
 import { chessGame, games } from '../games/catalog'
 import { BoardSkeleton } from '../RouteSkeleton'
@@ -28,6 +28,40 @@ function startLabel(people: number, bots: number, full: boolean): string {
   const who = `${people} player${people === 1 ? '' : 's'}`
   const withBots = bots ? `${who} and ${bots} bot${bots === 1 ? '' : 's'}` : who
   return full ? `Start the game · ${withBots}` : `Start with ${withBots}`
+}
+
+/**
+ * Who is in the room without a seat. Somebody watching is told so, plainly —
+ * a game that has started without them shows a table they cannot touch, and
+ * that should never read as a broken one — and the players are told how many
+ * people are watching them. Nothing at all when nobody is.
+ */
+function Audience({ snapshot, you, floating }: { snapshot: RoomSnapshot; you: YouInfo; floating?: boolean }) {
+  const count = snapshot.spectators ?? 0,
+    watching = you.seat === null
+  if (!watching && count === 0) return null
+  const others = watching ? count - 1 : count
+  return (
+    <div
+      className={`room-audience${floating ? ' room-audience-floating' : ''}${watching ? ' room-audience-watching' : ''}`}
+      role="status"
+      aria-label={
+        watching
+          ? `You are watching${others > 0 ? `, with ${others} other${others === 1 ? '' : 's'}` : ''}`
+          : `${count} watching`
+      }
+    >
+      <Eye size={14} aria-hidden="true" />
+      {watching ? (
+        <>
+          <strong>Watching</strong>
+          {others > 0 && <span>· {others + 1} here</span>}
+        </>
+      ) : (
+        <span>{count} watching</span>
+      )}
+    </div>
+  )
 }
 
 export default function RoomPage({ game }: { game: string }) {
@@ -187,6 +221,7 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
   // on it would hide that it can be pressed — and is spoken through the region.
   const toastStack = (
     <div key="toasts" className="ch-room-toasts" role="status">
+      {snapshot?.gameState != null && you && <Audience snapshot={snapshot} you={you} floating />}
       {toasts.map((toast) => (
         <div key={toast.id} className={`ch-room-toast${toast.leaving ? ' ch-room-toast-leaving' : ''}`}>
           {toast.text}
@@ -355,12 +390,19 @@ function Room({ code, config }: { code: string; config: OnlineGame }) {
           </div>
           {isChess && <p className="ch-room-seat-label">CHOOSE YOUR SIDE</p>}
           <div className="ch-room-seats">{snapshot.seatIds.map(seatSlot)}</div>
+          {you && <Audience snapshot={snapshot} you={you} />}
           {isHost ? (
             <button className="ch-room-start" disabled={!ready} onClick={api.start}>
               {!ready ? 'Waiting for players…' : startLabel(people, bots, taken === snapshot.seatIds.length)}
             </button>
           ) : (
-            <p role="status">{ready ? 'Waiting for the host to start…' : 'Waiting for players…'}</p>
+            <p role="status">
+              {you?.seat === null && taken === snapshot.seatIds.length
+                ? 'Every seat is taken — you’ll watch the game from here.'
+                : ready
+                  ? 'Waiting for the host to start…'
+                  : 'Waiting for players…'}
+            </p>
           )}
           <Link className="ch-room-leave" to={config.basePath}>
             Leave room
