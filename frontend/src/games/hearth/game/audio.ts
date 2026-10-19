@@ -41,19 +41,29 @@ export function createAudio() {
     oscillator.start(start)
     oscillator.stop(start + duration + 0.01)
   }
-  function play(sound: Sound) {
+  /** `pitch` scales every frequency (a walk climbs a little with each hop); `gain` scales the volume. */
+  function play(sound: Sound, { pitch = 1, gain = 1 }: { pitch?: number; gain?: number } = {}) {
     if (!context || context.state !== 'running') return
+    const note = (
+      frequency: number,
+      when: number,
+      duration: number,
+      volume: number,
+      type?: OscillatorType,
+      end?: number,
+    ) => tone(frequency * pitch, when, duration, volume * gain, type, end && end * pitch)
     if (sound === 'roll')
-      for (let i = 0; i < 6; i++) tone(190 + i * 23, i * 0.085, 0.045, 0.022, 'triangle', 70)
-    if (sound === 'land') tone(160, 0, 0.1, 0.06, 'triangle', 55)
-    if (sound === 'step') tone(510, 0, 0.05, 0.024, 'sine', 270)
+      for (let i = 0; i < 6; i++) note(190 + i * 23, i * 0.085, 0.045, 0.022, 'triangle', 70)
+    if (sound === 'land') note(160, 0, 0.1, 0.06, 'triangle', 55)
+    if (sound === 'step') note(510, 0, 0.05, 0.024, 'sine', 270)
     if (sound === 'capture') {
-      tone(360, 0, 0.16, 0.05, 'triangle', 100)
-      tone(190, 0.1, 0.19, 0.028, 'sine', 90)
+      note(90, 0, 0.12, 0.07, 'sine', 40)
+      note(360, 0.02, 0.16, 0.05, 'triangle', 100)
+      note(190, 0.12, 0.19, 0.028, 'sine', 90)
     }
     if (sound === 'home' || sound === 'win') {
       const notes = sound === 'win' ? [392, 494, 587, 784, 988, 1175] : [523, 659, 784]
-      notes.forEach((note, i) => tone(note, i * 0.12, 0.45, 0.026, 'sine'))
+      notes.forEach((frequency, i) => note(frequency, i * 0.12, 0.45, 0.026, 'sine'))
     }
   }
   function stop() {

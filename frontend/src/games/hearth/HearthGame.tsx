@@ -1,5 +1,5 @@
 import ThemeControl from '../../theme/ThemeControl'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { PlayersOnlineBadge } from '../../online/playersOnline'
 import { HeaderAuth } from '../../online/identity'
 import {
@@ -15,8 +15,6 @@ import {
   House,
   Maximize2,
   Minus,
-  Pause,
-  Play,
   Plus,
   RotateCcw,
   Settings2,
@@ -33,9 +31,13 @@ import { HOME, PALETTES } from '@games/shared/hearth/board'
 import { createGame, progressFor } from '@games/shared/hearth'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
 import { createAudio } from './game/audio'
-import type { GameConfig, GameState } from '@games/shared/hearth/types'
+import type { GameConfig, GameState, Player } from '@games/shared/hearth/types'
 import BoardScene from './scene/BoardScene'
 import type { BoardControls } from './scene/BoardScene'
+import type { Cue } from './scene/createScene'
+import { useCountUp, useHeld } from '../../motion/hooks'
+import { useMotionPreference } from '../../motion/preference'
+import type { MotionPreference } from '../../motion/preference'
 import { useBotRoom } from '../../online/useBotRoom'
 import SetupPanel from './components/SetupPanel'
 import RulesDialog from './components/RulesDialog'
@@ -101,6 +103,143 @@ function AbandonmentNotice({
   )
 }
 
+const clock = (ms: number) => {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/**
+ * The table's clock, counted from when the room dealt it, so it neither
+ * restarts on a reconnect nor carries over into a rematch — and ticking in its
+ * own component, so a second passing re-renders four characters, not the table.
+ */
+function GameClock({ startedAt, endedAt }: { startedAt?: number; endedAt?: number }) {
+  const [opened] = useState(() => Date.now()),
+    [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (endedAt) return
+    const ticker = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(ticker)
+  }, [endedAt])
+  return <span className="hh-time">{clock((endedAt ?? now) - (startedAt ?? opened))}</span>
+}
+
+/**
+ * Who is at the table, with one marker that slides from the last player's card
+ * to the next one's instead of blinking between them.
+ */
+function PlayerList({
+  children,
+  current,
+  color,
+}: {
+  children: React.ReactNode
+  current: number
+  color: string
+}) {
+  const list = useRef<HTMLDivElement>(null),
+    [marker, setMarker] = useState<{ top: number; height: number } | null>(null)
+  useLayoutEffect(() => {
+    const card = list.current?.children[current + 1] as HTMLElement | undefined
+    if (card) setMarker({ top: card.offsetTop, height: card.offsetHeight })
+  }, [current])
+  return (
+    <div className="hh-player-list" ref={list}>
+      <span
+        className="hh-turn-marker"
+        aria-hidden="true"
+        style={
+          {
+            '--marker-color': color,
+            translate: marker ? `0 ${marker.top + marker.height / 2 - 11}px` : undefined,
+            opacity: marker ? 1 : 0,
+          } as React.CSSProperties
+        }
+      />
+      {children}
+    </div>
+  )
+}
+
+/** The result, after the board has had its moment: the trophy pops and the numbers count up. */
+function Victory({
+  state,
+  winner,
+  online,
+  onClose,
+}: {
+  state: GameState
+  winner: Player
+  online?: OnlineHearthSession
+  onClose: () => void
+}) {
+  const turns = useCountUp(state.turn),
+    captures = useCountUp(winner.stats.captures)
+  return (
+    <Modal title={`${winner.name} wins!`} onClose={onClose} className="hh-victory">
+      <div className="hh-victory-icon" style={{ color: winner.color }}>
+        <Trophy size={43} />
+        <span>✦</span>
+        <span>✦</span>
+      </div>
+      <div className="hh-eyebrow">EVERY JOURNEY HAS A HAPPY ENDING</div>
+      <h2>{winner.name} wins!</h2>
+      <p>
+        {state.rules.piecesPerPlayer === 1 ? 'One piece.' : `All ${state.rules.piecesPerPlayer} pieces.`} One
+        happy home.
+      </p>
+      <div className="hh-victory-stats">
+        <div>
+          <strong>{turns}</strong>
+          <span>TURNS</span>
+        </div>
+        <div>
+          <strong>{captures}</strong>
+          <span>CAPTURES</span>
+        </div>
+        <div>
+          <strong>{state.startedAt && state.endedAt ? clock(state.endedAt - state.startedAt) : '—'}</strong>
+          <span>WELL SPENT</span>
+        </div>
+      </div>
+      <div className="hh-final-players">
+        {state.players.map((p) => (
+          <div key={p.id}>
+            <span style={{ color: p.color }}>●</span>
+            <strong>{p.name}</strong>
+            <span>
+              {progressFor(state, p.id).home}/{state.rules.piecesPerPlayer} home
+            </span>
+            <span>{p.stats.rolls} rolls</span>
+            <span>{p.stats.captures} captures</span>
+          </div>
+        ))}
+      </div>
+      {online ? (
+        <>
+          <button className="hh-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>
+            {online.rematch.mine
+              ? 'Waiting for the table…'
+              : online.rematch.theirs
+                ? 'Accept rematch'
+                : 'Rematch'}
+            <RotateCcw size={16} />
+          </button>
+          <button className="hh-text-button" onClick={online.leave}>
+            Leave room
+          </button>
+        </>
+      ) : null}
+    </Modal>
+  )
+}
+
+const MOTION_LABELS: Record<MotionPreference, string> = {
+  system: 'Follows your device setting.',
+  full: 'Every hop, bounce and flourish.',
+  reduced: 'Short, gentle moves. No confetti.',
+}
+
 export default function HearthGame({ online }: { online?: OnlineHearthSession }) {
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   // The board behind the setup panel. It is never played: choosing a table
@@ -108,18 +247,26 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
   const preview = useMemo(() => createGame(config), [config])
   // The room is the only source of a live table — there is no local game left
   // to be the other half of this.
-  const state = online ? online.state : preview
+  const dealt = online ? online.state : preview
   const started = Boolean(online)
+  // What the board is showing. It trails the room while a die lands or a piece
+  // walks, so the sidebar says what happened as it happens on the table.
+  const [shown, setShown] = useState<GameState | null>(null)
+  const state =
+    shown && shown.startedAt === dealt.startedAt && shown.pieces.length === dealt.pieces.length
+      ? shown
+      : dealt
   const [dialog, setDialog] = useState<'rules' | 'settings' | null>(null)
   const [muted, setMuted] = useState(true),
-    [paused, setPaused] = useState(false),
-    [winDismissed, setWinDismissed] = useState(false)
-  const [elapsed, setElapsed] = useState(0),
+    [winDismissed, setWinDismissed] = useState(false),
     [gameMenu, setGameMenu] = useState(false)
-  const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [motion, setMotion] = useMotionPreference()
   const [audio] = useState(createAudio)
   const board = useRef<BoardControls>(null)
-  const soundedState = useRef<GameState | null>(null)
+  const sound = useRef(!muted)
+  useEffect(() => {
+    sound.current = !muted
+  }, [muted])
   const player = state.players[state.currentPlayer]
   /** Whose inputs this browser is allowed to make: only ever its own seat. */
   const myTurn = Boolean(online) && online!.mySeat === player.id
@@ -130,10 +277,14 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     setWasWon(state.phase === 'won')
     if (state.phase !== 'won') setWinDismissed(false)
   }
-  const active = started && !dialog && !paused
+  // The result waits for the confetti it would otherwise cover.
+  const showVictory = useHeld(Boolean(state.winner) && !winDismissed && !dialog, 1500)
+  const active = started && !dialog
   const roll = useCallback(() => {
     if (active && state.phase === 'roll' && myTurn) {
       if (!muted) audio.unlock()
+      // The die starts rattling now; the room's answer decides where it lands.
+      board.current?.roll()
       online?.send.roll()
     }
   }, [active, state.phase, myTurn, muted, audio, online])
@@ -144,53 +295,18 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     },
     [active, myTurn, online],
   )
+  /** Sounds follow the board's own animation, so each plays once, when it happens. */
+  const onCue = useCallback(
+    (cue: Cue) => {
+      if (!sound.current) return
+      if (cue.kind === 'dice') audio.play('land', { gain: 0.35 + cue.strength * 0.65 })
+      else if (cue.kind === 'step') audio.play('step', { pitch: 1 + Math.min(cue.index, 8) * 0.045 })
+      else audio.play(cue.kind)
+    },
+    [audio],
+  )
 
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const listener = () => setReduced(media.matches)
-    media.addEventListener('change', listener)
-    return () => media.removeEventListener('change', listener)
-  }, [])
   useEffect(() => () => audio.dispose(), [audio])
-  useEffect(() => {
-    if (muted || !active) return
-    const timers: number[] = []
-    const fresh = soundedState.current !== state
-    soundedState.current = state
-    if (fresh && state.phase === 'rolling') audio.play('roll')
-    if (fresh && (state.phase === 'choose' || state.phase === 'pass')) audio.play('land')
-    if (state.phase === 'moving' && state.motion) {
-      const travel = reduced ? 60 : state.motion.steps.length * 165
-      // The server paces the walk and a fresh state always starts it from the
-      // top, so there is never a part-played animation to catch up with.
-      const offset = 0
-      state.motion.steps.forEach((_, i) => {
-        const at = reduced ? 0 : i * 165
-        if ((!reduced || i === 0) && at >= offset)
-          timers.push(window.setTimeout(() => audio.play('step'), at - offset))
-      })
-      if (travel >= offset)
-        timers.push(
-          window.setTimeout(
-            () =>
-              audio.play(
-                state.motion!.captures.length ? 'capture' : state.motion!.to === HOME ? 'home' : 'land',
-              ),
-            travel - offset,
-          ),
-        )
-    }
-    if (fresh && state.phase === 'won') audio.play('win')
-    return () => {
-      timers.forEach(window.clearTimeout)
-      audio.stop()
-    }
-  }, [state, muted, active, reduced, audio])
-  useEffect(() => {
-    if (!started || state.winner || paused) return
-    const timer = window.setInterval(() => setElapsed((e) => e + 1), 1000)
-    return () => window.clearInterval(timer)
-  }, [started, state.winner, paused])
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
@@ -226,29 +342,25 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
     } else audio.stop()
     setMuted(!muted)
   }
-  const time = `${Math.floor(elapsed / 60)
-    .toString()
-    .padStart(2, '0')}:${(elapsed % 60).toString().padStart(2, '0')}`
   const status = !started
     ? 'A seat for everyone. A little friendly competition.'
-    : paused
-      ? 'Take your time. Your table is waiting.'
-      : state.phase === 'roll'
-        ? `Roll a little luck, ${player.name}.`
-        : state.phase === 'rolling'
-          ? 'A little luck is in the air…'
-          : state.phase === 'choose'
-            ? state.dice === 6
+    : state.phase === 'roll'
+      ? `Roll a little luck, ${player.name}.`
+      : state.phase === 'rolling'
+        ? 'A little luck is in the air…'
+        : state.phase === 'choose'
+          ? !myTurn
+            ? `${player.name} rolled ${state.dice === 6 ? 'a six' : state.dice} and is choosing a piece.`
+            : state.dice === 6
               ? 'A six! Leave the nest or keep your journey going.'
               : `Choose a glowing piece to move ${state.dice} spaces.`
-            : state.phase === 'moving'
+          : state.phase === 'moving'
+            ? state.events[0].message
+            : state.phase === 'pass'
               ? state.events[0].message
-              : state.phase === 'pass'
-                ? state.events[0].message
-                : `Every piece, right where it belongs. ${player.name} wins!`
-  const actionLabel = paused
-    ? 'Game paused'
-    : state.phase === 'rolling'
+              : `Every piece, right where it belongs. ${player.name} wins!`
+  const actionLabel =
+    state.phase === 'rolling'
       ? 'Rolling…'
       : state.phase === 'choose'
         ? 'Choose a piece'
@@ -351,10 +463,13 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
             </div>
             <BoardScene
               ref={board}
-              running={!started || active}
-              key={`${state.players.length}-${state.rules.piecesPerPlayer}`}
-              state={state}
+              key={`${dealt.players.length}-${dealt.rules.piecesPerPlayer}`}
+              state={dealt}
+              seat={online?.mySeat ?? null}
+              live={started}
               onSelect={select}
+              onPresent={setShown}
+              onCue={onCue}
             />
             <div className="hh-board-signature">
               <span>h & h</span>
@@ -378,18 +493,12 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
             <span className="hh-camera-hint">
               Drag to orbit <span>·</span> Scroll to zoom
             </span>
-            {paused && (
-              <div className="hh-pause-overlay">
-                <Pause size={32} />
-                <h2>A little breather.</h2>
-                <button className="hh-primary" onClick={() => setPaused(false)}>
-                  <Play size={16} />
-                  Back to the table
-                </button>
-              </div>
-            )}
             <div className="hh-board-status" role="status" aria-live="polite">
-              <span className="hh-status-icon" style={{ color: started ? player.color : undefined }}>
+              <span
+                className="hh-status-icon"
+                key={`${state.currentPlayer}-${state.phase}`}
+                style={{ color: started ? player.color : undefined }}
+              >
                 {state.phase === 'won' ? <Trophy size={17} /> : <Sparkles size={17} />}
               </span>
               {status}
@@ -423,12 +532,16 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                             ? 'THEIR TURN'
                             : 'COMPUTER’S TURN'}
                     </div>
-                    <span className="hh-time">{time}</span>
+                    <GameClock key={state.startedAt} startedAt={state.startedAt} endedAt={state.endedAt} />
                   </div>
-                  <h2>{state.phase === 'won' ? `${player.name} wins!` : `${player.name}’s turn`}</h2>
+                  <h2 key={`${player.id}-${state.phase === 'won'}`} className="hh-turn-title">
+                    {state.phase === 'won' ? `${player.name} wins!` : `${player.name}’s turn`}
+                  </h2>
                   <p className="hh-turn-subtitle">
                     {state.phase === 'choose'
-                      ? `You rolled ${state.dice}. Make your move.`
+                      ? myTurn
+                        ? `You rolled ${state.dice}. Make your move.`
+                        : `${player.name} rolled ${state.dice}.`
                       : state.phase === 'pass'
                         ? 'No moves this time. Luck comes around.'
                         : state.phase === 'moving'
@@ -439,11 +552,15 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                               ? 'A six means another chance. Roll again!'
                               : 'A new roll. A little possibility.'}
                   </p>
-                  <Die value={state.dice || state.lastDice || 1} rolling={state.phase === 'rolling'} />
+                  <Die
+                    value={state.dice || state.lastDice || 1}
+                    rolling={state.phase === 'rolling'}
+                    throws={state.players.reduce((sum, p) => sum + p.stats.rolls, 0)}
+                  />
                   <button
-                    className={`hh-primary hh-roll-button ${state.phase === 'roll' ? 'ready' : ''}`}
+                    className={`hh-primary hh-roll-button ${state.phase === 'roll' && myTurn ? 'ready' : ''}`}
                     aria-label={actionLabel}
-                    disabled={state.phase !== 'roll' || !myTurn || paused}
+                    disabled={state.phase !== 'roll' || !myTurn}
                     onClick={roll}
                   >
                     <Dices size={20} />
@@ -452,12 +569,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                   </button>
                   {state.phase === 'choose' ? (
                     <div className="hh-piece-choices">
-                      <p>
-                        {/* Locally a lone move plays itself; online the seat still chooses it. */}
-                        {state.legalMoves.length === 1 && !online
-                          ? 'One possible move. On its way…'
-                          : 'Pick a piece on the board or below.'}
-                      </p>
+                      <p>{myTurn ? 'Pick a piece on the board or below.' : `${player.name} is choosing…`}</p>
                       <div>
                         {state.pieces
                           .filter((p) => p.playerId === player.id)
@@ -468,7 +580,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                                 key={p.id}
                                 aria-label={`Move piece ${p.index + 1}`}
                                 aria-describedby={`piece-description-${p.id}`}
-                                disabled={!legal || !myTurn || paused}
+                                disabled={!legal || !myTurn}
                                 onMouseEnter={() => board.current?.focus(p.id)}
                                 onFocus={() => board.current?.focus(p.id)}
                                 onClick={() => select(p.id)}
@@ -528,10 +640,12 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                         'The next turn will begin automatically.'
                       ) : state.phase === 'won' ? (
                         'All roads led home.'
-                      ) : (
+                      ) : myTurn ? (
                         <>
                           Roll a <strong>6</strong> to leave your nest.
                         </>
+                      ) : (
+                        `${player.name} is about to roll.`
                       )}
                     </p>
                   )}
@@ -541,7 +655,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                     <h3>Around the table</h3>
                     <span>{state.players.length} PLAYERS</span>
                   </div>
-                  <div className="hh-player-list">
+                  <PlayerList current={state.currentPlayer} color={player.color}>
                     {state.players.map((p) => {
                       const progress = progressFor(state, p.id)
                       const seat = online?.players[p.id]
@@ -595,7 +709,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
                         </div>
                       )
                     })}
-                  </div>
+                  </PlayerList>
                 </section>
                 <section className="hh-events">
                   <div className="hh-section-title">
@@ -687,17 +801,21 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
               </span>
               <input type="checkbox" checked={!muted} onChange={toggleSound} />
             </label>
-            <div>
+            <label>
               <span>
                 <strong>Motion</strong>
-                <small>
-                  {reduced
-                    ? 'Reduced motion follows your device setting.'
-                    : 'Full animations. Follows your device setting.'}
-                </small>
+                <small>{MOTION_LABELS[motion]}</small>
               </span>
-              <Sparkles size={18} />
-            </div>
+              <select
+                className="hh-motion-select"
+                value={motion}
+                onChange={(e) => setMotion(e.target.value as MotionPreference)}
+              >
+                <option value="system">System</option>
+                <option value="full">Full</option>
+                <option value="reduced">Reduced</option>
+              </select>
+            </label>
             <div>
               <span>
                 <strong>{online ? 'Online table' : 'You and the bots'}</strong>
@@ -710,7 +828,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
               <Users size={18} />
             </div>
           </div>
-          <button className="hh-primary" onClick={() => setDialog(null)}>
+          <button className="hh-primary" data-close>
             Back to the table <ArrowRight size={17} />
           </button>
         </Modal>
@@ -722,62 +840,8 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
           onClaim={() => online?.send.claim()}
         />
       )}
-      {state.winner && !winDismissed && !dialog && (
-        <Modal title={`${player.name} wins!`} onClose={() => setWinDismissed(true)} className="hh-victory">
-          <div className="hh-victory-icon" style={{ color: player.color }}>
-            <Trophy size={43} />
-            <span>✦</span>
-            <span>✦</span>
-          </div>
-          <div className="hh-eyebrow">EVERY JOURNEY HAS A HAPPY ENDING</div>
-          <h2>{player.name} wins!</h2>
-          <p>
-            {state.rules.piecesPerPlayer === 1 ? 'One piece.' : `All ${state.rules.piecesPerPlayer} pieces.`}{' '}
-            One happy home.
-          </p>
-          <div className="hh-victory-stats">
-            <div>
-              <strong>{state.turn}</strong>
-              <span>TURNS</span>
-            </div>
-            <div>
-              <strong>{player.stats.captures}</strong>
-              <span>CAPTURES</span>
-            </div>
-            <div>
-              <strong>{time}</strong>
-              <span>WELL SPENT</span>
-            </div>
-          </div>
-          <div className="hh-final-players">
-            {state.players.map((p) => (
-              <div key={p.id}>
-                <span style={{ color: p.color }}>●</span>
-                <strong>{p.name}</strong>
-                <span>
-                  {progressFor(state, p.id).home}/{state.rules.piecesPerPlayer} home
-                </span>
-                <span>{p.stats.rolls} rolls</span>
-                <span>{p.stats.captures} captures</span>
-              </div>
-            ))}
-          </div>
-          {online ? (
-            <>
-              <button className="hh-primary" onClick={online.send.rematch} disabled={online.rematch.mine}>
-                {online.rematch.mine
-                  ? 'Waiting for the table…'
-                  : online.rematch.theirs
-                    ? 'Accept rematch'
-                    : 'Rematch'}
-                <RotateCcw size={16} />
-              </button>
-              <button className="hh-text-button" onClick={online.leave}>
-                Leave room
-              </button>
-            </>
-          ) : null}
-        </Modal>
+      {showVictory && state.winner && (
+        <Victory state={state} winner={player} online={online} onClose={() => setWinDismissed(true)} />
       )}
     </div>
   )

@@ -11,6 +11,16 @@ import {
 } from '@games/shared/hearth/board'
 import type { PlayerId } from '@games/shared/hearth/types'
 
+/**
+ * The board's tiles by space: `track-<0..51>` and `<player>-<52..56>` name an
+ * instance of one of two meshes, so a path can be lit by tinting instances.
+ */
+export interface TileSet {
+  meshes: [THREE.InstancedMesh, THREE.InstancedMesh]
+  slots: Map<string, [0 | 1, number]>
+  base: [THREE.Color[], THREE.Color[]]
+}
+
 export function material(color: string, metalness = 0, roughness = 0.55) {
   return new THREE.MeshStandardMaterial({ color, metalness, roughness })
 }
@@ -37,11 +47,6 @@ function printPlane(map: THREE.Texture, width: number, depth: number, x: number,
   plane.rotation.x = -Math.PI / 2
   plane.position.set(x, y, z)
   return plane
-}
-function ring(radius: number, tube: number, color: string) {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 64), material(color, 0.55, 0.32))
-  mesh.rotation.x = -Math.PI / 2
-  return mesh
 }
 function star(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
   ctx.beginPath()
@@ -75,6 +80,7 @@ export function makeBoard() {
     }
   })
   const table = roundedBox(13.6, 0.52, 13.6, '#ffffff', 0.2)
+  ;(table.material as THREE.Material).dispose()
   table.material = new THREE.MeshStandardMaterial({ map: wood, roughness: 0.48, metalness: 0.04 })
   table.position.y = -0.42
   board.add(table)
@@ -116,42 +122,102 @@ export function makeBoard() {
   })
   board.add(printPlane(artwork, 12.32, 12.32, 0, 0.214, 0))
 
-  const tiles: THREE.Mesh[] = []
-  for (let i = 0; i < 52; i++) {
-    const [x, z] = trackPosition(i)
-    const owner = PLAYER_IDS.find((id) => ENTRIES[id] === i)
-    const safe = SAFE_SPACES.has(i)
-    const tile = roundedBox(
-      0.735,
-      0.105,
-      0.735,
-      owner ? PALETTES[owner].color : safe ? '#ddd0aa' : '#fcf7e9',
-      0.05,
-    )
-    tile.position.set(x, 0.267, z)
-    board.add(tile)
-    tiles.push(tile)
-    const tileArt = canvasMap(128, (ctx) => {
-      ctx.fillStyle = owner ? '#fff4dc' : '#ae9562'
-      if (safe) star(ctx, 64, 64, 27)
-      else {
-        ctx.globalAlpha = 0.6
-        ctx.beginPath()
-        ctx.arc(64, 64, 3.5, 0, Math.PI * 2)
-        ctx.fill()
+  // Every tile is one instance of one of two meshes, and every glyph printed on
+  // a tile is one canvas: a board that was ~250 meshes and 72 textures draws in
+  // a handful of calls. Tiles only receive shadows — at a tenth of a unit tall
+  // the shadow they cast was never visible, only paid for.
+  const SPAN = 12.32,
+    ART = 2048,
+    perUnit = ART / SPAN
+  const tileGeometry = new RoundedBoxGeometry(0.735, 0.105, 0.735, 3, 0.05),
+    laneGeometry = new RoundedBoxGeometry(0.63, 0.11, 0.63, 3, 0.055)
+  const trackTiles = new THREE.InstancedMesh(tileGeometry, material('#ffffff'), 52),
+    laneTiles = new THREE.InstancedMesh(laneGeometry, material('#ffffff'), 20)
+  const tiles: TileSet = { meshes: [trackTiles, laneTiles], slots: new Map(), base: [[], []] }
+  const placement = new THREE.Matrix4(),
+    tint = new THREE.Color()
+  function place(set: 0 | 1, i: number, key: string, x: number, z: number, color: string) {
+    const mesh = tiles.meshes[set]
+    mesh.setMatrixAt(i, placement.makeTranslation(x, 0.267, z))
+    mesh.setColorAt(i, tint.set(color))
+    tiles.base[set][i] = tint.clone()
+    tiles.slots.set(key, [set, i])
+  }
+  const glyphs = canvasMap(ART, (ctx) => {
+    const at = (x: number, z: number, size: number, draw: () => void) => {
+      ctx.save()
+      ctx.translate((x + SPAN / 2) * perUnit, (z + SPAN / 2) * perUnit)
+      ctx.scale((size * perUnit) / 128, (size * perUnit) / 128)
+      ctx.translate(-64, -64)
+      draw()
+      ctx.restore()
+    }
+    for (let i = 0; i < 52; i++) {
+      const [x, z] = trackPosition(i)
+      const owner = PLAYER_IDS.find((id) => ENTRIES[id] === i)
+      const safe = SAFE_SPACES.has(i)
+      place(0, i, `track-${i}`, x, z, owner ? PALETTES[owner].color : safe ? '#ddd0aa' : '#fcf7e9')
+      at(x, z, 0.67, () => {
+        ctx.fillStyle = owner ? '#fff4dc' : '#ae9562'
+        if (safe) star(ctx, 64, 64, 27)
+        else {
+          ctx.globalAlpha = 0.6
+          ctx.beginPath()
+          ctx.arc(64, 64, 3.5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      })
+    }
+    PLAYER_IDS.forEach((id, playerIndex) => {
+      const palette = PALETTES[id]
+      for (let step = 52; step < 57; step++) {
+        const [px, pz] = piecePosition({ id: '', playerId: id, index: 0, progress: step })
+        place(1, playerIndex * 5 + step - 52, `${id}-${step}`, px, pz, palette.light)
+        at(px, pz, 0.53, () => {
+          ctx.strokeStyle = palette.color
+          ctx.lineWidth = 7
+          ctx.lineCap = 'round'
+          ctx.lineJoin = 'round'
+          ctx.translate(64, 64)
+          ctx.rotate((-playerIndex * Math.PI) / 2)
+          ctx.beginPath()
+          ctx.moveTo(-15, 8)
+          ctx.lineTo(0, -7)
+          ctx.lineTo(15, 8)
+          ctx.stroke()
+        })
       }
     })
-    board.add(printPlane(tileArt, 0.67, 0.67, x, 0.324, z))
+  })
+  for (const mesh of tiles.meshes) {
+    mesh.receiveShadow = true
+    mesh.instanceMatrix.needsUpdate = true
+    board.add(mesh)
   }
+  board.add(printPlane(glyphs, SPAN, SPAN, 0, 0.326, 0))
+
+  // The sixteen nest sockets, likewise three instanced meshes tinted per court.
+  const socketGeometry = new THREE.CylinderGeometry(0.39, 0.41, 0.035, 48),
+    innerGeometry = new THREE.CylinderGeometry(0.33, 0.33, 0.039, 48),
+    rimGeometry = new THREE.TorusGeometry(0.37, 0.011, 8, 64)
+  rimGeometry.rotateX(-Math.PI / 2)
+  const sockets = new THREE.InstancedMesh(socketGeometry, material('#ffffff', 0.05, 0.7), 16),
+    inners = new THREE.InstancedMesh(innerGeometry, material('#ffffff'), 16),
+    rims = new THREE.InstancedMesh(rimGeometry, material('#ffffff', 0.55, 0.32), 16)
+  sockets.receiveShadow = inners.receiveShadow = true
+  const borders = {} as Record<PlayerId, THREE.MeshStandardMaterial>
 
   PLAYER_IDS.forEach((id, playerIndex) => {
     const [x, z] = COURTS[id],
       palette = PALETTES[id]
     const border = roundedBox(3.63, 0.06, 3.63, palette.color, 0.22)
     border.position.set(x, 0.247, z)
+    border.castShadow = false
+    borders[id] = border.material as THREE.MeshStandardMaterial
     board.add(border)
     const court = roundedBox(3.48, 0.085, 3.48, palette.light, 0.18)
     court.position.set(x, 0.288, z)
+    court.castShadow = false
     board.add(court)
     const courtArt = canvasMap(512, (ctx) => {
       ctx.strokeStyle = palette.color + '40'
@@ -187,43 +253,18 @@ export function makeBoard() {
     })
     board.add(printPlane(courtArt, 3.44, 3.44, x, 0.334, z))
     for (let index = 0; index < 4; index++) {
-      const [px, pz] = piecePosition({ id: `${id}-${index}`, playerId: id, index, progress: -1 })
-      const socket = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.39, 0.41, 0.035, 48),
-        material(palette.color, 0.05, 0.7),
-      )
-      socket.position.set(px, 0.35, pz)
-      socket.receiveShadow = true
-      board.add(socket)
-      const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.039, 48), material(palette.light))
-      inner.position.set(px, 0.356, pz)
-      inner.receiveShadow = true
-      board.add(inner)
-      const rim = ring(0.37, 0.011, palette.dark)
-      rim.position.set(px, 0.373, pz)
-      board.add(rim)
-    }
-    for (let step = 52; step < 57; step++) {
-      const [px, pz] = piecePosition({ id: '', playerId: id, index: 0, progress: step })
-      const tile = roundedBox(0.63, 0.11, 0.63, palette.light, 0.055)
-      tile.position.set(px, 0.267, pz)
-      board.add(tile)
-      const pathArt = canvasMap(128, (ctx) => {
-        ctx.strokeStyle = palette.color
-        ctx.lineWidth = 7
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        ctx.translate(64, 64)
-        ctx.rotate((-playerIndex * Math.PI) / 2)
-        ctx.beginPath()
-        ctx.moveTo(-15, 8)
-        ctx.lineTo(0, -7)
-        ctx.lineTo(15, 8)
-        ctx.stroke()
-      })
-      board.add(printPlane(pathArt, 0.53, 0.53, px, 0.328, pz))
+      const [px, pz] = piecePosition({ id: `${id}-${index}`, playerId: id, index, progress: -1 }),
+        i = playerIndex * 4 + index
+      sockets.setMatrixAt(i, placement.makeTranslation(px, 0.35, pz))
+      sockets.setColorAt(i, tint.set(palette.color))
+      inners.setMatrixAt(i, placement.makeTranslation(px, 0.356, pz))
+      inners.setColorAt(i, tint.set(palette.light))
+      rims.setMatrixAt(i, placement.makeTranslation(px, 0.373, pz))
+      rims.setColorAt(i, tint.set(palette.dark))
     }
   })
+  board.add(sockets, inners, rims)
+
   const centerBase = new THREE.Mesh(
     new THREE.CylinderGeometry(0.76, 0.81, 0.16, 64),
     material('#bea26e', 0.6, 0.3),
@@ -260,20 +301,44 @@ export function makeBoard() {
       foot.position.set(x * 0.87, -0.73, z * 0.87)
       board.add(foot)
     }
-  return { board, tiles }
+  return { board, tiles, borders }
 }
 
-export function makePiece(id: PlayerId, index: number) {
-  const group = new THREE.Group(),
-    palette = PALETTES[id]
-  const lacquer = new THREE.MeshPhysicalMaterial({
-    color: palette.color,
+export interface PieceLook {
+  lacquer: THREE.Material
+  gold: THREE.Material
+}
+
+/** One lacquer per colour and one gold for every piece, rather than two materials a piece. */
+export function pieceLooks(): Record<PlayerId, PieceLook> {
+  const gold = material('#d6b875', 0.67, 0.24),
+    looks = {} as Record<PlayerId, PieceLook>
+  for (const id of PLAYER_IDS) looks[id] = { gold, lacquer: lacquer(id) }
+  return looks
+}
+const lacquer = (id: PlayerId) =>
+  new THREE.MeshPhysicalMaterial({
+    color: PALETTES[id].color,
     roughness: 0.25,
     metalness: 0.12,
     clearcoat: 0.85,
     clearcoatRoughness: 0.2,
   })
-  const gold = material('#d6b875', 0.67, 0.24)
+
+/** A see-through copy of a piece for previewing where a move lands — its own colour, gold kept gold. */
+export function makeGhost(id: PlayerId) {
+  const fade = (base: THREE.Material) =>
+    Object.assign(base, { transparent: true, opacity: 0.32, depthWrite: false })
+  const ghost = makePiece(id, 0, { lacquer: fade(lacquer(id)), gold: fade(material('#d6b875', 0.67, 0.24)) })
+  ghost.traverse((child) => {
+    child.castShadow = false
+    child.receiveShadow = false
+  })
+  return ghost
+}
+
+export function makePiece(id: PlayerId, index: number, { lacquer, gold }: PieceLook) {
+  const group = new THREE.Group()
   const add = (geometry: THREE.BufferGeometry, y: number, mat: THREE.Material = lacquer) => {
     const mesh = new THREE.Mesh(geometry, mat)
     mesh.position.y = y
@@ -370,6 +435,7 @@ export const PIPS: [number, number][][] = [
 export function makeDie() {
   const die = new THREE.Group()
   const body = roundedBox(0.85, 0.85, 0.85, '#fff7e6', 0.11)
+  ;(body.material as THREE.Material).dispose()
   body.material = new THREE.MeshPhysicalMaterial({ color: '#fff7e6', roughness: 0.24, clearcoat: 0.6 })
   die.add(body)
   const faces: { value: number; position: [number, number, number]; rotation: [number, number, number] }[] = [
@@ -380,33 +446,36 @@ export function makeDie() {
     { value: 3, position: [0.427, 0, 0], rotation: [0, Math.PI / 2, 0] },
     { value: 4, position: [-0.427, 0, 0], rotation: [0, -Math.PI / 2, 0] },
   ]
+  const pip = new THREE.CircleGeometry(0.065, 20),
+    ace = material('#c4684f'),
+    ink = material('#403e36')
   for (const face of faces) {
     const holder = new THREE.Group()
     holder.position.set(...face.position)
     holder.rotation.set(...face.rotation)
     PIPS[face.value].forEach(([x, y]) => {
-      const pip = new THREE.Mesh(
-        new THREE.CircleGeometry(0.065, 20),
-        material(face.value === 1 ? '#c4684f' : '#403e36'),
-      )
-      pip.position.set(x * 0.215, y * 0.215, 0)
-      holder.add(pip)
+      const dot = new THREE.Mesh(pip, face.value === 1 ? ace : ink)
+      dot.position.set(x * 0.215, y * 0.215, 0)
+      holder.add(dot)
     })
     die.add(holder)
   }
   return die
 }
+const DIE_TURNS: [number, number, number][] = [
+  [0, 0, 0],
+  [0, 0, 0],
+  [-Math.PI / 2, 0, 0],
+  [0, 0, Math.PI / 2],
+  [0, 0, -Math.PI / 2],
+  [Math.PI / 2, 0, 0],
+  [Math.PI, 0, 0],
+]
+const YAW = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.22)
+const DIE_FACES = DIE_TURNS.map((turn) =>
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(...turn)).premultiply(YAW),
+)
+/** The die's orientation with `value` facing up (shared; copy it before changing it). */
 export function dieQuaternion(value: number) {
-  const rotations: [number, number, number][] = [
-    [0, 0, 0],
-    [0, 0, 0],
-    [-Math.PI / 2, 0, 0],
-    [0, 0, Math.PI / 2],
-    [0, 0, -Math.PI / 2],
-    [Math.PI / 2, 0, 0],
-    [Math.PI, 0, 0],
-  ]
-  return new THREE.Quaternion()
-    .setFromEuler(new THREE.Euler(...rotations[value]))
-    .premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.22))
+  return DIE_FACES[value] ?? DIE_FACES[1]
 }

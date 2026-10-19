@@ -59,7 +59,7 @@ export default function RulesDialog({ onClose, rules }: { onClose: () => void; r
           </div>
         ))}
       </div>
-      <button className="hh-primary" onClick={onClose}>
+      <button className="hh-primary" data-close>
         Got it. Let’s play.
       </button>
     </Modal>

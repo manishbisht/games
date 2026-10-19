@@ -188,7 +188,12 @@
 .hh-board-section {
   position: relative;
   min-height: 642px;
-  background: radial-gradient(ellipse at 50% 42%, light-dark(#f1f0e6, var(--theme-inset)) 0, light-dark(#e9ebdf, var(--theme-inset)) 56%, light-dark(#e2e5d7, var(--theme-inset)) 100%);
+  background: radial-gradient(
+    ellipse at 50% 42%,
+    light-dark(#f1f0e6, var(--theme-inset)) 0,
+    light-dark(#e9ebdf, var(--theme-inset)) 56%,
+    light-dark(#e2e5d7, var(--theme-inset)) 100%
+  );
   isolation: isolate;
   overflow: hidden;
 }
@@ -253,6 +258,16 @@
   display: block;
   touch-action: none;
   outline: none;
+}
+/*
+ * On a touch screen the board is most of the page, so a vertical swipe over it
+ * scrolls the page; a sideways drag still turns the table.
+ */
+@media (pointer: coarse) {
+  .hh-canvas,
+  .hh-canvas canvas {
+    touch-action: pan-y;
+  }
 }
 .hh-board-signature {
   position: absolute;
@@ -587,7 +602,8 @@
   width: 15px;
   height: 15px;
 }
-.hh-custom-rules select {
+.hh-custom-rules select,
+.hh-settings-list .hh-motion-select {
   border: 1px solid light-dark(#dbe0d1, var(--theme-border));
   background: light-dark(#f6f7ef, var(--theme-inset));
   color: light-dark(#6d7a5e, var(--theme-muted));
@@ -622,6 +638,20 @@
 .hh-turn-panel h2 {
   font-size: 31px;
   margin-top: 10px;
+}
+/* A new player's name eases in rather than blinking over the last one's. */
+.hh-turn-title {
+  animation: hh-title-in var(--motion-slow) var(--ease-out) both;
+}
+@keyframes hh-title-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+    filter: blur(3px);
+  }
+}
+.hh-status-icon {
+  animation: motion-pop var(--motion-slow) var(--ease-spring) both;
 }
 .hh-turn-subtitle {
   font-size: 10px;
@@ -722,10 +752,64 @@
     transform: translateY(-5px) rotateX(336deg) rotateY(332deg) rotateZ(353deg);
   }
 }
+.hh-die-stage.is-landed .hh-die-cube {
+  animation: hh-die-land 0.62s var(--ease-out) both;
+}
+.hh-die-stage.is-landed .hh-die-shadow {
+  animation: hh-die-shadow-land 0.62s var(--ease-out) both;
+}
+/* From mid-tumble, down onto the face: two bounces and a squash on each. */
+@keyframes hh-die-land {
+  0% {
+    transform: translateY(-30px) rotateX(150deg) rotateY(170deg) rotateZ(70deg);
+  }
+  45% {
+    transform: translateY(-5px) rotateX(-14deg) rotateY(-36deg) rotateZ(-4deg) scale3d(1.06, 0.9, 1.06);
+  }
+  65% {
+    transform: translateY(-13px) rotateX(-28deg) rotateY(-26deg) rotateZ(-9deg);
+  }
+  82% {
+    transform: translateY(-5px) rotateX(-22deg) rotateY(-29deg) rotateZ(-6deg) scale3d(1.03, 0.95, 1.03);
+  }
+  100% {
+    transform: translateY(-5px) rotateX(-24deg) rotateY(-28deg) rotateZ(-7deg);
+  }
+}
+@keyframes hh-die-shadow-land {
+  0% {
+    transform: rotate(-12deg) scale(0.6);
+    opacity: 0.4;
+  }
+  45% {
+    transform: rotate(-12deg) scale(1.05);
+    opacity: 1;
+  }
+  65% {
+    transform: rotate(-12deg) scale(0.85);
+  }
+}
 @keyframes hh-shadow {
   50% {
     transform: scale(0.7);
     opacity: 0.45;
+  }
+}
+/* Your turn: the button breathes, so the table's invitation is hard to miss. */
+.hh-roll-button.ready:not(:disabled) {
+  animation: hh-ready 1.8s var(--ease-in-out) infinite;
+}
+@keyframes hh-ready {
+  0%,
+  100% {
+    box-shadow:
+      0 3px 0 #314435,
+      0 0 0 0 color-mix(in srgb, var(--player-color, #435b48) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 3px 0 #314435,
+      0 0 0 6px color-mix(in srgb, var(--player-color, #435b48) 22%, transparent);
   }
 }
 .hh-roll-button {
@@ -816,6 +900,10 @@
   gap: 7px;
 }
 .hh-player-card {
+  transition:
+    border-color var(--motion-base) var(--ease-out),
+    background-color var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -830,15 +918,23 @@
   border-color: color-mix(in srgb, var(--player-color) 40%, light-dark(#e7e8df, var(--theme-border)));
   background: color-mix(in srgb, var(--player-light) 17%, light-dark(#fcfbf7, var(--theme-surface)));
 }
-.hh-player-card.current:before {
-  content: '';
-  width: 3px;
-  height: 22px;
-  background: var(--player-color);
+/* One marker for the whole list, sliding from card to card as the turn passes. */
+.hh-player-list {
+  position: relative;
+}
+.hh-turn-marker {
   position: absolute;
   left: -1px;
-  top: 15px;
+  top: 0;
+  width: 3px;
+  height: 22px;
   border-radius: 0 2px 2px 0;
+  background: var(--marker-color, #435b48);
+  z-index: 1;
+  transition:
+    translate var(--motion-slow) var(--ease-spring),
+    background-color var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out);
 }
 .hh-player-avatar {
   width: 32px;
@@ -933,6 +1029,16 @@
 }
 .hh-player-progress i.filled {
   background: var(--player-color);
+  animation: hh-pip-fill var(--motion-slow) var(--ease-spring) both;
+}
+@keyframes hh-pip-fill {
+  from {
+    scale: 0.3 1;
+    background: light-dark(#e4e7db, var(--theme-inset));
+  }
+  55% {
+    scale: 1.25 1.6;
+  }
 }
 .hh-events {
   border-top: 1px solid light-dark(#e4e6dc, var(--theme-border));
@@ -959,10 +1065,17 @@
   min-height: 90px;
 }
 .hh-event {
+  animation: hh-feed-in var(--motion-slow) var(--ease-out) both;
   display: flex;
   align-items: flex-start;
   gap: 8px;
   line-height: 1.5;
+}
+@keyframes hh-feed-in {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
 }
 .hh-event > span {
   display: inline-flex;
@@ -1110,27 +1223,6 @@
 .hh-game-picker > div button:hover {
   background: light-dark(#eff2e6, var(--theme-inset));
 }
-.hh-pause-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 20px;
-  background: light-dark(#e9eee5bb, color-mix(in srgb, var(--theme-inset) 73%, transparent));
-  backdrop-filter: blur(6px);
-  z-index: 4;
-  color: light-dark(#607958, var(--theme-muted));
-}
-.hh-pause-overlay h2 {
-  font:
-    400 38px Georgia,
-    serif;
-}
-.hh-pause-overlay .hh-primary {
-  width: 200px;
-}
 .hh-dialog {
   --hh-ink: light-dark(#303c35, var(--theme-text));
   --hh-muted: light-dark(#85897e, var(--theme-muted));
@@ -1148,6 +1240,20 @@
   font-size: 13px;
   overflow: auto;
   color-scheme: inherit;
+}
+/* Closed but still fading out: it must not catch clicks meant for the page. */
+.hh-dialog:not([open]) {
+  pointer-events: none;
+}
+.hh-victory-icon {
+  animation: hh-trophy 0.7s var(--ease-spring) 0.12s both;
+}
+@keyframes hh-trophy {
+  from {
+    scale: 0.4;
+    rotate: -14deg;
+    opacity: 0;
+  }
 }
 .hh-dialog::backdrop {
   background: #23362e60;
@@ -2066,14 +2172,6 @@
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
-}
-@media (prefers-reduced-motion: reduce) {
-  .hh-app *,
-  .hh-dialog * {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
-  }
 }
 
 .hh-online-badge {

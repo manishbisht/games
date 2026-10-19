@@ -1,21 +1,34 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { GameState } from '@games/shared/hearth/types'
+import type { GameState, PlayerId } from '@games/shared/hearth/types'
 import { createScene } from './createScene'
-import type { SceneApi } from './createScene'
+import type { Cue, SceneApi } from './createScene'
 
-export type BoardControls = Pick<SceneApi, 'focus' | 'reset' | 'zoom' | 'top'>
-const BoardScene = forwardRef<
-  BoardControls,
-  { state: GameState; running: boolean; onSelect: (id: string) => void }
->(function BoardScene({ state, running, onSelect }, ref) {
+export type BoardControls = Pick<SceneApi, 'focus' | 'reset' | 'zoom' | 'top' | 'roll'>
+
+interface Props {
+  state: GameState
+  /** The colour this browser plays; the board only offers its pieces, on its turn. */
+  seat: PlayerId | null
+  /** False for the preview behind the setup panel. */
+  live: boolean
+  onSelect: (id: string) => void
+  /** The table as the board is showing it, which trails `state` while a move plays out. */
+  onPresent: (state: GameState) => void
+  onCue: (cue: Cue) => void
+}
+
+const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
+  { state, seat, live, onSelect, onPresent, onCue },
+  ref,
+) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
-  const initial = useRef(state),
-    select = useRef(onSelect)
+  const initial = useRef({ state, seat, live }),
+    hooks = useRef({ onSelect, onPresent, onCue })
   const [failed, setFailed] = useState(false)
   useEffect(() => {
-    select.current = onSelect
-  }, [onSelect])
+    hooks.current = { onSelect, onPresent, onCue }
+  }, [onSelect, onPresent, onCue])
   useImperativeHandle(
     ref,
     () => ({
@@ -23,13 +36,25 @@ const BoardScene = forwardRef<
       reset: () => scene.current?.reset(),
       zoom: (d) => scene.current?.zoom(d),
       top: () => scene.current?.top(),
+      roll: () => scene.current?.roll(),
     }),
     [],
   )
   useEffect(() => {
     if (!container.current) return
+    const { state, seat, live } = initial.current
     try {
-      scene.current = createScene(container.current, initial.current, (id) => select.current(id))
+      scene.current = createScene(
+        container.current,
+        state,
+        {
+          select: (id) => hooks.current.onSelect(id),
+          present: (shown) => hooks.current.onPresent(shown),
+          cue: (cue) => hooks.current.onCue(cue),
+        },
+        seat,
+        live,
+      )
     } catch (error) {
       console.error('Hearth & Home could not initialize WebGL.', error)
       setFailed(true)
@@ -40,11 +65,10 @@ const BoardScene = forwardRef<
     }
   }, [])
   useEffect(() => {
-    scene.current?.update(state)
-  }, [state])
-  useEffect(() => {
-    scene.current?.setRunning(running)
-  }, [running])
+    if (scene.current) scene.current.update(state, seat, live)
+    // Without a board there is nothing to wait for: the HUD takes the room's state as it comes.
+    else if (failed) hooks.current.onPresent(state)
+  }, [state, seat, live, failed])
   return (
     <div className="hh-canvas" ref={container}>
       {failed && (
