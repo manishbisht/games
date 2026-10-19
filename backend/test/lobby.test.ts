@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PublicRoomSummary } from '@games/shared/protocol'
 import type { Env } from '../src/env'
 import { migrate } from '../src/lobby'
-import { connect, createRoom } from './helpers'
+import { MAX_LISTED_PER_SOURCE } from '../src/lobby'
+import { connect, createRoom, WAIT } from './helpers'
 
 const testEnv = env as unknown as Env
 
@@ -14,21 +15,27 @@ async function lobbyRooms(): Promise<PublicRoomSummary[]> {
   return (await res.json<{ rooms: PublicRoomSummary[] }>()).rooms
 }
 
+const listed = async (code: string) => (await lobbyRooms()).some((room) => room.code === code)
+
+/** A public room with its host in it (a room is only listed once somebody is). */
+async function hostedRoom(name = 'Ann') {
+  const { code, guestId } = await createRoom('public', name)
+  const host = await connect(code)
+  host.join(name, guestId)
+  await host.waitRoom(() => true)
+  await vi.waitFor(async () => expect(await listed(code)).toBe(true), WAIT)
+  return { code, guestId, host }
+}
+
 describe('public lobby', () => {
   it('lists public rooms with live seat counts and hides them once started', async () => {
-    const { code, guestId } = await createRoom('public', 'Ann')
-    await vi.waitFor(async () => {
-      const rooms = await lobbyRooms()
-      expect(rooms.map((r) => r.code)).toContain(code)
-      expect(rooms.find((r) => r.code === code)).toMatchObject({
-        hostName: 'Ann',
-        seatsTaken: 0,
-        seatsTotal: 2,
-      })
+    const { code, host } = await hostedRoom('Ann')
+    expect((await lobbyRooms()).find((r) => r.code === code)).toMatchObject({
+      hostName: 'Ann',
+      seatsTaken: 0,
+      seatsTotal: 2,
     })
 
-    const host = await connect(code)
-    host.join('Ann', guestId)
     host.send({ type: 'sit', seat: 'w' })
     await host.waitRoom((m) => m.you.seat === 'w')
     await vi.waitFor(async () => {
@@ -47,11 +54,7 @@ describe('public lobby', () => {
   })
 
   it('hides a full room even before the host starts it', async () => {
-    const { code, guestId } = await createRoom('public', 'Ann')
-    await vi.waitFor(async () => expect((await lobbyRooms()).map((r) => r.code)).toContain(code))
-
-    const host = await connect(code)
-    host.join('Ann', guestId)
+    const { code, host } = await hostedRoom('Ann')
     host.send({ type: 'sit', seat: 'w' })
     await host.waitRoom((m) => m.you.seat === 'w')
     const guest = await connect(code)
@@ -71,8 +74,7 @@ describe('public lobby', () => {
   })
 
   it('drops a room from the lobby when it expires', async () => {
-    const { code } = await createRoom('public')
-    await vi.waitFor(async () => expect((await lobbyRooms()).map((r) => r.code)).toContain(code))
+    const { code } = await hostedRoom()
     await runDurableObjectAlarm(testEnv.ROOM.getByName(code))
     await vi.waitFor(async () => {
       expect((await lobbyRooms()).map((r) => r.code)).not.toContain(code)
@@ -80,8 +82,7 @@ describe('public lobby', () => {
   })
 
   it('purges stale entries on its own alarm', async () => {
-    const { code } = await createRoom('public')
-    await vi.waitFor(async () => expect((await lobbyRooms()).map((r) => r.code)).toContain(code))
+    await hostedRoom()
     const lobby = testEnv.LOBBY.getByName('global')
     await runInDurableObject(lobby, async (_instance, state) => {
       state.storage.sql.exec('UPDATE rooms SET updated_at = ?', Date.now() - 7 * 60 * 60 * 1000)
@@ -89,6 +90,55 @@ describe('public lobby', () => {
     const ran = await runDurableObjectAlarm(lobby)
     expect(ran).toBe(true)
     expect(await lobbyRooms()).toEqual([])
+  })
+
+  it('lists nothing for a room nobody has entered, and forgets one everybody has left', async () => {
+    const { code, guestId } = await createRoom('public', 'Ghost')
+    // Made and never entered: not a table anyone can sit down with.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(await listed(code)).toBe(false)
+
+    const host = await connect(code)
+    host.join('Ghost', guestId)
+    await vi.waitFor(async () => expect(await listed(code)).toBe(true), WAIT)
+    host.ws.close()
+    await vi.waitFor(async () => expect(await listed(code)).toBe(false), WAIT)
+  })
+
+  it('stays listed while a seated player is there, though the host has gone', async () => {
+    const { code, host } = await hostedRoom('Ann')
+    const guest = await connect(code)
+    guest.join('Ben')
+    guest.send({ type: 'sit', seat: 'b' })
+    await host.waitRoom((m) => Boolean(m.snapshot.seats.b))
+    host.ws.close()
+    await guest.waitRoom((m) => m.snapshot.spectators === 0 && m.you.seat === 'b')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect((await lobbyRooms()).find((r) => r.code === code)).toMatchObject({ seatsTaken: 1 })
+  })
+
+  it('lists only a few rooms from one address at a time', async () => {
+    const lobby = testEnv.LOBBY.getByName('global')
+    const summary = (code: string): PublicRoomSummary => ({
+      code,
+      game: 'hearth',
+      hostName: 'Spam',
+      seatsTaken: 1,
+      seatsTotal: 4,
+      createdAt: Date.now(),
+      bots: 0,
+    })
+    const codes = ['SRCAA2', 'SRCAA3', 'SRCAA4', 'SRCAA5', 'SRCAA6']
+    const results = []
+    for (const code of codes) results.push(await lobby.upsert(summary(code), 'tag-of-one-address'))
+    expect(results).toEqual(codes.map((_, index) => index < MAX_LISTED_PER_SOURCE))
+    // A room already listed keeps updating, and somewhere else is not held to that count.
+    expect(await lobby.upsert({ ...summary(codes[0]), seatsTaken: 2 }, 'tag-of-one-address')).toBe(true)
+    expect(await lobby.upsert(summary('SRCAA7'), 'tag-of-another')).toBe(true)
+    const listedCodes = (await lobby.list('hearth')).map((room) => room.code)
+    expect(listedCodes).toEqual(expect.arrayContaining([...codes.slice(0, MAX_LISTED_PER_SOURCE), 'SRCAA7']))
+    for (const code of codes.slice(MAX_LISTED_PER_SOURCE)) expect(listedCodes).not.toContain(code)
+    for (const code of [...codes, 'SRCAA7']) await lobby.remove(code)
   })
 })
 
@@ -100,6 +150,7 @@ describe('bots at a public table', () => {
   }
 
   it("says how many of a public room's seats are bots", async () => {
+    const guestId = crypto.randomUUID()
     const res = await SELF.fetch('https://api.test/api/rooms', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -107,12 +158,14 @@ describe('bots at a public table', () => {
         game: 'wildrise',
         visibility: 'public',
         name: 'Ann',
-        guestId: crypto.randomUUID(),
+        guestId,
         seats: 4,
         bots: ['casual'],
       }),
     })
     const { code } = await res.json<{ code: string }>()
+    const host = await connect(code)
+    host.join('Ann', guestId)
     await vi.waitFor(async () => {
       const room = (await wildriseRooms()).find((entry) => entry.code === code)
       // A seat a bot is in is taken, but a table of bots is not a table of

@@ -150,6 +150,8 @@ export type ErrorCode =
   | 'PROMOTION_REQUIRED'
   | 'NOT_FINISHED'
   | 'CLAIM_REJECTED'
+  /** Too many frames too fast; the room drops them, and closes a socket that keeps it up. */
+  | 'RATE_LIMITED'
 
 export type ServerMessage<S = unknown> =
   | { type: 'room'; snapshot: RoomSnapshot<S>; you: YouInfo }

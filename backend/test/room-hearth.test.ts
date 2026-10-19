@@ -255,6 +255,9 @@ describe('a hearth room', () => {
     back.join('Ben', ids[1])
     await back.waitRoom((m) => m.you.seat === 'p1')
     expect((await readRecord(code))!.seats.p1?.abandoned).toBeUndefined()
+    // The table hears he is back a beat later (arrivals are told together), and
+    // that snapshot must land before the marks below, not inside them.
+    await clients[2].waitRoom((m) => m.snapshot.seats.p1?.connected === true)
 
     // Round the table: Cai, then Ann, and the turn is Ben's again.
     const round = back.mark()
@@ -397,5 +400,8 @@ describe('a hearth room', () => {
     back.join('Ben', ids[1])
     await back.waitRoom((m) => m.you.seat === 'p1')
     expect((await readRecord(code))!.seats.p1?.abandoned).toBeUndefined()
+    // The table hears he is back a beat later (arrivals are told together), and
+    // that snapshot must land before the marks below, not inside them.
+    await clients[2].waitRoom((m) => m.snapshot.seats.p1?.connected === true)
   })
 })

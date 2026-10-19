@@ -19,16 +19,20 @@ import type {
   SeatId,
   SeatInfo,
   ServerMessage,
+  YouInfo,
 } from '@games/shared/protocol'
 import type { ActiveTable } from '@games/shared/protocol'
-import { cleanName, resolveIdentity } from './auth'
+import { cleanName, resolveIdentity, verifyClerkToken } from './auth'
+import { isLocalWorker } from './cors'
 import type { Env } from './env'
 import { durationBucket, track } from './analytics'
 import { isPerson, playerHandle } from './handles'
 import { freshLedger, joinedMessage, turnAlerts, turnMessage } from './ledger'
 import type { Ledger } from './ledger'
 import { outcomeOf } from './outcome'
-import type { NotifyKind, PlayerSelf } from './player'
+import { CREDIBLE_GAMES, RATED_PER_OPPONENT_DAILY } from './player'
+import type { ChessStanding, NotifyKind, PlayerSelf } from './player'
+import { PROVISIONAL_GAMES } from './elo'
 import type { PushMessage } from './push'
 import { ReplayLog } from './replay'
 
@@ -49,6 +53,51 @@ const BOT_THINK_MS = 900
  * this is what bounds a single move's cost.
  */
 export const MAX_ROOM_SOCKETS = 24
+
+/**
+ * Sockets that have not joined yet, per room. A browser joins within a moment
+ * of opening its socket (it is waiting on its Clerk token at most), but a whole
+ * room reconnecting at once — a deploy, a network blip — opens every socket
+ * before any of their joins land, so this is a full room and then some. Past
+ * it, the room is being held open by something that is not a browser, and the
+ * oldest silent socket is let go to make room for the newest.
+ */
+export const MAX_PENDING_SOCKETS = 32
+/** How long a socket may stay open without joining. */
+export const JOIN_DEADLINE_MS = 15_000
+/** Joins one socket may try. A browser sends exactly one. */
+const MAX_JOINS_PER_SOCKET = 3
+
+/**
+ * Frames per socket: a bucket of `burst` that refills one every `refillMs`.
+ * Real play is a click or two a second, and a reconnect flushes at most
+ * sixteen queued frames after its join (`useRoom`'s outbox), so this is
+ * generous; a socket that runs it dry is told once, and one that sends another
+ * whole burst into the empty bucket is closed.
+ */
+export const MESSAGE_LIMITS = { burst: 30, refillMs: 100 } as const
+/** The longest frame a room reads. A join with a Clerk token is the biggest real one, at a couple of KB. */
+export const MAX_FRAME_CHARS = 8 * 1024
+/** WebSocket "policy violation": the close a socket earns by flooding the room. */
+const CLOSE_POLICY = 1008
+/** WebSocket "try again later": an unjoined socket timed out or let go; the browser reconnects. */
+const CLOSE_RETRY = 1013
+
+/**
+ * How long a change that only moves people — someone arriving, someone
+ * leaving — waits to be told to the room, so a crowd reconnecting at once is
+ * told in one snapshot rather than one each: k sockets coming back cost the
+ * room about 2k sends instead of k². Imperceptible as a dot turning green.
+ */
+export const PRESENCE_COALESCE_MS = 40
+/** At most one lobby update per this long, carrying the table as it stands when it goes. */
+const LOBBY_THROTTLE_MS = 250
+
+/** Close codes a server may send back; anything else (1005, 1006, 1015…) is answered as a plain 1000. */
+const sendableClose = (code: number) =>
+  (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999)
+    ? code
+    : 1000
 
 /**
  * How often a room that is still playing the same bots repeats itself to the
@@ -135,10 +184,26 @@ export interface RoomRecord {
   forfeited?: SeatId[]
   /** What the room has already told players' records, analytics and push (see ledger.ts). */
   ledger?: Ledger
+  /**
+   * Where the room was made from, as a one-way tag (see `sourceTag`), so the
+   * lobby can cap how many public rooms one address lists. Never the address.
+   */
+  source?: string
 }
 
+/**
+ * What a socket carries through hibernation. A socket with no `player` has not
+ * joined yet; one accepted before `at` was recorded has neither, and is
+ * treated as joined-or-not by `player` alone.
+ */
 interface Attachment {
-  player: PlayerInfo
+  /** When the room accepted the socket: it has `JOIN_DEADLINE_MS` from here to join. */
+  at?: number
+  /** Reached through a dev server (`isLocalWorker`), which also admits localhost pages' tokens. */
+  local?: boolean
+  /** Joins tried on this socket. */
+  joins?: number
+  player?: PlayerInfo
   /** Joined saying it understands `reaction` frames (see `ClientFeature`). */
   reactions?: boolean
 }
@@ -199,17 +264,53 @@ export class RoomDO extends DurableObject<Env> {
    */
   private departed = new WeakSet<WebSocket>()
   /**
-   * Each socket's reaction allowance (see `REACTION_LIMITS`). In memory only:
+   * Each person's reaction allowance (see `REACTION_LIMITS`), by player id, so
+   * a second tab or a reconnect does not hand them a fresh one. In memory only:
    * an evicted room forgets it, which hands everyone a full bucket — harmless.
+   * Emptied when the last person leaves.
    */
-  private reactionBuckets = new WeakMap<WebSocket, { tokens: number; at: number }>()
+  private reactionBuckets = new Map<string, { tokens: number; at: number }>()
   private reactionSeq = 0
+  /** Each socket's frame allowance (see `MESSAGE_LIMITS`); `warned` once it has been told it ran dry. */
+  private messageBuckets = new WeakMap<WebSocket, { tokens: number; at: number; warned: boolean }>()
+  /** Closes sockets that never joined (see `JOIN_DEADLINE_MS`). */
+  private sweepTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Presence changes are counted, and each socket remembers the count it was
+   * last sent a snapshot at; a coalesced presence broadcast only goes to the
+   * sockets behind it (see `PRESENCE_COALESCE_MS`).
+   */
+  private presenceVersion = 0
+  private presenceSent = new WeakMap<WebSocket, number>()
+  private presenceTimer: ReturnType<typeof setTimeout> | null = null
+  /** The lobby's last word on this room (a summary, or `null` for "not listed"), as JSON. */
+  private lobbyShown: string | undefined
+  private lobbyTimer: ReturnType<typeof setTimeout> | null = null
   /** Every state each game passes through, as a spectator saw it (see replay.ts). */
   private replay = new ReplayLog(this.ctx.storage.sql)
 
   /** The sockets still in the room: everything workerd lists, less the ones leaving it. */
   private sockets(): WebSocket[] {
     return this.ctx.getWebSockets().filter((ws) => !this.departed.has(ws))
+  }
+
+  private attachment(ws: WebSocket): Attachment {
+    return (ws.deserializeAttachment() as Attachment | null) ?? {}
+  }
+
+  /** Who joined on this socket, or null while it has not. */
+  private member(ws: WebSocket): PlayerInfo | null {
+    return this.attachment(ws).player ?? null
+  }
+
+  /** Close a socket from this side; it stops counting as here at once. */
+  private drop(ws: WebSocket, code: number, reason: string): void {
+    this.departed.add(ws)
+    try {
+      ws.close(code, reason)
+    } catch {
+      // Already closing.
+    }
   }
 
   private async load(): Promise<RoomRecord | null> {
@@ -375,6 +476,14 @@ export class RoomDO extends DurableObject<Env> {
    * people is rated, once both have moved — a game abandoned before it began is
    * recorded but leaves both numbers alone; each record moves its own rating
    * against the other's as it stood going in.
+   *
+   * A guest identity costs nothing, so a rating could be farmed by beating a
+   * fresh one in a private window over and over. Each side's rating only moves
+   * against an opponent worth rating against — signed in, or a guest with
+   * `CREDIBLE_GAMES` finished games behind them — unless that side is still
+   * provisional itself, which is what lets two newcomers' first games count;
+   * and only `RATED_PER_OPPONENT_DAILY` times a day against the same person.
+   * Anything past that is recorded, unrated.
    */
   private async recordFinish(finished: FinishedGame): Promise<void> {
     const outcome = outcomeOf(finished.game, finished.gameState, finished.seatIds, finished.forfeited)
@@ -386,19 +495,37 @@ export class RoomDO extends DurableObject<Env> {
     const handles = new Map<SeatId, string>()
     for (const seat of people) handles.set(seat, await playerHandle(finished.seats[seat]!.player.id))
     const history = (finished.gameState as { history?: unknown[] } | null)?.history
-    const rated =
+    const ratable =
       finished.game === 'chess' &&
       people.length === 2 &&
       finished.seatIds.length === 2 &&
       Array.isArray(history) &&
       history.length >= 2
-    const ratings = new Map<SeatId, number>()
-    if (rated)
+    const opponentOf = (seat: SeatId) => people.find((other) => other !== seat)
+    const standings = new Map<SeatId, ChessStanding>()
+    if (ratable)
       for (const seat of people)
-        ratings.set(seat, (await this.env.PLAYER.getByName(handles.get(seat)!).chessRating()).rating)
+        standings.set(
+          seat,
+          await this.env.PLAYER.getByName(handles.get(seat)!).chessRating(
+            handles.get(opponentOf(seat)!),
+            finished.at,
+          ),
+        )
+    const ratedFor = (seat: SeatId): boolean => {
+      const other = opponentOf(seat)
+      if (!ratable || !other) return false
+      const mine = standings.get(seat)!,
+        theirs = standings.get(other)!
+      const credible =
+        !finished.seats[other]!.player.isGuest ||
+        theirs.played >= CREDIBLE_GAMES ||
+        mine.games < PROVISIONAL_GAMES
+      return credible && mine.againstToday < RATED_PER_OPPONENT_DAILY
+    }
     await Promise.all(
       people.map((seat) => {
-        const opponent = people.find((other) => other !== seat)
+        const opponent = opponentOf(seat)
         return this.env.PLAYER.getByName(handles.get(seat)!).record({
           self: selfOf(finished.seats[seat]!.player),
           game: finished.game,
@@ -417,7 +544,9 @@ export class RoomDO extends DurableObject<Env> {
                 : { name: stored.player.name, ...(handle ? { handle } : {}) }
             }),
           at: finished.at,
-          ...(rated && opponent ? { rated: { opponent: ratings.get(opponent)! } } : {}),
+          ...(opponent && ratedFor(seat)
+            ? { rated: { opponent: standings.get(opponent)!.rating, against: handles.get(opponent) } }
+            : {}),
         })
       }),
     )
@@ -576,29 +705,60 @@ export class RoomDO extends DurableObject<Env> {
     return record ? this.replay.read(record.expiresAt) : null
   }
 
-  /** Fire-and-forget: lobby staleness is tolerable, gameplay latency is not. */
-  private pushLobby(record: RoomRecord): void {
-    if (record.visibility !== 'public') return
+  /**
+   * Bring the lobby round to this room, at most once per `LOBBY_THROTTLE_MS`
+   * however many seats change in between. Fire-and-forget: lobby staleness is
+   * tolerable, gameplay latency is not.
+   */
+  private syncLobby(record: RoomRecord): void {
+    if (record.visibility !== 'public' || this.lobbyTimer) return
+    this.lobbyTimer = setTimeout(() => {
+      this.lobbyTimer = null
+      this.pushLobby()
+    }, LOBBY_THROTTLE_MS)
+  }
+
+  /**
+   * A public room is listed while it is open, and only while somebody is
+   * actually there: its host, or a person in a seat, connected. A room made and
+   * never entered is not a table anyone can sit down with, and listing it from
+   * the moment it was made let a script fill the lobby with names for hours.
+   * The lobby itself hides a room with no free seat.
+   */
+  private pushLobby(): void {
+    const record = this.cached
+    if (!record || record.visibility !== 'public') return
+    const connected = this.connectedIds()
+    const attended =
+      connected.has(record.hostId) ||
+      record.seatIds.some((seat) => {
+        const stored = record.seats[seat]
+        return stored && !stored.bot && connected.has(stored.player.id)
+      })
+    const summary =
+      record.status === 'open' && attended
+        ? {
+            code: record.code,
+            game: record.game,
+            hostName: record.hostName,
+            seatsTaken: record.seatIds.filter((seat) => record.seats[seat]).length,
+            seatsTotal: record.seatsTotal,
+            createdAt: record.createdAt,
+            // A seat a bot is in is taken, but a table of bots is not a table of
+            // people — the lobby says both numbers rather than implying the wrong one.
+            bots: record.seatIds.filter((seat) => record.seats[seat]?.bot).length,
+          }
+        : null
+    const shown = JSON.stringify(summary)
+    if (shown === this.lobbyShown) return
+    this.lobbyShown = shown
     const lobby = this.env.LOBBY.getByName('global')
-    if (record.status === 'open') {
-      const seatsTaken = record.seatIds.filter((seat) => record.seats[seat]).length
-      // A seat a bot is in is taken, but a table of bots is not a table of
-      // people — the lobby says both numbers rather than implying the wrong one.
-      const bots = record.seatIds.filter((seat) => record.seats[seat]?.bot).length
-      this.ctx.waitUntil(
-        lobby.upsert({
-          code: record.code,
-          game: record.game,
-          hostName: record.hostName,
-          seatsTaken,
-          seatsTotal: record.seatsTotal,
-          createdAt: record.createdAt,
-          bots,
-        }),
-      )
-    } else {
-      this.ctx.waitUntil(lobby.remove(record.code))
-    }
+    this.ctx.waitUntil(
+      (summary ? lobby.upsert(summary, record.source ?? null) : lobby.remove(record.code)).catch(() => {
+        // Told nothing after all: try again on the next change.
+        this.lobbyShown = undefined
+      }),
+    )
   }
 
   async create(input: {
@@ -610,6 +770,7 @@ export class RoomDO extends DurableObject<Env> {
     options: unknown
     bots: string[]
     autoStart: boolean
+    source?: string | null
   }): Promise<boolean> {
     // `false` means "that code is taken"; an unregistered game is a caller bug,
     // and the router has already refused those.
@@ -642,21 +803,72 @@ export class RoomDO extends DurableObject<Env> {
       }
     })
     if (input.autoStart) record.autoStart = true
+    if (input.source) record.source = input.source
+    // Not listed yet, public or not: see `pushLobby`.
     await this.save(record)
-    this.pushLobby(record)
     return true
   }
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket')
       return new Response('expected websocket', { status: 426 })
+    const record = await this.load()
+    const now = Date.now()
+    if (record) {
+      this.sweepPending(now)
+      // Too many sockets sitting here without joining: the oldest go, so
+      // whatever is holding them open cannot keep a real player's out.
+      const pending = this.sockets()
+        .filter((ws) => !this.member(ws))
+        .sort((a, b) => (this.attachment(a).at ?? 0) - (this.attachment(b).at ?? 0))
+      for (const ws of pending.slice(0, Math.max(0, pending.length - MAX_PENDING_SOCKETS + 1)))
+        this.drop(ws, CLOSE_RETRY, 'JOIN_TIMEOUT')
+    }
     const pair = new WebSocketPair()
     this.ctx.acceptWebSocket(pair[1])
-    if (!(await this.load())) {
+    pair[1].serializeAttachment({
+      at: now,
+      ...(isLocalWorker(request.url) ? { local: true } : {}),
+    } satisfies Attachment)
+    if (!record) {
       this.fail(pair[1], 'ROOM_NOT_FOUND', 'This room does not exist or has expired.')
       pair[1].close(CLOSE_CODES.notFound, 'ROOM_NOT_FOUND')
-    }
+    } else this.armSweep(now)
     return new Response(null, { status: 101, webSocket: pair[0] })
+  }
+
+  /** Close every socket that has sat here past `JOIN_DEADLINE_MS` without joining. */
+  private sweepPending(now: number): void {
+    for (const ws of this.sockets()) {
+      const { at, player } = this.attachment(ws)
+      if (!player && at !== undefined && now - at >= JOIN_DEADLINE_MS)
+        this.drop(ws, CLOSE_RETRY, 'JOIN_TIMEOUT')
+    }
+  }
+
+  /**
+   * Wake up when the oldest unjoined socket's deadline passes. A timer rather
+   * than the alarm, whose one slot belongs to the game and the room's expiry;
+   * a room with a timer pending does not hibernate, which costs at most the
+   * deadline itself, and a room evicted with one pending sweeps on its next
+   * socket instead.
+   */
+  private armSweep(now: number): void {
+    if (this.sweepTimer) return
+    const deadlines = this.sockets().flatMap((ws) => {
+      const { at, player } = this.attachment(ws)
+      return !player && at !== undefined ? [at + JOIN_DEADLINE_MS] : []
+    })
+    if (!deadlines.length) return
+    this.sweepTimer = setTimeout(
+      () => {
+        this.sweepTimer = null
+        const at = Date.now()
+        this.sweepPending(at)
+        this.armSweep(at)
+      },
+      Math.max(0, Math.min(...deadlines) - now) + 50,
+    )
   }
 
   private fail(ws: WebSocket, code: ErrorCode, message: string): void {
@@ -667,8 +879,8 @@ export class RoomDO extends DurableObject<Env> {
   private connectedIds(): Set<string> {
     const ids = new Set<string>()
     for (const ws of this.sockets()) {
-      const attachment = ws.deserializeAttachment() as Attachment | null
-      if (attachment) ids.add(attachment.player.id)
+      const player = this.member(ws)
+      if (player) ids.add(player.id)
     }
     return ids
   }
@@ -676,7 +888,7 @@ export class RoomDO extends DurableObject<Env> {
   /** Sockets that have joined, other than `except` — the one asking to. */
   private joinedSockets(except: WebSocket): number {
     let count = 0
-    for (const ws of this.sockets()) if (ws !== except && ws.deserializeAttachment()) count++
+    for (const ws of this.sockets()) if (ws !== except && this.member(ws)) count++
     return count
   }
 
@@ -686,8 +898,11 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /** Seat players are stripped down to public fields; only `gameState` is per-viewer. */
-  private snapshot(record: RoomRecord, viewerSeat: SeatId | null): RoomSnapshot {
-    const connected = this.connectedIds()
+  private snapshot(
+    record: RoomRecord,
+    viewerSeat: SeatId | null,
+    connected: Set<string> = this.connectedIds(),
+  ): RoomSnapshot {
     // Everyone here who holds no seat: people, not tabs, so one watcher with two
     // windows open is one.
     const seated = new Set(record.seatIds.map((seat) => record.seats[seat]?.player.id))
@@ -729,30 +944,90 @@ export class RoomDO extends DurableObject<Env> {
     }
   }
 
-  private broadcast(record: RoomRecord): void {
-    // One snapshot per distinct viewpoint: redaction is pure, so every seat
-    // needs it built once and all the spectators share a single `null` view.
-    const views = new Map<SeatId | null, RoomSnapshot>()
-    for (const ws of this.sockets()) {
-      const attachment = ws.deserializeAttachment() as Attachment | null
-      if (!attachment) continue
-      const seat = this.seatOf(record, attachment.player.id)
-      let snapshot = views.get(seat)
-      if (!snapshot) views.set(seat, (snapshot = this.snapshot(record, seat)))
-      const message: ServerMessage = {
-        type: 'room',
-        snapshot,
-        you: {
-          id: attachment.player.id,
-          seat,
-          isHost: attachment.player.id === record.hostId,
-        },
-      }
-      ws.send(JSON.stringify(message))
+  /**
+   * Send the room as it stands. Everyone, by default — which also settles any
+   * presence broadcast still waiting, since this one carries the same news. With
+   * `only`, just those sockets; with `stale`, just the sockets a presence change
+   * has happened behind (see `presenceSoon`).
+   */
+  private broadcast(
+    record: RoomRecord,
+    { only, stale = false }: { only?: WebSocket[]; stale?: boolean } = {},
+  ): void {
+    if (!only && !stale && this.presenceTimer) {
+      clearTimeout(this.presenceTimer)
+      this.presenceTimer = null
+    }
+    const connected = this.connectedIds()
+    // One snapshot per distinct viewpoint, serialised once: redaction is pure,
+    // so every seat needs it built once and all the spectators share a single
+    // `null` view. Only `you` differs per socket, and it is spliced in.
+    const views = new Map<SeatId | null, string>()
+    for (const ws of only ?? this.sockets()) {
+      const player = this.member(ws)
+      if (!player) continue
+      if (stale && (this.presenceSent.get(ws) ?? -1) >= this.presenceVersion) continue
+      const seat = this.seatOf(record, player.id)
+      let json = views.get(seat)
+      if (json === undefined) views.set(seat, (json = JSON.stringify(this.snapshot(record, seat, connected))))
+      const you: YouInfo = { id: player.id, seat, isHost: player.id === record.hostId }
+      ws.send(`{"type":"room","snapshot":${json},"you":${JSON.stringify(you)}}`)
+      this.presenceSent.set(ws, this.presenceVersion)
     }
   }
 
+  /**
+   * Somebody arrived or left, and nothing else changed: tell the room once
+   * `PRESENCE_COALESCE_MS` have passed, in one broadcast for however many
+   * came and went meanwhile — and only to the sockets that have not already
+   * been sent a snapshot since. Anything that broadcasts in between carries
+   * the news itself and cancels this.
+   */
+  private presenceSoon(): void {
+    this.presenceVersion++
+    if (this.presenceTimer) return
+    this.presenceTimer = setTimeout(() => {
+      this.presenceTimer = null
+      const record = this.cached
+      if (record) this.broadcast(record, { stale: true })
+    }, PRESENCE_COALESCE_MS)
+  }
+
+  /**
+   * Whether `ws` may send another frame (see `MESSAGE_LIMITS`). A frame over
+   * the allowance is dropped; the first is answered with `RATE_LIMITED`, and
+   * a socket that keeps going until it owes a whole burst is closed.
+   */
+  private allow(ws: WebSocket): boolean {
+    const now = Date.now()
+    const bucket = this.messageBuckets.get(ws) ?? { tokens: MESSAGE_LIMITS.burst, at: now, warned: false }
+    bucket.tokens = Math.min(
+      MESSAGE_LIMITS.burst,
+      bucket.tokens + (now - bucket.at) / MESSAGE_LIMITS.refillMs,
+    )
+    bucket.at = now
+    this.messageBuckets.set(ws, bucket)
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1
+      bucket.warned = false
+      return true
+    }
+    bucket.tokens -= 1
+    if (bucket.tokens <= -MESSAGE_LIMITS.burst) {
+      this.drop(ws, CLOSE_POLICY, 'RATE_LIMITED')
+      this.ctx.waitUntil(this.handleDeparture(ws))
+    } else if (!bucket.warned) {
+      bucket.warned = true
+      this.fail(ws, 'RATE_LIMITED', 'Too many messages at once — slow down a little.')
+    }
+    return false
+  }
+
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    if (this.departed.has(ws) || !this.allow(ws)) return
+    // Measured before parsing, so a megabyte of JSON costs the room nothing but this.
+    if ((typeof raw === 'string' ? raw.length : raw.byteLength) > MAX_FRAME_CHARS)
+      return this.fail(ws, 'BAD_MESSAGE', 'That message is too large.')
     const record = await this.load()
     if (!record) {
       this.fail(ws, 'ROOM_NOT_FOUND', 'This room does not exist or has expired.')
@@ -772,27 +1047,27 @@ export class RoomDO extends DurableObject<Env> {
     // No TTL refresh here: `save()` re-arms the alarm on every mutation, and a
     // room whose only traffic is non-mutating messages has nothing worth keeping.
     if (message.type === 'join') return this.handleJoin(ws, record, message)
-    const attachment = ws.deserializeAttachment() as Attachment | null
-    if (!attachment) return this.fail(ws, 'NOT_JOINED', 'Send a join message first.')
+    const player = this.member(ws)
+    if (!player) return this.fail(ws, 'NOT_JOINED', 'Send a join message first.')
     switch (message.type) {
       case 'sit':
-        return this.handleSit(ws, record, attachment.player, message.seat)
+        return this.handleSit(ws, record, player, message.seat)
       case 'leaveSeat':
-        return this.handleLeaveSeat(ws, record, attachment.player)
+        return this.handleLeaveSeat(ws, record, player)
       case 'start':
-        return this.handleStart(ws, record, attachment.player)
+        return this.handleStart(ws, record, player)
       case 'action':
-        return this.handleAction(ws, record, attachment.player, message.action)
+        return this.handleAction(ws, record, player, message.action)
       case 'rematch':
-        return this.handleRematch(ws, record, attachment.player)
+        return this.handleRematch(ws, record, player)
       case 'claim':
-        return this.handleClaim(ws, record, attachment.player)
+        return this.handleClaim(ws, record, player)
       case 'addBot':
-        return this.handleAddBot(ws, record, attachment.player, message.seat, message.skill)
+        return this.handleAddBot(ws, record, player, message.seat, message.skill)
       case 'removeBot':
-        return this.handleRemoveBot(ws, record, attachment.player, message.seat)
+        return this.handleRemoveBot(ws, record, player, message.seat)
       case 'react':
-        return this.handleReact(ws, record, attachment.player, message.reaction)
+        return this.handleReact(ws, record, player, message.reaction)
       default:
         return this.fail(ws, 'BAD_MESSAGE', 'Unknown message type.')
     }
@@ -803,11 +1078,21 @@ export class RoomDO extends DurableObject<Env> {
     record: RoomRecord,
     message: Extract<ClientMessage, { type: 'join' }>,
   ): Promise<void> {
+    // One join per socket, as a browser sends: a socket is one person. A few
+    // tries are allowed for the ones that fail; past that, verifying tokens
+    // for it is work the room will not keep doing.
+    const attachment = this.attachment(ws)
+    if (attachment.player) return this.fail(ws, 'BAD_MESSAGE', 'Already joined.')
+    const joins = (attachment.joins ?? 0) + 1
+    if (joins > MAX_JOINS_PER_SOCKET) return this.drop(ws, CLOSE_POLICY, 'TOO_MANY_JOINS')
+    ws.serializeAttachment({ ...attachment, joins } satisfies Attachment)
     if (message.protocol !== PROTOCOL_VERSION)
       return this.fail(ws, 'PROTOCOL_MISMATCH', 'Please refresh to get the latest version.')
     if (!cleanName(message.name)) return this.fail(ws, 'BAD_MESSAGE', 'A display name is required.')
-    const player = await resolveIdentity(message, this.env)
+    const player = await resolveIdentity(message, this.env, verifyClerkToken, attachment.local === true)
     if (!player) return this.fail(ws, 'BAD_TOKEN', 'Could not verify your identity.')
+    // The socket may have gone, or joined on a second frame, while the token was checked.
+    if (this.departed.has(ws) || this.member(ws)) return
     const seat = this.seatOf(record, player.id)
     // Somebody without a seat watches — at a full table, a game under way, a
     // finished one — and is sent the view nobody is sitting behind. Only a room
@@ -818,7 +1103,11 @@ export class RoomDO extends DurableObject<Env> {
       return
     }
     const reactions = Array.isArray(message.features) && message.features.includes('reactions')
-    ws.serializeAttachment({ player, ...(reactions ? { reactions: true } : {}) } satisfies Attachment)
+    ws.serializeAttachment({
+      ...this.attachment(ws),
+      player,
+      ...(reactions ? { reactions: true } : {}),
+    } satisfies Attachment)
     if (seat) {
       if (record.status === 'playing' && record.seats[seat]!.disconnectedAt)
         track(this.env, 'player_back', { game: record.game, detail: 'mid-game' })
@@ -842,7 +1131,11 @@ export class RoomDO extends DurableObject<Env> {
       record.seats[free[0]] = { player, wantsRematch: false }
       return this.startGame(record)
     }
-    this.broadcast(record)
+    // The newcomer hears at once; everyone else hears they arrived with
+    // whoever else arrives in the same few milliseconds.
+    this.presenceSoon()
+    this.broadcast(record, { only: [ws] })
+    this.syncLobby(record)
   }
 
   private async handleSit(
@@ -860,7 +1153,7 @@ export class RoomDO extends DurableObject<Env> {
     if (previous && previous !== seat) delete record.seats[previous]
     record.seats[seat] = { player, wantsRematch: false }
     await this.save(record)
-    this.pushLobby(record)
+    this.syncLobby(record)
     this.broadcast(record)
     // Somebody sat down at a table its host has stepped away from.
     if (
@@ -883,7 +1176,7 @@ export class RoomDO extends DurableObject<Env> {
     if (!seat) return this.fail(ws, 'NOT_SEATED', 'You are not seated.')
     delete record.seats[seat]
     await this.save(record)
-    this.pushLobby(record)
+    this.syncLobby(record)
     this.broadcast(record)
   }
 
@@ -935,7 +1228,7 @@ export class RoomDO extends DurableObject<Env> {
       bot: { skill: chosen },
     }
     await this.save(record)
-    this.pushLobby(record)
+    this.syncLobby(record)
     this.broadcast(record)
   }
 
@@ -952,7 +1245,7 @@ export class RoomDO extends DurableObject<Env> {
     if (!record.seats[seat]?.bot) return this.fail(ws, 'NOT_ALLOWED', 'That seat is not a bot.')
     delete record.seats[seat]
     await this.save(record)
-    this.pushLobby(record)
+    this.syncLobby(record)
     this.broadcast(record)
   }
 
@@ -968,10 +1261,10 @@ export class RoomDO extends DurableObject<Env> {
     const seat = this.seatOf(record, player.id)
     const limit = seat ? REACTION_LIMITS.seated : REACTION_LIMITS.watching
     const now = Date.now()
-    const bucket = this.reactionBuckets.get(ws) ?? { tokens: limit.burst, at: now }
+    const bucket = this.reactionBuckets.get(player.id) ?? { tokens: limit.burst, at: now }
     bucket.tokens = Math.min(limit.burst, bucket.tokens + (now - bucket.at) / limit.refillMs)
     bucket.at = now
-    this.reactionBuckets.set(ws, bucket)
+    this.reactionBuckets.set(player.id, bucket)
     if (bucket.tokens < 1) return
     bucket.tokens -= 1
     const frame = JSON.stringify({
@@ -981,10 +1274,7 @@ export class RoomDO extends DurableObject<Env> {
       id: `${now.toString(36)}-${(++this.reactionSeq).toString(36)}`,
       at: now,
     } satisfies ServerMessage)
-    for (const socket of this.sockets()) {
-      const attachment = socket.deserializeAttachment() as Attachment | null
-      if (attachment?.reactions) socket.send(frame)
-    }
+    for (const socket of this.sockets()) if (this.attachment(socket).reactions) socket.send(frame)
     track(this.env, 'reaction', { game: record.game, detail: reaction, value: seat ? 0 : 1 })
   }
 
@@ -1030,7 +1320,7 @@ export class RoomDO extends DurableObject<Env> {
       ),
     )
     await this.save(record)
-    this.pushLobby(record)
+    this.syncLobby(record)
     this.broadcast(record)
   }
 
@@ -1155,10 +1445,14 @@ export class RoomDO extends DurableObject<Env> {
     this.broadcast(record)
   }
 
-  /** A socket went away: stamp any seat that just lost its last connection, then tell everyone. */
-  private async handleDeparture(): Promise<void> {
+  /**
+   * A socket went away: stamp any seat that just lost its last connection, then
+   * tell everyone — with whoever else leaves in the same few milliseconds (see
+   * `presenceSoon`). A socket that never joined was nobody anyone could see.
+   */
+  private async handleDeparture(ws: WebSocket): Promise<void> {
     const record = await this.load()
-    if (!record) return
+    if (!record || !this.member(ws)) return
     const connected = this.connectedIds()
     let changed = false
     for (const seat of record.seatIds) {
@@ -1172,17 +1466,30 @@ export class RoomDO extends DurableObject<Env> {
       }
     }
     if (changed) await this.save(record)
-    this.broadcast(record)
+    if (!connected.size) this.reactionBuckets.clear()
+    this.presenceSoon()
+    this.syncLobby(record)
   }
 
-  async webSocketClose(ws: WebSocket): Promise<void> {
+  /**
+   * The browser closed its socket. The close is answered — the runtime does
+   * not do it for us, and a browser whose close goes unanswered sits in
+   * CLOSING for ten seconds or so before it gives up, reconnects, and only
+   * then gets its table back.
+   */
+  async webSocketClose(ws: WebSocket, code: number): Promise<void> {
     this.departed.add(ws)
-    await this.handleDeparture()
+    try {
+      ws.close(sendableClose(code), 'bye')
+    } catch {
+      // Already answered.
+    }
+    await this.handleDeparture(ws)
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
     this.departed.add(ws)
-    await this.handleDeparture()
+    await this.handleDeparture(ws)
   }
 
   async alarm(): Promise<void> {

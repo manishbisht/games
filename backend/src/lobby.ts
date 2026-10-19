@@ -4,6 +4,12 @@ import type { Env } from './env'
 
 const STALE_MS = 6 * 60 * 60 * 1000
 const PURGE_INTERVAL_MS = 60 * 60 * 1000
+/**
+ * Public rooms one address may have listed at once. A person hosts one table,
+ * maybe a second while the first fills; the lobby shows fifty, and one script
+ * should not be able to fill them all with whatever name it likes.
+ */
+export const MAX_LISTED_PER_SOURCE = 3
 
 interface Row extends Record<string, SqlStorageValue> {
   code: string
@@ -49,6 +55,10 @@ export function migrate(sql: SqlStorage): void {
   // A constant default is what makes ADD COLUMN legal on a non-empty table.
   if (!columns.some((column) => column.name === 'bots'))
     sql.exec('ALTER TABLE rooms ADD COLUMN bots INTEGER NOT NULL DEFAULT 0')
+  // Where the room was made from, as a one-way tag (see `sourceTag`); null for loopback.
+  if (!columns.some((column) => column.name === 'source'))
+    sql.exec('ALTER TABLE rooms ADD COLUMN source TEXT')
+  sql.exec('CREATE INDEX IF NOT EXISTS rooms_source ON rooms (source, updated_at)')
 }
 
 export class LobbyDO extends DurableObject<Env> {
@@ -58,10 +68,30 @@ export class LobbyDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => migrate(this.ctx.storage.sql))
   }
 
-  async upsert(summary: PublicRoomSummary): Promise<void> {
-    this.ctx.storage.sql.exec(
-      `INSERT INTO rooms (code, game, host_name, seats_taken, seats_total, created_at, updated_at, bots)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  /**
+   * List a room, or bring its listing up to date. Answers false when the room
+   * is not listed because its address already has `MAX_LISTED_PER_SOURCE`
+   * rooms here: it is still a room anyone with the code can join, just not
+   * one the lobby offers.
+   */
+  async upsert(summary: PublicRoomSummary, source: string | null = null): Promise<boolean> {
+    const sql = this.ctx.storage.sql
+    if (source !== null) {
+      const listed = sql.exec('SELECT 1 FROM rooms WHERE code = ?', summary.code).toArray().length > 0
+      const others = listed
+        ? 0
+        : sql
+            .exec<{ n: number }>(
+              'SELECT COUNT(*) AS n FROM rooms WHERE source = ? AND updated_at > ?',
+              source,
+              Date.now() - STALE_MS,
+            )
+            .one().n
+      if (others >= MAX_LISTED_PER_SOURCE) return false
+    }
+    sql.exec(
+      `INSERT INTO rooms (code, game, host_name, seats_taken, seats_total, created_at, updated_at, bots, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(code) DO UPDATE SET
          host_name = excluded.host_name,
          seats_taken = excluded.seats_taken,
@@ -75,9 +105,11 @@ export class LobbyDO extends DurableObject<Env> {
       summary.createdAt,
       Date.now(),
       summary.bots,
+      source,
     )
     if ((await this.ctx.storage.getAlarm()) === null)
       await this.ctx.storage.setAlarm(Date.now() + PURGE_INTERVAL_MS)
+    return true
   }
 
   async remove(code: string): Promise<void> {
