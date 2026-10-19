@@ -36,7 +36,7 @@ import { PALETTES, PLAYER_IDS } from '@games/shared/wildrise/board'
 import { createGame } from '@games/shared/wildrise'
 import { companionNames } from '@games/shared/wildrise/online'
 import { CLAIM_WIN_AFTER_MS } from '@games/shared/protocol'
-import { sound, unlockAudio } from './game/audio'
+import { sound } from './game/audio'
 import type { Cue } from './game/audio'
 import type { GameConfig, GameState, Player } from '@games/shared/wildrise/types'
 import { useCountUp, useHeld } from '../../motion/hooks'
@@ -260,12 +260,11 @@ function Table({
   }, [])
   const doRoll = useCallback(() => {
     if (!canRoll) return
-    if (soundOn) unlockAudio()
     // The die is the server's to throw, so this only ever asks for one — and
     // rattles it in the hand until the number comes back.
     board.current?.rolling()
     online?.send.roll()
-  }, [canRoll, soundOn, online])
+  }, [canRoll, online])
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (
@@ -285,8 +284,8 @@ function Table({
   // Sound is cued by the board as each thing happens on screen, so a snapshot
   // that only says someone came or went plays nothing.
   const onCue = useCallback(
-    (cue: Cue, n?: number) => {
-      if (!menu && soundOn) sound(cue, n)
+    (cue: Cue, n?: number, pan?: number) => {
+      if (!menu && soundOn) sound(cue, n, pan)
     },
     [menu, soundOn],
   )
@@ -321,10 +320,6 @@ function Table({
     : `${game.events[0]?.message ?? ''}${
         game.phase === 'ready' ? (myTurn ? ' Your turn to roll.' : ` ${current.name}’s turn.`) : ''
       }`
-  const start = () => {
-    if (soundOn) unlockAudio()
-    onStart()
-  }
   return (
     <div className="wr-app">
       <header className="wr-header">
@@ -352,10 +347,7 @@ function Table({
             className="wr-icon-button"
             aria-label={soundOn ? 'Mute sound' : 'Turn sound on'}
             title={soundOn ? 'Mute sound' : 'Turn sound on'}
-            onClick={() => {
-              if (!soundOn) unlockAudio()
-              setSoundOn(!soundOn)
-            }}
+            onClick={() => setSoundOn(!soundOn)}
           >
             {soundOn ? <Volume2 size={19} /> : <VolumeX size={19} />}
           </button>
@@ -398,6 +390,7 @@ function Table({
             <BoardScene
               ref={board}
               state={game}
+              timing={online?.timing}
               running={!hidden}
               canRoll={canRoll}
               onRoll={doRoll}
@@ -458,7 +451,7 @@ function Table({
         </section>
         <aside className="wr-sidebar">
           {menu ? (
-            <Setup options={options} onChange={onOptions} onStart={start} disabled={startDisabled} />
+            <Setup options={options} onChange={onOptions} onStart={onStart} disabled={startDisabled} />
           ) : (
             <>
               <section className="wr-players" aria-labelledby="wr-players-title">
