@@ -68,9 +68,8 @@ export function createStory(
   live: boolean,
 ) {
   const { stage, tweens } = ctx
-  const queue = createQueue({ catchUpAfter: Infinity })
-  /** States handed to the queue that it has not finished presenting. */
-  let backlog = 0
+  /** Counted per state, so its backlog is the states handed over that it has not finished presenting. */
+  const queue = createQueue({ catchUpAfter: Infinity, countBy: 'push' })
   let target = initial,
     shown = initial,
     shakenTurn = -1,
@@ -78,16 +77,20 @@ export function createStory(
     walked = '',
     /** When this browser started a rattle the room has not answered yet. */
     localShakeAt = -1,
-    celebrated = false
+    celebrated = false,
+    /** Wall time the stage's clock skipped over in long frames (`takeDrift`), which the room did not. */
+    drifted = 0
   /** Where each piece will be once the queued beats have played. */
   const planned = new Map<string, number>()
 
   const mine = () =>
     live && shown.phase === 'choose' && seat !== null && shown.players[shown.currentPlayer]?.id === seat
   const tell = () => report({ ...shown, pieces: pieces.shown(shown) })
-  /** How far behind the room's clock a beat that began at `beatAt` (scene time) is starting. */
+  /** The room's clock, as near as the board can keep it: scene time plus whatever long frames skipped. */
+  const roomNow = () => stage.now + drifted
+  /** How far behind the room's clock a beat that began at `beatAt` (`roomNow` time) is starting. */
   const lateBy = (beatAt: number) => {
-    const late = stage.now - beatAt
+    const late = roomNow() - beatAt
     return late > LATE_SLACK_MS ? late : 0
   }
 
@@ -129,7 +132,6 @@ export function createStory(
   function snap(state: GameState, elapsed: number) {
     queue.clear()
     tweens.cancelAll()
-    backlog = 0
     const motion = state.phase === 'moving' ? state.motion : null
     // Mid-walk, the board starts from where the walk began.
     const before = new Map<string, number>(
@@ -145,7 +147,7 @@ export function createStory(
     }
     pieces.layout()
     pieces.seat()
-    const beatAt = stage.now - elapsed,
+    const beatAt = roomNow() - elapsed,
       value = state.dice || state.lastDice || 1,
       tossing =
         state.dice !== null && (state.phase === 'choose' || state.phase === 'pass') && elapsed < THROW_MS
@@ -181,15 +183,14 @@ export function createStory(
     const prev = target
     target = next
     if (freshGame(prev, next)) return snap(next, elapsed)
-    if (backlog > 4) {
+    if (queue.backlog > 4) {
       // Far behind (a hidden tab, a stalled connection): land it all at once, silently.
       ctx.quiet = true
       queue.flush()
       tweens.finishAll()
       ctx.quiet = false
     }
-    backlog++
-    const beatAt = stage.now - elapsed
+    const beatAt = roomNow() - elapsed
     const beats: Beat[] = []
     if (next.phase === 'rolling' && shakenTurn !== next.turn) {
       shakenTurn = next.turn
@@ -226,10 +227,7 @@ export function createStory(
     }
     beats.push({
       label: 'present',
-      run: () => {
-        backlog = Math.max(0, backlog - 1)
-        present(next)
-      },
+      run: () => present(next),
     })
     queue.push(...beats)
     stage.invalidate()
@@ -268,8 +266,20 @@ export function createStory(
     },
     step(dt: number) {
       const ms = dt * 1000,
-        speed = backlog > 3 ? 3 : backlog > 1 ? 1.6 : 1
+        backlog = queue.backlog,
+        speed = backlog > 3 ? 3 : backlog > 1 ? 1.6 : 1,
+        drift = stage.takeDrift()
       tweens.speed = speed
+      if (drift > 0) {
+        // A long frame (a shader compiling, a stalled thread) cost wall time the scene clock never
+        // counted, but the room's clock did: a beat under way skips ahead, quietly, to land with everyone.
+        drifted += drift
+        if (queue.busy) {
+          ctx.skip(drift)
+          die.fastForward(drift)
+          queue.step(drift)
+        }
+      }
       // Tweens first, so a beat's last landing has run before the queue starts the next one.
       let moving = tweens.step(ms)
       moving = queue.step(ms * speed) || moving

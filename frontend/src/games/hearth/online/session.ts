@@ -2,8 +2,9 @@ import { PLAYER_IDS } from '@games/shared/hearth/board'
 import type { HearthOnlineAction } from '@games/shared/hearth/online'
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
 import { beatElapsed } from '@games/shared/protocol'
-import type { RoomSnapshot, SeatId, YouInfo } from '@games/shared/protocol'
-import type { RoomApi } from '../../../online/useRoom'
+import type { RoomSnapshot, SeatId } from '@games/shared/protocol'
+import type { RoomViewProps } from '../../../online/games'
+import type { RoomBeat } from '../scene/types'
 
 export interface HearthSeatPlayer {
   name: string
@@ -24,10 +25,12 @@ export interface HearthSeatPlayer {
 export interface OnlineHearthSession {
   state: GameState
   /**
-   * How far into `state`'s beat the room already was when it sent it, in ms —
-   * so a board that arrives mid-walk takes the walk up where the room is.
+   * Every state the room has sent lately, oldest first, ending with `state`.
+   * A burst of snapshots renders once, but the board still plays each one —
+   * and each knows when its beat began, so a board that arrives mid-walk
+   * takes the walk up where the room is.
    */
-  elapsed: number
+  beats: RoomBeat[]
   /** The colour this browser plays, or `null` for someone watching. */
   mySeat: PlayerId | null
   players: Partial<Record<PlayerId, HearthSeatPlayer>>
@@ -57,14 +60,33 @@ export function claimTarget(session: OnlineHearthSession): HearthSeatPlayer | nu
   return blocker && !blocker.connected && !blocker.abandoned ? blocker : null
 }
 
-export function hearthSession(
-  snapshot: RoomSnapshot,
-  you: YouInfo,
-  api: RoomApi,
-  leave: () => void,
-): OnlineHearthSession {
+/**
+ * When `snapshot`'s state began at the room, on this page's clock: the server
+ * says how far in it was when it sent it, counted back from when it arrived —
+ * not from when it rendered. An older server sends no timing, and the beat is
+ * taken to start on arrival.
+ */
+const beganAt = (snapshot: RoomSnapshot, receivedAt: number) => receivedAt - beatElapsed(snapshot.timing)
+
+export function hearthSession({
+  snapshot,
+  receivedAt,
+  recent,
+  you,
+  api,
+  leave,
+}: RoomViewProps): OnlineHearthSession {
   // Safe by construction: this only runs for a hearth room with a live game.
   const state = snapshot.gameState as GameState
+  // Only the run of game states that ends here: anything before a gap in the game belongs to another table.
+  const run = recent.slice(recent.findLastIndex((entry) => !entry.snapshot.gameState) + 1)
+  const beats: RoomBeat[] = run.map((entry) => ({
+    seq: entry.seq,
+    state: entry.snapshot.gameState as GameState,
+    since: beganAt(entry.snapshot, entry.receivedAt),
+  }))
+  if (beats.at(-1)?.state !== state)
+    beats.push({ seq: (beats.at(-1)?.seq ?? 0) + 1, state, since: beganAt(snapshot, receivedAt) })
   const colourOf = (seat: SeatId): PlayerId | undefined => PLAYER_IDS[snapshot.seatIds.indexOf(seat)]
 
   const players: Partial<Record<PlayerId, HearthSeatPlayer>> = {}
@@ -90,7 +112,7 @@ export function hearthSession(
   )
   return {
     state,
-    elapsed: beatElapsed(snapshot.timing),
+    beats,
     mySeat: (you.seat && colourOf(you.seat)) || null,
     players,
     rematch: {

@@ -234,6 +234,56 @@ test('the die lands before the HUD learns its number, and a capture lands before
   expect(errors).toEqual([])
 })
 
+test('a burst of states that renders once still plays every beat, in order', async ({ page }) => {
+  const { room, errors } = await open(page)
+  const start = table({ 'red-0': 10, 'blue-0': 1 })
+  room.deal(start)
+  await expect(label(page, 'Roll dice')).toBeEnabled()
+  await step(page, 50)
+  await crossedIn(page)
+
+  // A whole turn arrives at once — a stalled connection catching up. The page is held busy while the
+  // messages land, so React commits them as one render, ending on Jules's turn.
+  const choose = rolled(start, 4),
+    moving = gameReducer(choose, { type: 'MOVE', pieceId: 'red-0' }),
+    burst = [
+      gameReducer(start, { type: 'ROLL_START' }),
+      choose,
+      moving,
+      gameReducer(moving, { type: 'ANIMATION_DONE' }),
+    ]
+  const busy = page.evaluate(() => {
+    const until = performance.now() + 600
+    while (performance.now() < until);
+  })
+  await page.waitForTimeout(100)
+  for (const state of burst) room.deal(state)
+  await busy
+
+  // Jumping straight to the last state would glide red forward and drop blue in its nest: instead the
+  // die is thrown, red walks, and blue is knocked off the board before the table passes to Jules.
+  let walkFrames = 0,
+    blueWaited = false
+  const jules = page.getByRole('heading', { name: 'Jules’s turn', exact: true })
+  await stepUntil(
+    page,
+    () => jules.isVisible(),
+    async () => {
+      if (!(await label(page, 'On the way…').isVisible())) return
+      if ((await card(page, 'blue').textContent())?.includes('1 on board')) blueWaited = true
+      if (walkFrames++ === 0) {
+        // A frame drawn just now, so the capture has the board on it.
+        await step(page, 1000 / 60)
+        await page.screenshot({ path: 'test-results/hearth-motion-burst-walk.png' })
+      }
+    },
+  )
+  expect(walkFrames).toBeGreaterThan(1)
+  expect(blueWaited).toBe(true)
+  await expect(card(page, 'blue')).toContainText('0 on board · 2 in nest')
+  expect(errors).toEqual([])
+})
+
 test('a piece comes home, and the result waits for the board to celebrate', async ({ page }) => {
   const { room, errors } = await open(page)
   // One piece each: red's last three squares win the game.
@@ -286,17 +336,22 @@ test('a board that arrives mid-walk picks the walk up where the room is', async 
   const start = table({ 'red-0': 10, 'blue-0': 1 })
   const moving = gameReducer(rolled(start, 4), { type: 'MOVE', pieceId: 'red-0' })
   // The room started this walk 900ms ago: the hit is over, blue is in the air.
-  const elapsed = LANDED + 200
+  const elapsed = LANDED + 200,
+    sentAt = await page.evaluate(() => performance.now())
   room.deal(moving, elapsed)
   // The board shows the table as the walk had it, not as the room will end it.
   await expect(card(page, 'blue')).toContainText('1 on board')
+  // The room's clock ran on while the page mounted the board, and the board counts that from when the
+  // snapshot arrived: it starts at most this much further in.
+  const mounting = (await page.evaluate(() => performance.now())) - sentAt
   await step(page, 16)
   await crossedIn(page)
   await page.screenshot({ path: 'test-results/hearth-motion-join.png' })
-  // Played from the start, blue would land 1.66s from now; resumed, it lands in 0.76s.
-  await step(page, VICTIM_HOME - elapsed - 80)
+  // Played from the start, blue would land 1.66s from now; resumed, it lands in under 0.76s.
+  const early = Math.max(0, VICTIM_HOME - elapsed - mounting - 80)
+  await step(page, Math.max(0, early - 16))
   await expect(card(page, 'blue')).toContainText('1 on board')
-  await step(page, 120)
+  await step(page, VICTIM_HOME - elapsed + 40 - Math.max(16, early))
   await expect(card(page, 'blue')).toContainText('0 on board · 2 in nest')
   expect(errors).toEqual([])
 })

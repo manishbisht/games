@@ -459,7 +459,7 @@ export default function HearthGame({ online }: { online?: OnlineHearthSession })
               state={dealt}
               seat={online?.mySeat ?? null}
               live={started}
-              elapsed={online?.elapsed}
+              beats={online?.beats}
               onSelect={select}
               onPresent={setShown}
               onCue={onCue}

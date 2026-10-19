@@ -2,16 +2,13 @@ import * as THREE from 'three'
 import { PALETTES } from '@games/shared/hearth/board'
 import type { PlayerId } from '@games/shared/hearth/types'
 import { lerp, outCubic } from '../../../motion/ease'
-import { createParticles } from '../../../motion/particles'
+import { createParticles, qualityDensity } from '../../../motion/particles'
 import type { Burst } from '../../../motion/particles'
 import { reducedMotion } from '../../../motion/preference'
 import type { SceneContext } from './types'
 
 export const DUST = ['#efe6d0', '#e2d6b8', '#f7f1e2'],
   GOLD = ['#f1d98a', '#d6b46d', '#fff3c4']
-
-/** How much of each burst a quality tier can afford: all of it, most of it, a token amount. */
-const DENSITY = [0.35, 0.65, 1]
 
 /**
  * Everything the board throws into the air that is not a piece: dust where a
@@ -22,14 +19,14 @@ const DENSITY = [0.35, 0.65, 1]
 export function createEffects(ctx: SceneContext) {
   const { stage, scene, tweens } = ctx
   const particles = createParticles(scene, { max: 700, floor: 0.3 })
-  let density = DENSITY[stage.quality]
+  particles.density = qualityDensity(stage.quality)
   const offQuality = stage.onQuality((tier) => {
-    density = DENSITY[tier]
+    particles.density = qualityDensity(tier)
   })
 
   function burst(spec: Burst) {
     if (ctx.quiet || reducedMotion()) return
-    particles.burst({ ...spec, count: Math.max(1, Math.round((spec.count ?? 40) * density)) })
+    particles.burst(spec)
   }
 
   // A small pool of flat rings: a capture's shockwave, a piece's welcome home.

@@ -42,7 +42,14 @@ function table(
     ...(timing ? { timing } : {}),
   }
   const info: YouInfo = { id: 'ann', seat: 'p0', isHost: true, ...you }
-  return hearthSession(snapshot, info, api(), () => {})
+  return hearthSession({
+    snapshot,
+    receivedAt: 20_000,
+    recent: [{ seq: 1, snapshot, receivedAt: 20_000 }],
+    you: info,
+    api: api(),
+    leave: () => {},
+  })
 }
 
 const seated = {
@@ -61,10 +68,46 @@ describe('hearthSession', () => {
     expect(session.players.yellow).toBeUndefined()
   })
 
-  it('says how far into its beat the table already was, by the server’s clock', () => {
-    expect(table(seated, {}, { now: 50_900, since: 50_000, due: 51_400 }).elapsed).toBe(900)
+  it('says when the beat began on this page’s clock, counted back from when the snapshot arrived', () => {
+    // Rendered well after it arrived: the arrival is what counts.
+    const now = vi.spyOn(performance, 'now').mockReturnValue(90_000)
+    expect(table(seated, {}, { now: 50_900, since: 50_000, due: 51_400 }).beats.at(-1)!.since).toBe(19_100)
     // An older server sends no timing: the beat is taken to start on arrival.
-    expect(table(seated).elapsed).toBe(0)
+    expect(table(seated).beats.at(-1)!.since).toBe(20_000)
+    now.mockRestore()
+  })
+
+  it('hands over every state of a burst in order, from the start of the game that ends it', () => {
+    const lobby: RoomSnapshot = {
+        protocol: PROTOCOL_VERSION,
+        code: 'ABC234',
+        game: 'hearth',
+        visibility: 'private',
+        status: 'open',
+        seatIds: ['p0', 'p1'],
+        seats: { p0: seat('Ann'), p1: seat('Ben') },
+        gameState: null,
+      },
+      dealt = { ...lobby, status: 'playing' as const, gameState: createGame({ playerCount: 2 }) },
+      rolled = { ...dealt, gameState: { ...dealt.gameState, phase: 'rolling' as const } },
+      session = hearthSession({
+        snapshot: rolled,
+        receivedAt: 3_000,
+        recent: [
+          { seq: 4, snapshot: dealt, receivedAt: 1_000 },
+          { seq: 5, snapshot: lobby, receivedAt: 2_000 },
+          { seq: 6, snapshot: dealt, receivedAt: 2_990 },
+          { seq: 7, snapshot: rolled, receivedAt: 3_000 },
+        ],
+        you: { id: 'ann', seat: 'p0', isHost: true },
+        api: api(),
+        leave: () => {},
+      })
+    expect(session.beats).toEqual([
+      { seq: 6, state: dealt.gameState, since: 2_990 },
+      { seq: 7, state: rolled.gameState, since: 3_000 },
+    ])
+    expect(session.beats.at(-1)!.state).toBe(session.state)
   })
 
   it('carries a seat’s presence and abandonment through to the table', () => {
@@ -110,7 +153,14 @@ describe('hearthSession', () => {
       gameState: createGame({ playerCount: 2 }),
     }
     const wire = api()
-    const session = hearthSession(snapshot, { id: 'ann', seat: 'p0', isHost: true }, wire, () => {})
+    const session = hearthSession({
+      snapshot,
+      receivedAt: 0,
+      recent: [{ seq: 1, snapshot, receivedAt: 0 }],
+      you: { id: 'ann', seat: 'p0', isHost: true },
+      api: wire,
+      leave: () => {},
+    })
     session.send.roll()
     session.send.move('red-2')
     expect(wire.action).toHaveBeenNthCalledWith(1, { kind: 'roll' })

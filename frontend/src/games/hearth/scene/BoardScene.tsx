@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import type { GameState, PlayerId } from '@games/shared/hearth/types'
 import { createScene } from './createScene'
 import type { Cue, SceneApi } from './createScene'
+import type { RoomBeat } from './types'
 
 export type BoardControls = Pick<SceneApi, 'focus' | 'reset' | 'zoom' | 'top' | 'roll'>
 
@@ -11,8 +12,11 @@ interface Props {
   seat: PlayerId | null
   /** False for the preview behind the setup panel. */
   live: boolean
-  /** How far into `state`'s beat the room already was when it sent it, in ms. */
-  elapsed?: number
+  /**
+   * The room's recent states, ending with `state`, each stamped with when its
+   * beat began. Absent for the setup preview, whose state simply begins now.
+   */
+  beats?: RoomBeat[]
   onSelect: (id: string) => void
   /** The table as the board is showing it, which trails `state` while a move plays out. */
   onPresent: (state: GameState) => void
@@ -20,13 +24,15 @@ interface Props {
 }
 
 const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
-  { state, seat, live, elapsed = 0, onSelect, onPresent, onCue },
+  { state, seat, live, beats, onSelect, onPresent, onCue },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null),
     scene = useRef<SceneApi | null>(null)
-  const initial = useRef({ state, seat, live, elapsed }),
-    hooks = useRef({ onSelect, onPresent, onCue })
+  const initial = useRef({ state, seat, live, since: beats?.at(-1)?.since }),
+    hooks = useRef({ onSelect, onPresent, onCue }),
+    /** The newest snapshot the board has been handed; it starts on whatever was newest when it mounted. */
+    seen = useRef(beats?.at(-1)?.seq ?? 0)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     hooks.current = { onSelect, onPresent, onCue }
@@ -44,7 +50,9 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
   )
   useEffect(() => {
     if (!container.current) return
-    const { state, seat, live, elapsed } = initial.current
+    const { state, seat, live, since } = initial.current
+    // Counted from when the state's beat began, so however long the board took to mount, it starts where the room is.
+    const elapsed = since === undefined ? 0 : performance.now() - since
     try {
       scene.current = createScene(
         container.current,
@@ -68,10 +76,23 @@ const BoardScene = forwardRef<BoardControls, Props>(function BoardScene(
     }
   }, [])
   useEffect(() => {
-    if (scene.current) scene.current.update(state, seat, live, elapsed)
-    // Without a board there is nothing to wait for: the HUD takes the room's state as it comes.
-    else if (failed) hooks.current.onPresent(state)
-  }, [state, seat, live, elapsed, failed])
+    const board = scene.current
+    if (!board) {
+      // Without a board there is nothing to wait for: the HUD takes the room's state as it comes.
+      if (failed) hooks.current.onPresent(state)
+      return
+    }
+    const now = performance.now(),
+      fresh = beats?.filter((beat) => beat.seq > seen.current) ?? []
+    // A burst of snapshots renders once, but each state is still a beat of its own: hand them over in
+    // order. If more arrived than are kept, the gap cannot be told, and the board lands the newest as
+    // a late arrival would.
+    if (fresh.length && fresh[0].seq === seen.current + 1)
+      for (const beat of fresh.slice(0, -1)) board.update(beat.state, seat, live, now - beat.since)
+    seen.current = beats?.at(-1)?.seq ?? seen.current
+    const newest = beats?.at(-1)
+    board.update(state, seat, live, newest ? now - newest.since : 0)
+  }, [state, beats, seat, live, failed])
   return (
     <div className="hh-canvas" ref={container}>
       {failed && (

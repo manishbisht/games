@@ -47,6 +47,13 @@ export function createDie(ctx: SceneContext, face: number) {
       })
     },
   })
+  /** Runs the toss `ms` ahead at once, quietly — time that passed at the room before the board saw it. */
+  function fastForward(ms: number) {
+    const quiet = ctx.quiet
+    ctx.quiet = true
+    toss.step(ms / 1000)
+    ctx.quiet = quiet
+  }
   return {
     get busy() {
       return toss.busy
@@ -80,14 +87,10 @@ export function createDie(ctx: SceneContext, face: number) {
         return 180
       }
       toss.throw(value, THROW_MS)
-      if (skip > 0) {
-        const quiet = ctx.quiet
-        ctx.quiet = true
-        toss.step(Math.min(skip, THROW_MS) / 1000)
-        ctx.quiet = quiet
-      }
+      if (skip > 0) fastForward(Math.min(skip, THROW_MS))
       return Math.max(0, THROW_MS - skip)
     },
+    fastForward,
     /** Straight onto `value`, rattling again if the room is still rolling. */
     settle(value: number, rolling: boolean) {
       toss.settle(value)
