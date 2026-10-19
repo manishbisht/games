@@ -38,6 +38,8 @@ export interface GameEvent {
   player?: number
   card?: Card
   count?: number
+  /** The colour a wild was given, on the `effect` that names it. */
+  color?: Color
 }
 export interface GameState {
   players: Player[]

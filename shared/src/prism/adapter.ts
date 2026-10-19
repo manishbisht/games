@@ -195,6 +195,13 @@ export const prismAdapter: GameAdapter<GameState, PrismOnlineAction> = {
   bots: {
     skills: ['easy', 'medium', 'hard'],
     name: (_seat, index) => botName(index),
+    /**
+     * A table shows each play before the next: the card arcs to the pile in
+     * about half a second and its effect lands after it. The room's default 0.9s
+     * left a bot barely a breath of visible thought between them; this leaves it
+     * one, while a penalty's longer rain is caught up by the table's own queue.
+     */
+    thinkMs: () => 1150,
     decide(state, seat, seats, skill, ctx) {
       if (state.status !== 'playing' || seats[state.currentPlayer] !== seat) return state
       return act(state, chooseMove(state, skill as Difficulty, ctx.random), ctx.random)

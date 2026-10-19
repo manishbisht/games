@@ -267,7 +267,8 @@ export function act(state: GameState, command: Command, random = Math.random): G
   s.activeColor = card.isWild ? command.color! : (card.color as Color)
   s.drawnCardId = null
   log(s, 'play', `${player.name} played ${cardName(card)}.`, { player: player.id, card })
-  if (card.isWild) log(s, 'effect', `${player.name} chose ${s.activeColor}.`, { player: player.id })
+  if (card.isWild)
+    log(s, 'effect', `${player.name} chose ${s.activeColor}.`, { player: player.id, color: s.activeColor })
   let steps = 1
   if (card.value === 'reverse') {
     s.direction = s.direction === 1 ? -1 : 1
